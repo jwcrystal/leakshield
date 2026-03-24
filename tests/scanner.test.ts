@@ -144,6 +144,44 @@ describe("scanText() — max_chars 截斷", () => {
   });
 });
 
+// ─── Inline ignore ────────────────────────────────────────────────────────────
+
+describe("scanText() — sensitive-guard-ignore", () => {
+  it("同行有 ignore 標記時 finding 應被抑制", () => {
+    const text = "const key = 'sk-abcdefghij1234567890abcde'; // sensitive-guard-ignore";
+    expect(scanText(text, defaultConfig).safe).toBe(true);
+  });
+
+  it("ignore 在其他行時不影響當前行的 finding", () => {
+    const text = [
+      "const key = 'sk-abcdefghij1234567890abcde';",
+      "// sensitive-guard-ignore",
+    ].join("\n");
+    // ignore 在第 2 行，API key 在第 1 行，不應被抑制
+    expect(scanText(text, defaultConfig).safe).toBe(false);
+  });
+
+  it("同行有多個 findings 時全部被抑制", () => {
+    const text = "user@example.com sk-abcdefghij1234567890abcde // sensitive-guard-ignore";
+    expect(scanText(text, defaultConfig).safe).toBe(true);
+  });
+
+  it("# 風格 ignore 也有效", () => {
+    const text = "API_KEY = 'sk-abcdefghij1234567890abcde' # sensitive-guard-ignore";
+    expect(scanText(text, defaultConfig).safe).toBe(true);
+  });
+
+  it("只抑制被標記的行，其他行仍正常偵測", () => {
+    const text = [
+      "const a = 'sk-abcdefghij1234567890abcde'; // sensitive-guard-ignore",
+      "const b = 'sk-abcdefghij1234567890abcde';",
+    ].join("\n");
+    const result = scanText(text, defaultConfig);
+    expect(result.safe).toBe(false);
+    expect(result.total_findings).toBe(1);
+  });
+});
+
 // ─── 多次呼叫穩定性 ────────────────────────────────────────────────────────────
 
 describe("scanText() — 多次呼叫結果一致（無 RegExp 狀態殘留）", () => {

@@ -1,13 +1,14 @@
 import type { GuardConfig, Finding, ScanResult } from "../types.js";
 import { BUILTIN_RULES } from "../rules/builtin.js";
 import { buildDynamicRules } from "../rules/dynamic.js";
-import { redact, getLineCol } from "./utils.js";
+import { redact, getLineCol, getIgnoredLines } from "./utils.js";
 
 export function scanText(text: string, config: GuardConfig): ScanResult {
   const truncated = text.slice(0, config.settings.max_chars);
   const allRules = [...BUILTIN_RULES, ...buildDynamicRules(config)];
   const findings: Finding[] = [];
   const seen = new Set<string>();
+  const ignoredLines = getIgnoredLines(truncated);
 
   for (const rule of allRules) {
     const pattern = new RegExp(rule.pattern.source, rule.pattern.flags);
@@ -20,6 +21,8 @@ export function scanText(text: string, config: GuardConfig): ScanResult {
       seen.add(key);
 
       const { line, col } = getLineCol(truncated, match.index);
+      if (ignoredLines.has(line)) continue;
+
       const preview = redact(matchedText, config.settings.preview_length);
 
       findings.push({

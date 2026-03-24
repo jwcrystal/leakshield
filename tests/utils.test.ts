@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { redact, getLineCol } from "../src/scanner/utils.js";
+import { redact, getLineCol, getIgnoredLines } from "../src/scanner/utils.js";
 
 // ─── redact() ────────────────────────────────────────────────────────────────
 
@@ -50,5 +50,37 @@ describe("getLineCol()", () => {
     const text = "ab\ncd";
     // index 5 → end → 第 2 行第 3 欄
     expect(getLineCol(text, 5)).toEqual({ line: 2, col: 3 });
+  });
+});
+
+// ─── getIgnoredLines() ────────────────────────────────────────────────────────
+
+describe("getIgnoredLines()", () => {
+  it("無 ignore 標記時回傳空 Set", () => {
+    expect(getIgnoredLines("no ignore here")).toEqual(new Set());
+  });
+
+  it("偵測 // sensitive-guard-ignore（行內尾部）", () => {
+    const text = "line1\nconst x = 'secret'; // sensitive-guard-ignore\nline3";
+    expect(getIgnoredLines(text)).toEqual(new Set([2]));
+  });
+
+  it("偵測 # sensitive-guard-ignore（Python/YAML/Shell 風格）", () => {
+    const text = "line1\nAPI_KEY=secret # sensitive-guard-ignore\nline3";
+    expect(getIgnoredLines(text)).toEqual(new Set([2]));
+  });
+
+  it("大小寫不敏感", () => {
+    const text = "// SENSITIVE-GUARD-IGNORE\nline2";
+    expect(getIgnoredLines(text)).toEqual(new Set([1]));
+  });
+
+  it("多行各自標記", () => {
+    const text = [
+      "line1 // sensitive-guard-ignore",
+      "line2",
+      "line3 # sensitive-guard-ignore",
+    ].join("\n");
+    expect(getIgnoredLines(text)).toEqual(new Set([1, 3]));
   });
 });

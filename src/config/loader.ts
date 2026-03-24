@@ -12,12 +12,14 @@ const DEFAULT_CONFIG: GuardConfig = {
   settings: { max_chars: 200000, show_line_numbers: true, preview_length: 60 },
 };
 
-export function loadConfig(): GuardConfig {
-  const configPaths = [
-    path.resolve(process.cwd(), "config/guard.config.yaml"),
-    path.resolve(__dirname, "../../config/guard.config.yaml"),
-    path.resolve(process.env.HOME ?? "~", ".sensitive-guard/guard.config.yaml"),
-  ];
+export function loadConfig(overridePath?: string): GuardConfig {
+  const configPaths = overridePath
+    ? [overridePath]
+    : [
+        path.resolve(process.cwd(), "config/guard.config.yaml"),
+        path.resolve(__dirname, "../../config/guard.config.yaml"),
+        path.resolve(process.env.HOME ?? "~", ".sensitive-guard/guard.config.yaml"),
+      ];
 
   for (const p of configPaths) {
     if (fs.existsSync(p)) {

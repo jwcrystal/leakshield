@@ -144,6 +144,28 @@ describe("scanText() — max_chars 截斷", () => {
   });
 });
 
+// ─── 多次呼叫穩定性 ────────────────────────────────────────────────────────────
+
+describe("scanText() — 多次呼叫結果一致（無 RegExp 狀態殘留）", () => {
+  it("連續呼叫三次結果應完全相同", () => {
+    const text = "sk-abcdefghij1234567890abcde user@example.com";
+    const r1 = scanText(text, defaultConfig);
+    const r2 = scanText(text, defaultConfig);
+    const r3 = scanText(text, defaultConfig);
+    expect(r2.total_findings).toBe(r1.total_findings);
+    expect(r3.total_findings).toBe(r1.total_findings);
+    expect(r2.findings.map((f) => f.type)).toEqual(r1.findings.map((f) => f.type));
+  });
+
+  it("掃描後 BUILTIN_RULES 的 pattern.lastIndex 不應被改動", async () => {
+    const { BUILTIN_RULES } = await import("../src/rules/builtin.js");
+    scanText("sk-abcdefghij1234567890abcde", defaultConfig);
+    for (const rule of BUILTIN_RULES) {
+      expect(rule.pattern.lastIndex).toBe(0);
+    }
+  });
+});
+
 // ─── 去重 ─────────────────────────────────────────────────────────────────────
 
 describe("scanText() — 去重機制", () => {

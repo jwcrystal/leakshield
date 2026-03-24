@@ -10,10 +10,10 @@ export function scanText(text: string, config: GuardConfig): ScanResult {
   const seen = new Set<string>();
 
   for (const rule of allRules) {
-    rule.pattern.lastIndex = 0;
+    const pattern = new RegExp(rule.pattern.source, rule.pattern.flags);
     let match: RegExpExecArray | null;
 
-    while ((match = rule.pattern.exec(truncated)) !== null) {
+    while ((match = pattern.exec(truncated)) !== null) {
       const matchedText = match[0];
       const key = `${rule.type}:${match.index}`;
       if (seen.has(key)) continue;

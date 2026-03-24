@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { scanText } from "../src/index.js";
-import type { GuardConfig } from "../src/index.js";
+import { scanText } from "../src/scanner/engine.js";
+import type { GuardConfig } from "../src/types.js";
 
 const defaultConfig: GuardConfig = {
   nda_keywords: ["CONFIDENTIAL"],

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { redact, getLineCol } from "../src/index.js";
+import { redact, getLineCol } from "../src/scanner/utils.js";
 
 // ─── redact() ────────────────────────────────────────────────────────────────
 

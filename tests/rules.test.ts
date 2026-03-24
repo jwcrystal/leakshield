@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { BUILTIN_RULES, buildDynamicRules } from "../src/index.js";
-import type { GuardConfig } from "../src/index.js";
+import { BUILTIN_RULES } from "../src/rules/builtin.js";
+import { buildDynamicRules } from "../src/rules/dynamic.js";
+import type { GuardConfig } from "../src/types.js";
 
 // 輔助：測試某條規則是否命中
 function matches(pattern: RegExp, text: string): boolean {

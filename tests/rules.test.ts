@@ -28,10 +28,8 @@ describe("OpenAI API Key", () => {
     expect(matches(pat, "sk-short")).toBe(false);
   });
 
-  // 已知缺口：新版 sk-proj-xxx 格式含連字號，現有規則 [A-Za-z0-9]{20,60} 無法命中
-  // 重構時應將 pattern 更新為 /sk-[A-Za-z0-9\-]{20,60}/g
-  it("【已知缺口】sk-proj- 新格式目前不命中", () => {
-    expect(matches(pat, "sk-proj-abcdefghijklmnopqrstuvwxyz012345")).toBe(false);
+  it("應命中 sk-proj- 新格式（含連字號）", () => {
+    expect(matches(pat, "sk-proj-abcdefghijklmnopqrstuvwxyz012345")).toBe(true);
   });
 });
 
@@ -185,11 +183,10 @@ describe("資料庫連線字串（含密碼）", () => {
     ).toBe(true);
   });
 
-  // 已知缺口：mongodb+srv:// 格式不在規則 pattern 內，重構時應補上
-  it("【已知缺口】mongodb+srv:// 目前不命中", () => {
+  it("應命中 mongodb+srv:// 格式", () => {
     expect(
       matches(pat, "mongodb+srv://user:password@cluster.mongodb.net/db")
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("應命中 postgres URL", () => {

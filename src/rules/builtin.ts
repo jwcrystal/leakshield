@@ -6,7 +6,7 @@ export const BUILTIN_RULES: Rule[] = [
     type: "API_KEY",
     severity: "HIGH",
     description: "OpenAI API Key",
-    pattern: /sk-[A-Za-z0-9]{20,60}/g,
+    pattern: /sk-[A-Za-z0-9\-_]{20,60}/g,
   },
   {
     type: "API_KEY",
@@ -96,7 +96,7 @@ export const BUILTIN_RULES: Rule[] = [
     severity: "HIGH",
     description: "資料庫連線字串（含密碼）",
     pattern:
-      /(?:mongodb|postgresql|postgres|mysql|redis|mssql):\/\/[^:\s]+:[^@\s]+@[^\s"']+/gi,
+      /(?:mongodb(?:\+srv)?|postgresql|postgres|mysql|redis|mssql):\/\/[^:\s]+:[^@\s]+@[^\s"']+/gi,
   },
   {
     type: "DB_CONNECTION",

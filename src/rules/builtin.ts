@@ -6,7 +6,8 @@ export const BUILTIN_RULES: Rule[] = [
     type: "API_KEY",
     severity: "HIGH",
     description: "OpenAI API Key",
-    pattern: /sk-[A-Za-z0-9\-_]{20,60}/g,
+    // 涵蓋舊格式 sk-xxx 與新格式 sk-proj-xxx / sk-svcacct-xxx（上限放寬至 120）
+    pattern: /sk-[A-Za-z0-9\-_]{20,120}/g,
   },
   {
     type: "API_KEY",
@@ -24,19 +25,28 @@ export const BUILTIN_RULES: Rule[] = [
     type: "API_KEY",
     severity: "HIGH",
     description: "AWS Access Key ID",
-    pattern: /(?<![A-Z0-9])[A-Z0-9]{20}(?![A-Z0-9])/g,
+    // AWS key 固定以 AKIA / ASIA / ABIA / ACCA 開頭，後接 16 個大寫英數字
+    pattern: /(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}/g,
   },
   {
     type: "SECRET",
     severity: "HIGH",
     description: "AWS Secret Access Key",
-    pattern: /(?:aws.{0,10})?['\"]([A-Za-z0-9\/+]{40})['"]/gi,
+    // 須有 aws 關鍵字為前綴，避免誤報一般 Base64 / SHA-1 hash
+    pattern: /aws.{0,20}['\"]?([A-Za-z0-9\/+]{40})['\"]?/gi,
   },
   {
     type: "TOKEN",
     severity: "HIGH",
     description: "GitHub Personal Access Token",
     pattern: /ghp_[A-Za-z0-9]{36}/g,
+  },
+  {
+    type: "TOKEN",
+    severity: "HIGH",
+    description: "GitHub Fine-Grained Personal Access Token",
+    // 2022 年起新格式
+    pattern: /github_pat_[A-Za-z0-9_]{82}/g,
   },
   {
     type: "TOKEN",
@@ -54,14 +64,52 @@ export const BUILTIN_RULES: Rule[] = [
     type: "SECRET",
     severity: "HIGH",
     description: "Generic Secret / Password 賦值",
+    // 同時涵蓋有引號（YAML/JSON）與無引號（.env）寫法
     pattern:
-      /(?:password|passwd|secret|private_key|client_secret)\s*[:=]\s*['"]([^'"]{8,})['"]/gi,
+      /(?:password|passwd|secret|private_key|client_secret)\s*[:=]\s*(?:['"]([^'"]{8,})['"]|(\S{8,}))/gi,
   },
   {
     type: "TOKEN",
     severity: "HIGH",
     description: "JWT Token",
-    pattern: /eyJ[A-Za-z0-9\-_]+\.eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_.+/=]+/g,
+    // 移除最後一段 character class 中的 . 以減少誤匹配
+    pattern: /eyJ[A-Za-z0-9\-_]+\.eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_+/=]+/g,
+  },
+  {
+    type: "API_KEY",
+    severity: "HIGH",
+    description: "Stripe Live Secret Key",
+    pattern: /sk_live_[A-Za-z0-9]{24,}/g,
+  },
+  {
+    type: "API_KEY",
+    severity: "HIGH",
+    description: "Stripe Live Publishable Key",
+    pattern: /pk_live_[A-Za-z0-9]{24,}/g,
+  },
+  {
+    type: "TOKEN",
+    severity: "HIGH",
+    description: "Slack Bot Token",
+    pattern: /xoxb-[0-9A-Za-z\-]{40,}/g,
+  },
+  {
+    type: "TOKEN",
+    severity: "HIGH",
+    description: "Slack User / App Token",
+    pattern: /xoxp-[0-9A-Za-z\-]{40,}|xoxa-[0-9A-Za-z\-]{40,}/g,
+  },
+  {
+    type: "API_KEY",
+    severity: "HIGH",
+    description: "Hugging Face API Token",
+    pattern: /hf_[A-Za-z0-9]{34,}/g,
+  },
+  {
+    type: "SECRET",
+    severity: "HIGH",
+    description: "PEM Private Key",
+    pattern: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g,
   },
 
   // ── PII ──────────────────────────────────────────────────────────────────
@@ -87,7 +135,8 @@ export const BUILTIN_RULES: Rule[] = [
     type: "PII_ID_TW",
     severity: "HIGH",
     description: "台灣身份證字號",
-    pattern: /[A-Z][12]\d{8}/g,
+    // 加上 word boundary 避免擷取較長字串的片段
+    pattern: /\b[A-Z][12]\d{8}\b/g,
   },
 
   // ── 資料庫連線字串 ────────────────────────────────────────────────────────

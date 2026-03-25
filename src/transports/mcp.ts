@@ -40,6 +40,36 @@ export function serializeDecisionPayload({
   };
 }
 
+/**
+ * Build the human-readable error card shown to the user when decision is CONFIRM.
+ * Intentionally omits raw sensitive values.
+ */
+function buildConfirmCard(payload: Record<string, unknown>): string {
+  const findings = (payload.findings as Array<{ type: string; severity: string; line?: number }>) ?? [];
+  const byType = findings.reduce<Record<string, number>>((acc, f) => {
+    acc[`[${f.severity}] ${f.type}`] = (acc[`[${f.severity}] ${f.type}`] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  const lines: string[] = [
+    `🚨 CONFIRM — sensitive content detected in: ${payload.label}`,
+    `   Risk: ${payload.riskLevel}  |  Recommended action: ${payload.recommendedAction}`,
+    `   ${payload.summary}`,
+    ``,
+    `   Findings:`,
+    ...Object.entries(byType).map(([k, n]) => `     • ${k} — ${n} hit(s)`),
+    ``,
+    `   Choose one of:`,
+    `     [1] cancel                — do not send`,
+    `     [2] send redacted         — use redactedContent field${payload.redactedContent ? " (available)" : " (unavailable)"}`,
+    `     [3] send original anyway  — explicit override only`,
+    ``,
+    `   ⚠️  Only "override", "send original", or "continue with original" count as an override.`,
+  ];
+
+  return lines.join("\n");
+}
+
 export function createMcpServer() {
   const configRef = { current: loadConfig() };
   const workspaceRoot = fs.realpathSync(process.cwd());
@@ -57,6 +87,15 @@ export function createMcpServer() {
       const decisionResult = toDecisionResult(scanResult, content);
       const lbl = label ?? "(未命名)";
       const payload = serializeDecisionPayload({ label: lbl, content, result: decisionResult });
+      if (decisionResult.decision === "CONFIRM") {
+        return {
+          isError: true,
+          content: [
+            { type: "text" as const, text: buildConfirmCard(payload) },
+            { type: "text" as const, text: JSON.stringify(payload, null, 2) },
+          ],
+        };
+      }
       return {
         content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
       };
@@ -83,7 +122,17 @@ export function createMcpServer() {
       const scanResult = scanText(content, configRef.current);
       const decisionResult = toDecisionResult(scanResult, content);
       const payload = serializeDecisionPayload({ label: resolved, content, result: decisionResult });
-      return { content: [{ type: "text" as const, text: JSON.stringify({ file: resolved, ...payload }, null, 2) }] };
+      const fullPayload = { file: resolved, ...payload };
+      if (decisionResult.decision === "CONFIRM") {
+        return {
+          isError: true,
+          content: [
+            { type: "text" as const, text: buildConfirmCard(payload) },
+            { type: "text" as const, text: JSON.stringify(fullPayload, null, 2) },
+          ],
+        };
+      }
+      return { content: [{ type: "text" as const, text: JSON.stringify(fullPayload, null, 2) }] };
     }
   );
 

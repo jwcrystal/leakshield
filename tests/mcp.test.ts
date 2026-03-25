@@ -76,6 +76,45 @@ describe("serializeDecisionPayload", () => {
   });
 });
 
+describe("scan_text — isError behavior", () => {
+  it("CONFIRM returns isError: true", async () => {
+    const server = createMcpServer();
+    // @ts-expect-error — internal tool handler
+    const handler = server._registeredTools?.["scan_text"]?.callback;
+    if (!handler) return;
+    const result = await handler({ content: "sk-abcdefghij1234567890abcde", label: "test" });
+    expect(result.isError).toBe(true);
+    const parsed = JSON.parse(result.content[1].text);
+    expect(parsed.decision).toBe("CONFIRM");
+    expect(parsed.safe).toBe(false);
+  });
+
+  it("ALLOW returns isError: false (no isError field)", async () => {
+    const server = createMcpServer();
+    // @ts-expect-error — internal tool handler
+    const handler = server._registeredTools?.["scan_text"]?.callback;
+    if (!handler) return;
+    const result = await handler({ content: "hello world", label: "test" });
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.decision).toBe("ALLOW");
+  });
+
+  it("CONFIRM card text contains action options", async () => {
+    const server = createMcpServer();
+    // @ts-expect-error — internal tool handler
+    const handler = server._registeredTools?.["scan_text"]?.callback;
+    if (!handler) return;
+    const result = await handler({ content: "sk-abcdefghij1234567890abcde", label: "secret.ts" });
+    expect(result.isError).toBe(true);
+    const card = result.content[0].text as string;
+    expect(card).toContain("cancel");
+    expect(card).toContain("send redacted");
+    expect(card).toContain("send original anyway");
+    expect(card).not.toContain("sk-abcdefghij");
+  });
+});
+
 describe("isPathInsideBase()", () => {
   it("accepts files inside base directory", () => {
     expect(isPathInsideBase("/repo", "/repo/src/index.ts")).toBe(true);

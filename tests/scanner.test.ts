@@ -5,6 +5,7 @@ import type { GuardConfig } from "../src/types.js";
 const defaultConfig: GuardConfig = {
   nda_keywords: ["CONFIDENTIAL"],
   private_domains: ["internal.corp.com"],
+  custom_rules: [],
   settings: { max_chars: 200000, show_line_numbers: true, preview_length: 60 },
 };
 

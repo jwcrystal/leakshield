@@ -1,8 +1,15 @@
 // ─── Domain Types ────────────────────────────────────────────────────────────
 
+export interface CustomRuleConfig {
+  description: string;
+  pattern: string;
+  severity: "HIGH" | "MEDIUM" | "LOW";
+}
+
 export interface GuardConfig {
   nda_keywords: string[];
   private_domains: string[];
+  custom_rules: CustomRuleConfig[];
   settings: {
     max_chars: number;
     show_line_numbers: boolean;
@@ -20,7 +27,8 @@ export type FindingType =
   | "PII_ID_TW"
   | "DB_CONNECTION"
   | "PRIVATE_DOMAIN"
-  | "NDA_KEYWORD";
+  | "NDA_KEYWORD"
+  | "CUSTOM";
 
 export interface Finding {
   type: FindingType;

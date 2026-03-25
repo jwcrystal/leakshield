@@ -443,6 +443,7 @@ describe("buildDynamicRules()", () => {
   const baseConfig: GuardConfig = {
     nda_keywords: [],
     private_domains: [],
+    custom_rules: [],
     settings: { max_chars: 200000, show_line_numbers: true, preview_length: 60 },
   };
 

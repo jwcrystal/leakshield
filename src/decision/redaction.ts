@@ -6,7 +6,71 @@
  * for replacement but MUST NOT be exposed via CLI/MCP-facing outputs.
  */
 
-import type { Finding, FindingType, GuardConfig } from "../types.js";
+import type { Finding, FindingType, GuardConfig, ScanResult, RedactResult } from "../types.js";
+
+// ─── Transport-safe types ─────────────────────────────────────────────────────
+
+/** Keys that are internal-only and must never appear in CLI/MCP-facing outputs. */
+const INTERNAL_FINDING_KEYS = ["match_start", "match_end", "match_text"] as const;
+type InternalFindingKey = (typeof INTERNAL_FINDING_KEYS)[number];
+
+/** A finding with internal metadata stripped — safe for transport serialization. */
+export type TransportSafeFinding = Omit<Finding, InternalFindingKey>;
+
+/** A ScanResult with transport-safe findings. */
+export interface TransportSafeScanResult
+  extends Omit<ScanResult, "findings"> {
+  findings: TransportSafeFinding[];
+}
+
+/** A RedactResult with transport-safe findings. */
+export interface TransportSafeRedactResult
+  extends Omit<RedactResult, "findings"> {
+  findings: TransportSafeFinding[];
+}
+
+// ─── Sanitization API ─────────────────────────────────────────────────────────
+
+/**
+ * Strip internal match metadata from a single finding.
+ * The returned object is safe to serialize to CLI/MCP consumers.
+ */
+export function sanitizeFindingForExport(
+  f: Finding,
+): TransportSafeFinding {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { match_start: _ms, match_end: _me, match_text: _mt, ...safe } = f;
+  return safe;
+}
+
+/**
+ * Strip internal match metadata from an array of findings.
+ */
+export function sanitizeFindingsForExport(
+  findings: readonly Finding[],
+): TransportSafeFinding[] {
+  return findings.map(sanitizeFindingForExport);
+}
+
+/**
+ * Produce a transport-safe copy of a ScanResult by stripping internal
+ * match metadata from every finding.
+ */
+export function sanitizeScanResultForExport(
+  result: ScanResult,
+): TransportSafeScanResult {
+  return { ...result, findings: sanitizeFindingsForExport(result.findings) };
+}
+
+/**
+ * Produce a transport-safe copy of a RedactResult by stripping internal
+ * match metadata from every finding.
+ */
+export function sanitizeRedactResultForExport(
+  result: RedactResult,
+): TransportSafeRedactResult {
+  return { ...result, findings: sanitizeFindingsForExport(result.findings) };
+}
 
 // ─── Placeholder mapping ─────────────────────────────────────────────────────
 

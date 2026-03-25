@@ -4,6 +4,7 @@ import chalk from "chalk";
 import type { FindingType, Finding, ScanResult } from "../types.js";
 import { loadConfig } from "../config/loader.js";
 import { scanText, redactText } from "../scanner/engine.js";
+import { sanitizeScanResultForExport, sanitizeRedactResultForExport } from "../decision/redaction.js";
 import { collectFiles, runWithConcurrency } from "../utils/files.js";
 import { validateCliScanPath } from "../utils/path-security.js";
 import { t } from "../i18n/index.js";
@@ -106,7 +107,7 @@ export async function runCli() {
   function output(result: ScanResult, label: string) {
     const filtered = filterBySeverity(result, minSeverity);
     if (format === "json") {
-      console.log(JSON.stringify({ label, ...filtered }, null, 2));
+      console.log(JSON.stringify({ label, ...sanitizeScanResultForExport(filtered) }, null, 2));
     } else {
       printCliResult(filtered, label);
     }
@@ -160,7 +161,7 @@ export async function runCli() {
     }
 
     if (format === "json") {
-      console.log(JSON.stringify({ label, ...result }, null, 2));
+      console.log(JSON.stringify({ label, ...sanitizeRedactResultForExport(result) }, null, 2));
     } else {
       // Write redacted text to stdout (or file); summary goes to stderr
       const outPath = outIdx !== -1 ? args[outIdx + 1] : undefined;
@@ -221,7 +222,7 @@ export async function runCli() {
       if (!filtered.safe) {
         anyUnsafe = true;
         if (format === "json") {
-          jsonResults.push({ file: item.file, ...filtered });
+          jsonResults.push({ file: item.file, ...sanitizeScanResultForExport(filtered) });
         } else {
           printCliResult(filtered, item.file);
         }

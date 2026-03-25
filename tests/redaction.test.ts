@@ -2,6 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   buildSafePreview,
   buildRedactedContent,
+  sanitizeFindingForExport,
+  sanitizeFindingsForExport,
+  sanitizeScanResultForExport,
+  sanitizeRedactResultForExport,
 } from "../src/decision/redaction.js";
 import type { Finding, FindingType } from "../src/types.js";
 
@@ -382,5 +386,158 @@ describe("buildSafePreview", () => {
     expect(result).toContain("[REDACTED_API_KEY]");
     // Should NOT start with 100 'a's since that would exceed preview_length
     expect(result!.length).toBeLessThanOrEqual(40);
+  });
+});
+
+// ─── Sanitization for transport exports ────────────────────────────────────────
+
+describe("sanitizeFindingForExport", () => {
+  it("strips match_start, match_end, and match_text from a finding", () => {
+    const f: Finding = {
+      type: "API_KEY",
+      severity: "HIGH",
+      line: 3,
+      column: 5,
+      preview: "****",
+      description: "OpenAI API Key",
+      match_start: 20,
+      match_end: 50,
+      match_text: "sk-abcdefghij1234567890abcde",
+    };
+    const safe = sanitizeFindingForExport(f);
+    expect(safe.type).toBe("API_KEY");
+    expect(safe.severity).toBe("HIGH");
+    expect(safe.line).toBe(3);
+    expect(safe.column).toBe(5);
+    expect(safe.preview).toBe("****");
+    expect(safe.description).toBe("OpenAI API Key");
+    expect("match_start" in safe).toBe(false);
+    expect("match_end" in safe).toBe(false);
+    expect("match_text" in safe).toBe(false);
+  });
+
+  it("preserves a finding that never had internal metadata", () => {
+    const f: Finding = {
+      type: "PII_EMAIL",
+      severity: "MEDIUM",
+      preview: "****",
+      description: "Email",
+    };
+    const safe = sanitizeFindingForExport(f);
+    expect(safe).toEqual({ type: "PII_EMAIL", severity: "MEDIUM", preview: "****", description: "Email" });
+  });
+});
+
+describe("sanitizeFindingsForExport", () => {
+  it("strips internal metadata from every finding in the array", () => {
+    const findings: Finding[] = [
+      { type: "API_KEY", severity: "HIGH", preview: "****", description: "k", match_start: 0, match_end: 5, match_text: "abcde" },
+      { type: "PII_EMAIL", severity: "MEDIUM", preview: "****", description: "e", match_start: 10, match_end: 20, match_text: "user@test" },
+    ];
+    const safe = sanitizeFindingsForExport(findings);
+    expect(safe).toHaveLength(2);
+    for (const f of safe) {
+      expect("match_start" in f).toBe(false);
+      expect("match_end" in f).toBe(false);
+      expect("match_text" in f).toBe(false);
+    }
+  });
+
+  it("returns a new array (does not mutate the original)", () => {
+    const findings: Finding[] = [
+      { type: "API_KEY", severity: "HIGH", preview: "****", description: "k", match_start: 0, match_end: 5, match_text: "abcde" },
+    ];
+    const safe = sanitizeFindingsForExport(findings);
+    expect(safe).not.toBe(findings);
+    expect(findings[0]).toHaveProperty("match_text");
+  });
+
+  it("returns empty array for empty input", () => {
+    expect(sanitizeFindingsForExport([])).toEqual([]);
+  });
+});
+
+describe("sanitizeScanResultForExport", () => {
+  it("strips internal metadata from ScanResult findings", () => {
+    const result = {
+      safe: false,
+      total_findings: 1,
+      findings: [
+        { type: "API_KEY" as const, severity: "HIGH" as const, preview: "****", description: "k", match_start: 0, match_end: 5, match_text: "abcde" },
+      ],
+      summary: "🚨",
+      recommendation: "fix it",
+    };
+    const safe = sanitizeScanResultForExport(result);
+    expect(safe.safe).toBe(false);
+    expect(safe.total_findings).toBe(1);
+    expect(safe.summary).toBe("🚨");
+    expect(safe.recommendation).toBe("fix it");
+    expect(safe.findings).toHaveLength(1);
+    expect("match_start" in safe.findings[0]).toBe(false);
+    expect("match_end" in safe.findings[0]).toBe(false);
+    expect("match_text" in safe.findings[0]).toBe(false);
+  });
+});
+
+describe("sanitizeRedactResultForExport", () => {
+  it("strips internal metadata from RedactResult findings", () => {
+    const result = {
+      redacted: "clean text",
+      findings: [
+        { type: "SECRET" as const, severity: "HIGH" as const, preview: "****", description: "s", match_start: 0, match_end: 5, match_text: "hello" },
+      ],
+      total_findings: 1,
+      summary: "🚨",
+    };
+    const safe = sanitizeRedactResultForExport(result);
+    expect(safe.redacted).toBe("clean text");
+    expect(safe.total_findings).toBe(1);
+    expect(safe.summary).toBe("🚨");
+    expect(safe.findings).toHaveLength(1);
+    expect("match_start" in safe.findings[0]).toBe(false);
+    expect("match_end" in safe.findings[0]).toBe(false);
+    expect("match_text" in safe.findings[0]).toBe(false);
+  });
+});
+
+describe("transport output serialization safety", () => {
+  it("JSON.stringify of sanitized findings does not contain internal keys", () => {
+    const findings: Finding[] = [
+      { type: "API_KEY", severity: "HIGH", preview: "****", description: "OpenAI API Key", match_start: 6, match_end: 36, match_text: "sk-abcdefghij1234567890abcde" },
+    ];
+    const safe = sanitizeFindingsForExport(findings);
+    const json = JSON.stringify(safe);
+    expect(json).not.toContain("match_start");
+    expect(json).not.toContain("match_end");
+    expect(json).not.toContain("match_text");
+    expect(json).toContain("API_KEY");
+  });
+
+  it("JSON.stringify of sanitized ScanResult does not contain internal keys", () => {
+    const result = {
+      safe: false,
+      total_findings: 1,
+      findings: [
+        { type: "API_KEY" as const, severity: "HIGH" as const, preview: "****", description: "k", match_start: 0, match_end: 5, match_text: "abcde" },
+      ],
+      summary: "🚨",
+      recommendation: "fix",
+    };
+    const safe = sanitizeScanResultForExport(result);
+    const json = JSON.stringify(safe);
+    expect(json).not.toContain("match_start");
+    expect(json).not.toContain("match_end");
+    expect(json).not.toContain("match_text");
+  });
+
+  it("unsanitized findings DO contain internal keys (regression guard)", () => {
+    const findings: Finding[] = [
+      { type: "API_KEY", severity: "HIGH", preview: "****", description: "k", match_start: 0, match_end: 5, match_text: "abcde" },
+    ];
+    const json = JSON.stringify(findings);
+    expect(json).toContain("match_start");
+    expect(json).toContain("match_end");
+    expect(json).toContain("match_text");
   });
 });

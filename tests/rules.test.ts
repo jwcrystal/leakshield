@@ -219,13 +219,34 @@ describe("資料庫連線字串（含密碼）", () => {
   });
 });
 
+// ─── AWS Access Key ID ────────────────────────────────────────────────────────
+
+describe("AWS Access Key ID", () => {
+  const pat = ruleFor("AWS Access Key ID");
+
+  it("應命中 AKIA 開頭 20 字元（大寫英數）", () => {
+    expect(matches(pat, "AKIAIOSFODNN7EXAMPLE")).toBe(true);
+  });
+
+  it("應命中 ASIA 開頭（STS 臨時憑證）", () => {
+    expect(matches(pat, "ASIAIOSFODNN7EXAMPLE")).toBe(true);
+  });
+
+  it("嵌入較長字串中不命中（word boundary）", () => {
+    expect(matches(pat, "PREFIXAKIA1234567890ABCDEF")).toBe(false);
+  });
+
+  it("後接更多字元不命中（非標準長度）", () => {
+    expect(matches(pat, "AKIAIOSFODNN7EXAMPLEMORE")).toBe(false);
+  });
+});
+
 // ─── AWS Secret Access Key ────────────────────────────────────────────────────
 
 describe("AWS Secret Access Key", () => {
   const pat = ruleFor("AWS Secret Access Key");
 
-  it("應命中 aws 前綴後接 40 字元 Base64", () => {
-    // wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY 恰好 40 字元（AWS 官方範例 key）
+  it("應命中 aws 前綴後接 40 字元金鑰", () => {
     expect(
       matches(pat, `aws_secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"`)
     ).toBe(true);
@@ -234,32 +255,10 @@ describe("AWS Secret Access Key", () => {
     ).toBe(true);
   });
 
-  it("無 aws 前綴不命中", () => {
+  it("缺少 aws 前綴不命中", () => {
     expect(
       matches(pat, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
     ).toBe(false);
-  });
-});
-
-// ─── AWS Access Key ID ────────────────────────────────────────────────────────
-
-describe("AWS Access Key ID", () => {
-  const pat = ruleFor("AWS Access Key ID");
-
-  it("應命中 AKIA 開頭", () => {
-    expect(matches(pat, "AKIAIOSFODNN7EXAMPLE")).toBe(true);
-  });
-
-  it("應命中 ASIA 開頭（臨時憑證）", () => {
-    expect(matches(pat, "ASIAIOSFODNN7EXAMPLE")).toBe(true);
-  });
-
-  it("任意 20 個大寫英數字不命中（舊規則誤報）", () => {
-    expect(matches(pat, "ABCDEFGHIJKLMNOPQRST")).toBe(false);
-  });
-
-  it("前綴正確但長度不足不命中", () => {
-    expect(matches(pat, "AKIA1234")).toBe(false);
   });
 });
 
@@ -380,6 +379,10 @@ describe("PEM Private Key", () => {
     expect(matches(pat, "-----BEGIN EC PRIVATE KEY-----")).toBe(true);
   });
 
+  it("應命中 DSA PRIVATE KEY 標頭", () => {
+    expect(matches(pat, "-----BEGIN DSA PRIVATE KEY-----")).toBe(true);
+  });
+
   it("應命中 OPENSSH PRIVATE KEY header", () => {
     expect(matches(pat, "-----BEGIN OPENSSH PRIVATE KEY-----")).toBe(true);
   });
@@ -390,6 +393,22 @@ describe("PEM Private Key", () => {
 
   it("PUBLIC KEY 不命中", () => {
     expect(matches(pat, "-----BEGIN PUBLIC KEY-----")).toBe(false);
+  });
+});
+
+describe("國際電話號碼", () => {
+  const pat = ruleFor("國際電話號碼");
+
+  it("應命中 +1 美國號碼", () => {
+    expect(matches(pat, "+14155552671")).toBe(true);
+  });
+
+  it("應命中 +44 英國號碼", () => {
+    expect(matches(pat, "+447911123456")).toBe(true);
+  });
+
+  it("不含 + 號不命中", () => {
+    expect(matches(pat, "14155552671")).toBe(false);
   });
 });
 

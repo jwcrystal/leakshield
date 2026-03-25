@@ -26,7 +26,8 @@ export const BUILTIN_RULES: Rule[] = [
     severity: "HIGH",
     description: "AWS Access Key ID",
     // AWS key 固定以 AKIA / ASIA / ABIA / ACCA 開頭，後接 16 個大寫英數字
-    pattern: /(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}/g,
+    // 加上 word boundary 避免命中嵌入較長字串中的片段（如 base64）
+    pattern: /\b(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}\b/g,
   },
   {
     type: "SECRET",
@@ -110,7 +111,7 @@ export const BUILTIN_RULES: Rule[] = [
     type: "SECRET",
     severity: "HIGH",
     description: "PEM Private Key",
-    pattern: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g,
+    pattern: /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g,
   },
 
   // ── PII ──────────────────────────────────────────────────────────────────

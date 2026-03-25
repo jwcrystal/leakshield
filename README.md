@@ -98,6 +98,26 @@ Redacted output goes to **stdout**; the findings summary goes to **stderr** so t
 | `--redact --out <path>` | Write redacted text to file instead of stdout |
 | `--redact --format json` | Return JSON with `redacted`, `findings`, and `summary` fields |
 
+#### CLI Options
+
+| Option | Description |
+|--------|-------------|
+| `--format json` | JSON output (CI/CD friendly) |
+| `--min-severity high` | Only report HIGH (or `medium` / `low`) |
+| `--allow-outside` | Allow scanning paths outside the current working directory (disabled by default) |
+
+#### Workspace Path Restriction
+
+By default, `--file` and `--dir` only accept paths **inside the current working directory**. Attempts to scan outside (e.g. `../shared.env` or `/etc/passwd`) will be rejected with an error.
+
+To intentionally scan a path outside the workspace, pass `--allow-outside`:
+
+```bash
+npm run scan -- --file ../shared.env --allow-outside
+```
+
+> ⚠️ Outside-workspace scanning is opt-in. Only use it when you explicitly need to scan a file that lives outside the project root.
+
 ---
 
 ### Mode 2: Web UI
@@ -203,6 +223,10 @@ Stop and report if safe is false.
 | `redact_text` | Replace sensitive findings with `[REDACTED_TYPE]` and return the clean text |
 | `reload_config` | Reload YAML config without restarting the server |
 
+#### MCP Path Restriction
+
+`scan_file` and `scan_dir` only accept paths that resolve to within the **server's working directory** (the directory where the MCP server was started). Any path — including symlinks — that points outside the workspace is rejected with an error response. This prevents an AI agent from reading arbitrary host files through the MCP interface.
+
 ---
 
 ## Configuration
@@ -269,6 +293,21 @@ fi
 ```
 
 ---
+
+## Configuration Validation
+
+Input lengths for dynamic rules are validated when the config is loaded:
+
+| Field | Max length |
+|-------|-----------|
+| `nda_keywords` entries | 200 characters |
+| `private_domains` entries | 255 characters |
+
+Values exceeding these limits will cause `loadConfig()` to throw a Zod validation error, preventing oversized patterns from entering the scanner.
+
+## Secret Preview Behavior
+
+All secret previews in scan results are **fully masked** as `****`, regardless of the secret's length. No prefix or suffix characters from the original value are preserved. This eliminates partial secret exposure in logs, CI output, and MCP responses.
 
 ## Notes
 

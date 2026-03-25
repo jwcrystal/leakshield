@@ -5,6 +5,9 @@ import type { FindingType, Finding, ScanResult } from "../types.js";
 import { loadConfig } from "../config/loader.js";
 import { scanText, redactText } from "../scanner/engine.js";
 import { collectFiles, runWithConcurrency } from "../utils/files.js";
+import { validateCliScanPath } from "../utils/path-security.js";
+
+export { validateCliScanPath };
 
 const SCAN_CONCURRENCY = 8;
 
@@ -92,6 +95,7 @@ export async function runCli() {
   const format: "text" | "json" = args[fmtIdx + 1] === "json" ? "json" : "text";
   const minSeverity: MinSeverity =
     (["high", "medium", "low"].includes(args[sevIdx + 1]) ? args[sevIdx + 1] : "low") as MinSeverity;
+  const allowOutside = args.includes("--allow-outside");
 
   function output(result: ScanResult, label: string) {
     const filtered = filterBySeverity(result, minSeverity);
@@ -165,7 +169,13 @@ export async function runCli() {
 
   // --dir 模式
   if (dirIdx !== -1 && args[dirIdx + 1]) {
-    const dirPath = path.resolve(args[dirIdx + 1]);
+    let dirPath: string;
+    try {
+      dirPath = validateCliScanPath(process.cwd(), args[dirIdx + 1], allowOutside);
+    } catch (e) {
+      console.error(chalk.red(`❌ ${e instanceof Error ? e.message : String(e)}`));
+      process.exit(2);
+    }
     if (!fs.existsSync(dirPath)) {
       console.error(chalk.red(`❌ 找不到目錄：${dirPath}`));
       process.exit(2);
@@ -231,7 +241,13 @@ export async function runCli() {
 
   // --file 模式
   if (fileIdx !== -1 && args[fileIdx + 1]) {
-    const filePath = path.resolve(args[fileIdx + 1]);
+    let filePath: string;
+    try {
+      filePath = validateCliScanPath(process.cwd(), args[fileIdx + 1], allowOutside);
+    } catch (e) {
+      console.error(chalk.red(`❌ ${e instanceof Error ? e.message : String(e)}`));
+      process.exit(2);
+    }
     if (!fs.existsSync(filePath)) {
       console.error(chalk.red(`❌ 找不到檔案：${filePath}`));
       process.exit(2);
@@ -272,6 +288,7 @@ export async function runCli() {
   console.log("  --redact               脫敏模式（輸出替換後文字）");
   console.log("  --dry-run              搭配 --redact，只預覽不輸出");
   console.log("  --out <path>           搭配 --redact --file，指定輸出路徑");
+  console.log("  --allow-outside        允許掃描工作目錄以外的路徑（預設禁止）");
   console.log("");
   console.log("MCP Server 模式（由 OpenCode 自動啟動）：");
   console.log("  node dist/index.js");

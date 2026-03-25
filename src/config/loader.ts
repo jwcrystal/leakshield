@@ -7,9 +7,12 @@ import type { GuardConfig } from "../types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const MAX_DYNAMIC_RULE_LENGTH = 200;
+const MAX_PRIVATE_DOMAIN_LENGTH = 255;
+
 export const GuardConfigSchema = z.object({
-  nda_keywords: z.array(z.string()).default(["CONFIDENTIAL", "INTERNAL ONLY", "DO NOT SHARE", "NDA"]),
-  private_domains: z.array(z.string()).default([]),
+  nda_keywords: z.array(z.string().min(1).max(MAX_DYNAMIC_RULE_LENGTH)).default(["CONFIDENTIAL", "INTERNAL ONLY", "DO NOT SHARE", "NDA"]),
+  private_domains: z.array(z.string().min(1).max(MAX_PRIVATE_DOMAIN_LENGTH)).default([]),
   settings: z.object({
     max_chars: z.number().int().positive().default(200000),
     show_line_numbers: z.boolean().default(true),

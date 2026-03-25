@@ -2,9 +2,10 @@
 
 **在把程式碼、文件、資料丟給 AI 服務之前，先掃描敏感內容的守門員。**
 
-支援兩種使用模式：
+支援三種使用模式：
 - **MCP Server**：整合進 OpenCode / Claude Code，AI 讀檔前自動觸發守門
 - **CLI**：手動掃描指定文字、檔案或目錄
+- **Web UI**：瀏覽器介面，貼上內容即可掃描；同時提供 REST API
 
 ---
 
@@ -33,6 +34,15 @@ cd sensitive-guard
 npm install
 npm run build
 ```
+
+### npm scripts 速查
+
+| 指令 | 說明 |
+|------|------|
+| `npm run build` | 編譯 TypeScript → `dist/` |
+| `npm run dev` | 開發模式（MCP，不需先 build） |
+| `npm run scan` | CLI 掃描（不需先 build） |
+| `npm test` | 執行單元測試 |
 
 ---
 
@@ -64,7 +74,53 @@ Exit code：`0` = 安全，`1` = 有問題，`2` = 檔案不存在
 
 ---
 
-### 二、MCP Server 模式（整合進 OpenCode）
+### 二、Web UI 模式
+
+啟動本地 Web 伺服器，在瀏覽器中使用：
+
+```bash
+# 預設 port 3000
+npx tsx src/index.ts --web
+
+# 指定 port
+npx tsx src/index.ts --web --port 3001
+
+# Build 後的版本
+node dist/index.js --web --port 3001
+```
+
+開啟瀏覽器 `http://localhost:3001`，貼上內容後按「掃描」或 Ctrl+Enter。
+
+#### REST API
+
+也可直接呼叫 API：
+
+```bash
+# 掃描文字
+curl -s -X POST http://localhost:3001/scan \
+  -H 'Content-Type: application/json' \
+  -d '{"content": "sk-proj-abc123 secret_key=test"}' | jq
+
+# 回應格式
+{
+  "safe": false,
+  "total_findings": 2,
+  "findings": [
+    { "type": "API_KEY", "severity": "HIGH", "line": 1, ... }
+  ],
+  "summary": "...",
+  "recommendation": "..."
+}
+```
+
+| 端點 | 方法 | 說明 |
+|------|------|------|
+| `/` | GET | Web UI HTML |
+| `/scan` | POST | 掃描 `{ "content": string }`，回傳 JSON |
+
+---
+
+### 三、MCP Server 模式（整合進 OpenCode / Claude Code）
 
 #### 步驟 1：Build
 

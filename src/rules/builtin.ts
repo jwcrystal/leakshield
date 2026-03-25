@@ -151,7 +151,8 @@ export const BUILTIN_RULES: Rule[] = [
     type: "DB_CONNECTION",
     severity: "HIGH",
     description: "DB Connection String（ADO 格式）",
+    // (?:[^;]+;)* 允許 Server 與 Password 之間存在任意數量的中間欄位
     pattern:
-      /(?:Data Source|Server|Host)\s*=\s*[^;]+;\s*(?:Password|Pwd)\s*=\s*[^;]+/gi,
+      /(?:Data Source|Server|Host)\s*=\s*[^;]+;(?:[^;]+;)*\s*(?:Password|Pwd)\s*=\s*[^;]+/gi,
   },
 ];

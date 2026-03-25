@@ -48,6 +48,9 @@ export function scanText(text: string, config: GuardConfig): ScanResult {
         column: config.settings.show_line_numbers ? col : undefined,
         preview,
         description: rule.description,
+        match_start: match.index,
+        match_end: match.index + matchedText.length,
+        match_text: matchedText,
       });
     }
   }

@@ -37,6 +37,12 @@ export interface Finding {
   column?: number;
   preview: string;
   description: string;
+  /** Byte offset of the match start in the original text (for deterministic redaction). */
+  match_start?: number;
+  /** Byte offset one past the match end in the original text. */
+  match_end?: number;
+  /** The raw matched text (used by the redaction layer; never exposed in output). */
+  match_text?: string;
 }
 
 export interface ScanResult {

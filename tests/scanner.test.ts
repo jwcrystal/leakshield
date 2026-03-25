@@ -231,3 +231,41 @@ describe("scanText() — summary 與 recommendation", () => {
     expect(result.total_findings).toBe(result.findings.length);
   });
 });
+
+// ─── Match metadata for deterministic replacement ────────────────────────────
+
+describe("scanText() — match metadata (match_start, match_end, match_text)", () => {
+  it("finding 應包含 match_start, match_end, match_text", () => {
+    const text = "key = sk-abcdefghij1234567890abcde;";
+    const result = scanText(text, defaultConfig);
+    const finding = result.findings.find((f) => f.type === "API_KEY");
+    expect(finding).toBeDefined();
+    expect(finding!.match_start).toBe(6);
+    expect(finding!.match_end).toBe(34);
+    expect(finding!.match_text).toBe("sk-abcdefghij1234567890abcde");
+  });
+
+  it("match_start + match_end 長度應與 match_text 長度一致", () => {
+    const text = "sk-abcdefghij1234567890abcde user@example.com";
+    const result = scanText(text, defaultConfig);
+    for (const f of result.findings) {
+      expect(f.match_end! - f.match_start!).toBe(f.match_text!.length);
+    }
+  });
+
+  it("match_start / match_end 可用於從原始文字精確擷取 match_text", () => {
+    const text = "before sk-abcdefghij1234567890abcde after";
+    const result = scanText(text, defaultConfig);
+    const f = result.findings.find((fi) => fi.type === "API_KEY")!;
+    expect(text.slice(f.match_start!, f.match_end!)).toBe(f.match_text);
+  });
+
+  it("多行文字中 match_start/match_end 為整體偏移量，非行內偏移", () => {
+    const text = "aaa\nbbb\nsk-abcdefghij1234567890abcde";
+    const result = scanText(text, defaultConfig);
+    const f = result.findings.find((fi) => fi.type === "API_KEY")!;
+    // "aaa\nbbb\n" = 8 chars, so match_start should be 8
+    expect(f.match_start).toBe(8);
+    expect(f.match_end).toBe(36);
+  });
+});

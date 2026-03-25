@@ -4,6 +4,7 @@ import chalk from "chalk";
 import type { FindingType, Finding, ScanResult } from "../types.js";
 import { loadConfig } from "../config/loader.js";
 import { scanText } from "../scanner/engine.js";
+import { collectFiles } from "../utils/files.js";
 
 // ─── Severity filter ─────────────────────────────────────────────────────────
 
@@ -69,26 +70,6 @@ export function printCliResult(result: ScanResult, label: string) {
   console.log("");
 }
 
-// ─── File collector ───────────────────────────────────────────────────────────
-
-export function collectFiles(dir: string, extensions?: string[], maxFiles = 200): string[] {
-  const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", "__pycache__"]);
-  const files: string[] = [];
-  function walk(d: string) {
-    if (files.length >= maxFiles) return;
-    for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
-      if (files.length >= maxFiles) break;
-      if (entry.isDirectory() && !SKIP_DIRS.has(entry.name)) walk(path.join(d, entry.name));
-      else if (entry.isFile()) {
-        const ext = path.extname(entry.name).toLowerCase();
-        if (!extensions || extensions.includes(ext)) files.push(path.join(d, entry.name));
-      }
-    }
-  }
-  walk(dir);
-  return files;
-}
-
 // ─── CLI entry ───────────────────────────────────────────────────────────────
 
 export async function runCli() {
@@ -132,7 +113,7 @@ export async function runCli() {
       if (extensions) console.log(chalk.dim(`   副檔名篩選：${extensions.join(", ")}`));
     }
 
-    const files = collectFiles(dirPath, extensions);
+    const files = collectFiles(dirPath, extensions, 200);
     if (format === "text") console.log(chalk.dim(`   找到 ${files.length} 個檔案\n`));
 
     const jsonResults: object[] = [];

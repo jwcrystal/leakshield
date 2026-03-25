@@ -1,6 +1,23 @@
 import * as fs from "fs";
 import * as path from "path";
 
+// Run tasks with at most `limit` concurrent executions.
+export async function runWithConcurrency<T>(
+  tasks: Array<() => Promise<T>>,
+  limit: number
+): Promise<T[]> {
+  const results: T[] = new Array(tasks.length);
+  let next = 0;
+  async function worker() {
+    while (next < tasks.length) {
+      const i = next++;
+      results[i] = await tasks[i]();
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+  return results;
+}
+
 export const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", "__pycache__"]);
 
 export function collectFiles(dir: string, extensions?: string[], maxFiles = 100): string[] {

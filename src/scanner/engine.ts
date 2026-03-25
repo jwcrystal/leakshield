@@ -1,20 +1,35 @@
-import type { GuardConfig, Finding, ScanResult } from "../types.js";
+import type { GuardConfig, Finding, ScanResult, Rule } from "../types.js";
 import { BUILTIN_RULES } from "../rules/builtin.js";
 import { buildDynamicRules } from "../rules/dynamic.js";
 import { redact, getLineCol, getIgnoredLines } from "./utils.js";
 
+// Dynamic rules are derived from config; cache per config object so they are
+// rebuilt only when the config reference changes (e.g. after reload_config).
+const dynamicCache = new WeakMap<GuardConfig, Rule[]>();
+
+function getRules(config: GuardConfig): Rule[] {
+  let dynamic = dynamicCache.get(config);
+  if (!dynamic) {
+    dynamic = buildDynamicRules(config);
+    dynamicCache.set(config, dynamic);
+  }
+  return [...BUILTIN_RULES, ...dynamic];
+}
+
 export function scanText(text: string, config: GuardConfig): ScanResult {
   const truncated = text.slice(0, config.settings.max_chars);
-  const allRules = [...BUILTIN_RULES, ...buildDynamicRules(config)];
+  const allRules = getRules(config);
   const findings: Finding[] = [];
   const seen = new Set<string>();
   const ignoredLines = getIgnoredLines(truncated);
 
   for (const rule of allRules) {
-    const pattern = new RegExp(rule.pattern.source, rule.pattern.flags);
+    // Reuse the compiled RegExp; reset lastIndex before each scan so the
+    // stateful global flag starts from the beginning of the input.
+    rule.pattern.lastIndex = 0;
     let match: RegExpExecArray | null;
 
-    while ((match = pattern.exec(truncated)) !== null) {
+    while ((match = rule.pattern.exec(truncated)) !== null) {
       const matchedText = match[0];
       const key = `${rule.type}:${match.index}`;
       if (seen.has(key)) continue;

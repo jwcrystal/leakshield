@@ -5,7 +5,9 @@ import * as path from "path";
 import type { Finding } from "../types.js";
 import { loadConfig } from "../config/loader.js";
 import { scanText } from "../scanner/engine.js";
-import { collectFiles } from "../utils/files.js";
+import { collectFiles, runWithConcurrency } from "../utils/files.js";
+
+const SCAN_CONCURRENCY = 8;
 
 export function createMcpServer() {
   const configRef = { current: loadConfig() };
@@ -59,22 +61,32 @@ export function createMcpServer() {
       const dirResults: { file: string; safe: boolean; total_findings: number; findings: Finding[] }[] = [];
       let totalFindings = 0;
       let unsafeFiles = 0;
+      let skippedFiles = 0;
 
-      for (const f of files) {
+      const tasks = files.map((f) => async () => {
         try {
-          const content = fs.readFileSync(f, "utf-8");
-          const result = scanText(content, configRef.current);
-          totalFindings += result.total_findings;
-          if (!result.safe) {
-            unsafeFiles++;
-            dirResults.push({ file: f, safe: result.safe, total_findings: result.total_findings, findings: result.findings });
-          }
-        } catch { /* 跳過無法讀取的檔案 */ }
+          const content = await fs.promises.readFile(f, "utf-8");
+          return { file: f, result: scanText(content, configRef.current) };
+        } catch {
+          return null;
+        }
+      });
+
+      const scanResults = await runWithConcurrency(tasks, SCAN_CONCURRENCY);
+
+      for (const item of scanResults) {
+        if (!item) { skippedFiles++; continue; }
+        totalFindings += item.result.total_findings;
+        if (!item.result.safe) {
+          unsafeFiles++;
+          dirResults.push({ file: item.file, safe: item.result.safe, total_findings: item.result.total_findings, findings: item.result.findings });
+        }
       }
 
       const output = {
         dir: resolved,
         scanned_files: files.length,
+        skipped_files: skippedFiles,
         unsafe_files: unsafeFiles,
         total_findings: totalFindings,
         safe: unsafeFiles === 0,

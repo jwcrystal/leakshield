@@ -4,7 +4,9 @@ import chalk from "chalk";
 import type { FindingType, Finding, ScanResult } from "../types.js";
 import { loadConfig } from "../config/loader.js";
 import { scanText } from "../scanner/engine.js";
-import { collectFiles } from "../utils/files.js";
+import { collectFiles, runWithConcurrency } from "../utils/files.js";
+
+const SCAN_CONCURRENCY = 8;
 
 // ─── Severity filter ─────────────────────────────────────────────────────────
 
@@ -118,25 +120,39 @@ export async function runCli() {
 
     const jsonResults: object[] = [];
     let anyUnsafe = false;
+    let skippedFiles = 0;
 
-    for (const f of files) {
+    const tasks = files.map((f) => async () => {
       try {
-        const content = fs.readFileSync(f, "utf-8");
-        const result = scanText(content, config);
-        const filtered = filterBySeverity(result, minSeverity);
-        if (!filtered.safe) {
-          anyUnsafe = true;
-          if (format === "json") {
-            jsonResults.push({ file: f, ...filtered });
-          } else {
-            printCliResult(filtered, f);
-          }
+        const content = await fs.promises.readFile(f, "utf-8");
+        return { file: f, content };
+      } catch {
+        return null;
+      }
+    });
+
+    const readResults = await runWithConcurrency(tasks, SCAN_CONCURRENCY);
+
+    for (const item of readResults) {
+      if (!item) { skippedFiles++; continue; }
+      const result = scanText(item.content, config);
+      const filtered = filterBySeverity(result, minSeverity);
+      if (!filtered.safe) {
+        anyUnsafe = true;
+        if (format === "json") {
+          jsonResults.push({ file: item.file, ...filtered });
+        } else {
+          printCliResult(filtered, item.file);
         }
-      } catch { /* 跳過二進位檔案 */ }
+      }
+    }
+
+    if (skippedFiles > 0 && format === "text") {
+      console.log(chalk.dim(`   跳過 ${skippedFiles} 個無法讀取的檔案\n`));
     }
 
     if (format === "json") {
-      console.log(JSON.stringify({ dir: dirPath, scanned_files: files.length, unsafe_files: jsonResults.length, results: jsonResults }, null, 2));
+      console.log(JSON.stringify({ dir: dirPath, scanned_files: files.length, skipped_files: skippedFiles, unsafe_files: jsonResults.length, results: jsonResults }, null, 2));
     } else if (!anyUnsafe) {
       console.log(chalk.green(`✅ 掃描完成，${files.length} 個檔案均未發現敏感內容。\n`));
     }

@@ -39,6 +39,13 @@ export interface ScanResult {
   recommendation: string;
 }
 
+export interface RedactResult {
+  redacted: string;
+  findings: Finding[];
+  total_findings: number;
+  summary: string;
+}
+
 export interface Rule {
   type: FindingType;
   severity: Finding["severity"];

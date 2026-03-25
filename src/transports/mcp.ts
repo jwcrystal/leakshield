@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { Finding } from "../types.js";
 import { loadConfig } from "../config/loader.js";
-import { scanText } from "../scanner/engine.js";
+import { scanText, redactText } from "../scanner/engine.js";
 import { collectFiles, runWithConcurrency } from "../utils/files.js";
 
 const SCAN_CONCURRENCY = 8;
@@ -97,6 +97,25 @@ export function createMcpServer() {
       };
 
       return { content: [{ type: "text" as const, text: JSON.stringify(output, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "redact_text",
+    "將文字中的敏感內容（API Key、PII、DB 連線字串等）替換為 [REDACTED_TYPE] 佔位符，回傳脫敏後文字與命中清單。使用 dry_run: true 可只預覽命中位置，不回傳脫敏文字。",
+    {
+      content: z.string().describe("要脫敏的文字內容"),
+      label: z.string().optional().describe("內容說明標籤（例如：config.ts、用戶資料）"),
+      dry_run: z.boolean().optional().default(false).describe("true 時只回傳 findings 清單，不回傳脫敏文字（用於確認範圍）"),
+    },
+    async ({ content, label, dry_run }) => {
+      const result = redactText(content, configRef.current);
+      const output = dry_run
+        ? { label: label ?? "(未命名)", dry_run: true, total_findings: result.total_findings, summary: result.summary, findings: result.findings }
+        : { label: label ?? "(未命名)", ...result };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(output, null, 2) }],
+      };
     }
   );
 

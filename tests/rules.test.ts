@@ -122,6 +122,20 @@ describe("Generic Secret / Password 賦值", () => {
   it("值太短不命中（< 8 字元）", () => {
     expect(matches(pat, `password = "short"`)).toBe(false);
   });
+
+  it("遮罩值不命中（全 * 字元）", () => {
+    expect(matches(pat, `password = ********`)).toBe(false);
+    expect(matches(pat, `secret = ****************`)).toBe(false);
+  });
+
+  it("環境變數參照不命中（\${VAR} 格式）", () => {
+    expect(matches(pat, `secret = \${MY_SECRET_VAR}`)).toBe(false);
+    expect(matches(pat, `password = "\${DB_PASSWORD}"`)).toBe(false);
+  });
+
+  it("模板語法不命中（<%= %> 格式）", () => {
+    expect(matches(pat, `password = <%= @password %>`)).toBe(false);
+  });
 });
 
 // ─── PII ──────────────────────────────────────────────────────────────────────
@@ -205,6 +219,8 @@ describe("資料庫連線字串（含密碼）", () => {
   });
 });
 
+// ─── AWS Access Key ID ────────────────────────────────────────────────────────
+
 describe("AWS Access Key ID", () => {
   const pat = ruleFor("AWS Access Key ID");
 
@@ -225,110 +241,141 @@ describe("AWS Access Key ID", () => {
   });
 });
 
+// ─── AWS Secret Access Key ────────────────────────────────────────────────────
+
 describe("AWS Secret Access Key", () => {
   const pat = ruleFor("AWS Secret Access Key");
 
   it("應命中 aws 前綴後接 40 字元金鑰", () => {
     expect(
-      matches(pat, 'aws_secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"')
+      matches(pat, `aws_secret_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"`)
+    ).toBe(true);
+    expect(
+      matches(pat, `AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`)
     ).toBe(true);
   });
 
   it("缺少 aws 前綴不命中", () => {
     expect(
-      matches(pat, "secret_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+      matches(pat, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
     ).toBe(false);
   });
 });
 
+// ─── GitHub Fine-Grained PAT ──────────────────────────────────────────────────
+
 describe("GitHub Fine-Grained Personal Access Token", () => {
   const pat = ruleFor("GitHub Fine-Grained Personal Access Token");
 
-  it("應命中 github_pat_ 開頭接 82 個字元", () => {
-    expect(matches(pat, "github_pat_" + "A".repeat(82))).toBe(true);
+  it("應命中 github_pat_ 開頭接 82 字元", () => {
+    const token =
+      "github_pat_" + "A".repeat(11) + "_" + "B".repeat(70);
+    expect(matches(pat, token)).toBe(true);
+  });
+
+  it("ghp_ 開頭不命中此規則", () => {
+    expect(matches(pat, "ghp_ABCDEFGHIJ12345678901234567890123456")).toBe(false);
   });
 
   it("太短不命中", () => {
-    expect(matches(pat, "github_pat_TOOSHORT")).toBe(false);
+    expect(matches(pat, "github_pat_short")).toBe(false);
   });
 });
+
+// ─── Stripe ──────────────────────────────────────────────────────────────────
 
 describe("Stripe Live Secret Key", () => {
   const pat = ruleFor("Stripe Live Secret Key");
 
-  it("應命中 sk_live_ 開頭接至少 24 字元", () => {
-    expect(matches(pat, "sk_live_abcdefghijklmnopqrstuvwx")).toBe(true);
+  it("應命中 sk_live_ 開頭接 ≥24 字元", () => {
+    expect(matches(pat, "sk_live_AbCdEfGhIjKlMnOpQrStUvWx")).toBe(true);
   });
 
-  it("測試金鑰 sk_test_ 不命中", () => {
-    expect(matches(pat, "sk_test_abcdefghijklmnopqrstuvwx")).toBe(false);
+  it("測試環境 sk_test_ 不命中", () => {
+    expect(matches(pat, "sk_test_AbCdEfGhIjKlMnOpQrStUvWx")).toBe(false);
+  });
+
+  it("太短不命中", () => {
+    expect(matches(pat, "sk_live_short")).toBe(false);
   });
 });
 
 describe("Stripe Live Publishable Key", () => {
   const pat = ruleFor("Stripe Live Publishable Key");
 
-  it("應命中 pk_live_ 開頭接至少 24 字元", () => {
-    expect(matches(pat, "pk_live_abcdefghijklmnopqrstuvwx")).toBe(true);
+  it("應命中 pk_live_ 開頭接 ≥24 字元", () => {
+    expect(matches(pat, "pk_live_AbCdEfGhIjKlMnOpQrStUvWx")).toBe(true);
   });
 
-  it("測試金鑰 pk_test_ 不命中", () => {
-    expect(matches(pat, "pk_test_abcdefghijklmnopqrstuvwx")).toBe(false);
+  it("測試環境 pk_test_ 不命中", () => {
+    expect(matches(pat, "pk_test_AbCdEfGhIjKlMnOpQrStUvWx")).toBe(false);
   });
 });
+
+// ─── Slack ───────────────────────────────────────────────────────────────────
 
 describe("Slack Bot Token", () => {
   const pat = ruleFor("Slack Bot Token");
 
-  it("應命中 xoxb- 開頭接至少 40 字元", () => {
+  it("應命中 xoxb- 開頭接 ≥40 字元", () => {
     expect(
-      matches(pat, "xoxb-12345678901-12345678901234567890-abcdefghij")
+      matches(pat, "xoxb-123456789012-123456789012-AbCdEfGhIjKlMnOpQrSt")
     ).toBe(true);
   });
 
-  it("xoxp- 開頭不命中（非 Bot Token）", () => {
+  it("xoxp- 開頭不命中此規則", () => {
     expect(
-      matches(pat, "xoxp-12345678901-12345678901234567890-abcdefghij")
+      matches(pat, "xoxp-123456789012-123456789012-AbCdEfGhIjKlMnOpQrSt")
     ).toBe(false);
+  });
+
+  it("太短不命中", () => {
+    expect(matches(pat, "xoxb-short")).toBe(false);
   });
 });
 
 describe("Slack User / App Token", () => {
   const pat = ruleFor("Slack User / App Token");
 
-  it("應命中 xoxp- 開頭接至少 40 字元", () => {
+  it("應命中 xoxp- 開頭", () => {
     expect(
-      matches(pat, "xoxp-12345678901-12345678901234567890-abcdefghij")
+      matches(pat, "xoxp-123456789012-123456789012-AbCdEfGhIjKlMnOpQrSt")
     ).toBe(true);
   });
 
-  it("應命中 xoxa- 開頭接至少 40 字元", () => {
+  it("應命中 xoxa- 開頭", () => {
     expect(
-      matches(pat, "xoxa-12345678901-12345678901234567890-abcdefghij")
+      matches(pat, "xoxa-123456789012-123456789012-AbCdEfGhIjKlMnOpQrSt")
     ).toBe(true);
   });
 });
+
+// ─── Hugging Face ─────────────────────────────────────────────────────────────
 
 describe("Hugging Face API Token", () => {
   const pat = ruleFor("Hugging Face API Token");
 
-  it("應命中 hf_ 開頭接至少 34 字元", () => {
-    expect(matches(pat, "hf_abcdefghijklmnopqrstuvwxyz01234567")).toBe(true);
+  it("應命中 hf_ 開頭接 ≥34 字元", () => {
+    expect(
+      matches(pat, "hf_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh")
+    ).toBe(true);
   });
 
-  it("太短不命中（< 34 字元）", () => {
+  it("太短不命中", () => {
     expect(matches(pat, "hf_short")).toBe(false);
   });
 });
 
+// ─── PEM Private Key ─────────────────────────────────────────────────────────
+
 describe("PEM Private Key", () => {
   const pat = ruleFor("PEM Private Key");
 
-  it("應命中 RSA PRIVATE KEY 標頭", () => {
+  it("應命中 RSA PRIVATE KEY header", () => {
     expect(matches(pat, "-----BEGIN RSA PRIVATE KEY-----")).toBe(true);
   });
 
-  it("應命中 EC PRIVATE KEY 標頭", () => {
+  it("應命中 EC PRIVATE KEY header", () => {
     expect(matches(pat, "-----BEGIN EC PRIVATE KEY-----")).toBe(true);
   });
 
@@ -336,11 +383,11 @@ describe("PEM Private Key", () => {
     expect(matches(pat, "-----BEGIN DSA PRIVATE KEY-----")).toBe(true);
   });
 
-  it("應命中 OPENSSH PRIVATE KEY 標頭", () => {
+  it("應命中 OPENSSH PRIVATE KEY header", () => {
     expect(matches(pat, "-----BEGIN OPENSSH PRIVATE KEY-----")).toBe(true);
   });
 
-  it("應命中無前綴的 PRIVATE KEY 標頭（PKCS#8）", () => {
+  it("應命中無前綴 PRIVATE KEY header", () => {
     expect(matches(pat, "-----BEGIN PRIVATE KEY-----")).toBe(true);
   });
 
@@ -365,23 +412,28 @@ describe("國際電話號碼", () => {
   });
 });
 
+// ─── ADO Connection String ───────────────────────────────────────────────────
+
 describe("DB Connection String（ADO 格式）", () => {
   const pat = ruleFor("DB Connection String（ADO 格式）");
 
-  it("應命中 Server=...;Password=... 格式", () => {
+  it("應命中 Data Source + Password 格式", () => {
     expect(
-      matches(pat, "Server=myserver.database.windows.net; Password=myP@ss123")
+      matches(
+        pat,
+        "Data Source=myServer;Initial Catalog=myDB;Password=mySecret123;"
+      )
     ).toBe(true);
   });
 
-  it("應命中 Data Source=...;Password=... 格式", () => {
+  it("應命中 Server + Pwd 格式", () => {
     expect(
-      matches(pat, "Data Source=myserver; Password=secret123")
+      matches(pat, "Server=myServer;Database=myDB;Pwd=myPassword;")
     ).toBe(true);
   });
 
-  it("缺少 Password 欄位不命中", () => {
-    expect(matches(pat, "Server=myserver; Database=mydb")).toBe(false);
+  it("只有 Server 無密碼不命中", () => {
+    expect(matches(pat, "Server=myServer;Database=myDB;")).toBe(false);
   });
 });
 

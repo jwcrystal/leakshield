@@ -74,6 +74,26 @@ node dist/index.js --cli --file ./config.ts
 
 Exit code：`0` = 安全，`1` = 有問題，`2` = 檔案不存在
 
+#### CLI 選項
+
+| 選項 | 說明 |
+|------|------|
+| `--format json` | 輸出 JSON（適合 CI/CD） |
+| `--min-severity high` | 只回報 HIGH（或 `medium` / `low`） |
+| `--allow-outside` | 允許掃描工作目錄以外的路徑（預設禁止） |
+
+#### 工作目錄路徑限制
+
+預設情況下，`--file` 與 `--dir` 只接受**工作目錄內**的路徑。若嘗試掃描工作目錄以外的路徑（例如 `../shared.env` 或 `/etc/passwd`），會直接拋出錯誤並終止。
+
+如需掃描工作目錄以外的路徑，請明確加上 `--allow-outside`：
+
+```bash
+npm run scan -- --file ../shared.env --allow-outside
+```
+
+> ⚠️ 工作目錄外的掃描為選擇性開啟功能，僅在確實需要時使用。
+
 ---
 
 ### 二、Web UI 模式
@@ -171,6 +191,10 @@ npm run build
 | `scan_dir` | 掃描整個目錄（遞迴，跳過 node_modules / .git） |
 | `reload_config` | 修改 YAML 後重新載入，不用重啟 server |
 
+#### MCP 路徑限制
+
+`scan_file` 與 `scan_dir` 只接受解析後位於 **MCP Server 啟動目錄（工作目錄）以內**的路徑。任何指向工作目錄外的路徑（包含符號連結目標）都會被拒絕並回傳錯誤，防止 AI 透過 MCP 介面讀取主機上的任意檔案。
+
 ---
 
 ## 設定檔
@@ -237,6 +261,21 @@ fi
 ```
 
 ---
+
+## 設定檔驗證
+
+動態規則的輸入長度在載入時會透過 Zod 驗證：
+
+| 欄位 | 最大長度 |
+|------|---------|
+| `nda_keywords` 每個項目 | 200 字元 |
+| `private_domains` 每個項目 | 255 字元 |
+
+超過長度限制的值會導致 `loadConfig()` 拋出 Zod 驗證錯誤，避免過長的 pattern 進入掃描器。
+
+## 敏感資訊預覽行為
+
+掃描結果中所有敏感資訊的預覽一律顯示為 `****`，不論原始值長度為何，不保留任何前後綴字元。這樣可避免在日誌、CI 輸出或 MCP 回應中洩漏部分機密內容。
 
 ## 注意事項
 

@@ -38,11 +38,10 @@ describe("scanText() — API Key 偵測", () => {
     expect(finding?.severity).toBe("HIGH");
   });
 
-  it("finding 的 preview 應遮罩真實值", () => {
+  it("finding 的 preview 應完整遮罩，不含任何原始值片段", () => {
     const result = scanText("sk-abcdefghij1234567890abcde", defaultConfig);
     const finding = result.findings.find((f) => f.type === "API_KEY");
-    expect(finding?.preview).not.toContain("abcdefghij1234567890");
-    expect(finding?.preview).toContain("****");
+    expect(finding?.preview).toBe("****");
   });
 });
 

@@ -9,16 +9,14 @@ describe("redact()", () => {
     expect(redact("12345678", 60)).toBe("****");
   });
 
-  it("長字串保留前 4 碼 + **** + 後 2 碼", () => {
-    expect(redact("sk-abc123xyz789", 60)).toBe("sk-a****89");
-    expect(redact("ghp_ABCDEFGHIJ123456789012345678901234", 60)).toBe(
-      "ghp_****34"
-    );
+  it("長字串也完整遮罩，不保留任何前後綴", () => {
+    expect(redact("sk-abc123xyz789", 60)).toBe("****");
+    expect(redact("ghp_ABCDEFGHIJ123456789012345678901234", 60)).toBe("****");
   });
 
-  it("剛好 9 個字元仍套用長字串格式", () => {
+  it("任意長度字串均回傳 ****", () => {
     const val = "123456789"; // length = 9
-    expect(redact(val, 60)).toBe("1234****89");
+    expect(redact(val, 60)).toBe("****");
   });
 });
 

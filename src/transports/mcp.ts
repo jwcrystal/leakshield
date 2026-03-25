@@ -5,28 +5,10 @@ import * as path from "path";
 import type { Finding } from "../types.js";
 import { loadConfig } from "../config/loader.js";
 import { scanText } from "../scanner/engine.js";
-
-const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", "__pycache__"]);
-
-function collectFiles(dir: string, extensions?: string[], maxFiles = 100): string[] {
-  const files: string[] = [];
-  function walk(d: string) {
-    if (files.length >= maxFiles) return;
-    for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
-      if (files.length >= maxFiles) break;
-      if (entry.isDirectory() && !SKIP_DIRS.has(entry.name)) walk(path.join(d, entry.name));
-      else if (entry.isFile()) {
-        const ext = path.extname(entry.name).toLowerCase();
-        if (!extensions || extensions.includes(ext)) files.push(path.join(d, entry.name));
-      }
-    }
-  }
-  walk(dir);
-  return files;
-}
+import { collectFiles } from "../utils/files.js";
 
 export function createMcpServer() {
-  const config = loadConfig();
+  const configRef = { current: loadConfig() };
   const server = new McpServer({ name: "sensitive-guard", version: "1.0.0" });
 
   server.tool(
@@ -37,7 +19,7 @@ export function createMcpServer() {
       label: z.string().optional().describe("這段內容的說明標籤，方便識別（例如：config.ts、用戶資料 CSV）"),
     },
     async ({ content, label }) => {
-      const result = scanText(content, config);
+      const result = scanText(content, configRef.current);
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ label: label ?? "(未命名)", ...result }, null, 2) }],
       };
@@ -54,7 +36,7 @@ export function createMcpServer() {
         return { content: [{ type: "text" as const, text: JSON.stringify({ error: `找不到檔案：${resolved}` }, null, 2) }] };
       }
       const content = fs.readFileSync(resolved, "utf-8");
-      const result = scanText(content, config);
+      const result = scanText(content, configRef.current);
       return { content: [{ type: "text" as const, text: JSON.stringify({ file: resolved, ...result }, null, 2) }] };
     }
   );
@@ -81,7 +63,7 @@ export function createMcpServer() {
       for (const f of files) {
         try {
           const content = fs.readFileSync(f, "utf-8");
-          const result = scanText(content, config);
+          const result = scanText(content, configRef.current);
           totalFindings += result.total_findings;
           if (!result.safe) {
             unsafeFiles++;
@@ -113,12 +95,14 @@ export function createMcpServer() {
     async () => {
       try {
         const newConfig = loadConfig();
-        Object.assign(config, newConfig);
+        configRef.current = newConfig;
         return {
           content: [{ type: "text" as const, text: JSON.stringify({ success: true, message: "設定檔已重新載入", nda_keywords: newConfig.nda_keywords, private_domains: newConfig.private_domains }, null, 2) }],
         };
       } catch (e) {
-        return { content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: String(e) }, null, 2) }] };
+        const message = e instanceof Error ? e.message : String(e);
+        console.error("[sensitive-guard] reload_config failed:", message);
+        return { content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: message }, null, 2) }] };
       }
     }
   );

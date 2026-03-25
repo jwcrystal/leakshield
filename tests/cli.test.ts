@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { filterBySeverity } from "../src/transports/cli.js";
+import { filterBySeverity, validateCliScanPath } from "../src/transports/cli.js";
 import type { ScanResult } from "../src/types.js";
 
 // 建立假的 ScanResult，包含三種嚴重度的 findings
@@ -16,6 +16,37 @@ function makeMockResult(): ScanResult {
     recommendation: "⛔ 建議先處理",
   };
 }
+
+// ─── validateCliScanPath() ─────────────────────────────────────────────────────
+
+describe("validateCliScanPath()", () => {
+  it("accepts a path inside the workspace", () => {
+    const result = validateCliScanPath("/repo", "/repo/src/index.ts", false);
+    expect(result).toBe("/repo/src/index.ts");
+  });
+
+  it("rejects a path outside the workspace by default", () => {
+    expect(() => validateCliScanPath("/repo", "/etc/passwd", false)).toThrow(
+      /outside allowed workspace/
+    );
+  });
+
+  it("accepts an outside path when allowOutside=true", () => {
+    const result = validateCliScanPath("/repo", "/etc/passwd", true);
+    expect(result).toBe("/etc/passwd");
+  });
+
+  it("resolves relative paths against baseDir", () => {
+    const result = validateCliScanPath("/repo", "src/index.ts", false);
+    expect(result).toBe("/repo/src/index.ts");
+  });
+
+  it("rejects .. traversal by default", () => {
+    expect(() => validateCliScanPath("/repo", "../secret", false)).toThrow(
+      /outside allowed workspace/
+    );
+  });
+});
 
 describe("filterBySeverity()", () => {
   it("min=low 時保留全部 findings", () => {

@@ -12,10 +12,13 @@ import { runWeb } from "./transports/web.js";
 
 // Re-export for tests and external consumers
 export type { GuardConfig, Finding, ScanResult, FindingType, Rule } from "./types.js";
+export type { GuardDecision, GuardRiskLevel, GuardDecisionFinding, GuardDecisionResult } from "./decision/model.js";
 export { BUILTIN_RULES } from "./rules/builtin.js";
 export { buildDynamicRules } from "./rules/dynamic.js";
 export { redact, getLineCol } from "./scanner/utils.js";
 export { scanText } from "./scanner/engine.js";
+export { toDecisionResult } from "./decision/model.js";
+export { buildSafePreview, buildRedactedContent } from "./decision/redaction.js";
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 

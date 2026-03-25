@@ -89,6 +89,50 @@ settings:
     expect(config.private_domains).toContain("secret.corp.example.com");
   });
 
+  it("NDA 關鍵字超過 200 字元時應拋出錯誤", () => {
+    const longKeyword = "A".repeat(201);
+    const p = writeTmp(`
+nda_keywords:
+  - "${longKeyword}"
+private_domains: []
+settings:
+  max_chars: 200000
+  show_line_numbers: true
+  preview_length: 60
+`);
+    expect(() => loadConfig(p)).toThrow(/too_big|max/i);
+  });
+
+  it("私有域名超過 255 字元時應拋出錯誤", () => {
+    const longDomain = "a".repeat(256);
+    const p = writeTmp(`
+nda_keywords: []
+private_domains:
+  - "${longDomain}"
+settings:
+  max_chars: 200000
+  show_line_numbers: true
+  preview_length: 60
+`);
+    expect(() => loadConfig(p)).toThrow(/too_big|max/i);
+  });
+
+  it("正常長度的 NDA 關鍵字和域名仍可正常載入", () => {
+    const p = writeTmp(`
+nda_keywords:
+  - "NORMAL KEYWORD"
+private_domains:
+  - "internal.example.com"
+settings:
+  max_chars: 200000
+  show_line_numbers: true
+  preview_length: 60
+`);
+    const config = loadConfig(p);
+    expect(config.nda_keywords).toContain("NORMAL KEYWORD");
+    expect(config.private_domains).toContain("internal.example.com");
+  });
+
   it("應正確載入自訂 settings", () => {
     const p = writeTmp(`
 nda_keywords: []

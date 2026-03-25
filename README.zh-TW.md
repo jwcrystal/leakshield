@@ -54,19 +54,19 @@ npm run build
 
 ```bash
 # 掃描文字
-npm run cli -- --text 'sk-1234abcd my_password="super_secret"'
+npm run scan -- --text 'sk-1234abcd my_password="super_secret"'
 
 # 掃描單一檔案
-npm run cli -- --file ./src/config.ts
+npm run scan -- --file ./src/config.ts
 
 # 掃描整個目錄
-npm run cli -- --dir ./src
+npm run scan -- --dir ./src
 
 # 只掃描特定副檔名
-npm run cli -- --dir ./src --ext .ts .env .json
+npm run scan -- --dir ./src --ext .ts .env .json
 
 # 從 stdin 讀取
-cat .env | npm run cli -- --stdin
+cat .env | npm run scan -- --stdin
 
 # Build 後的版本
 node dist/index.js --cli --file ./config.ts

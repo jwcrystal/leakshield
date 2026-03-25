@@ -54,19 +54,19 @@ npm run build
 
 ```bash
 # Scan text
-npm run cli -- --text 'sk-1234abcd my_password="super_secret"'
+npm run scan -- --text 'sk-1234abcd my_password="super_secret"'
 
 # Scan a single file
-npm run cli -- --file ./src/config.ts
+npm run scan -- --file ./src/config.ts
 
 # Scan an entire directory
-npm run cli -- --dir ./src
+npm run scan -- --dir ./src
 
 # Scan specific file extensions only
-npm run cli -- --dir ./src --ext .ts .env .json
+npm run scan -- --dir ./src --ext .ts .env .json
 
 # Read from stdin
-cat .env | npm run cli -- --stdin
+cat .env | npm run scan -- --stdin
 
 # Built version
 node dist/index.js --cli --file ./config.ts

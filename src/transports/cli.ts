@@ -4,7 +4,7 @@ import chalk from "chalk";
 import type { FindingType, Finding, ScanResult } from "../types.js";
 import { loadConfig } from "../config/loader.js";
 import { scanText, redactText } from "../scanner/engine.js";
-import { sanitizeScanResultForExport, sanitizeRedactResultForExport } from "../decision/redaction.js";
+import { sanitizeRedactResultForExport } from "../decision/redaction.js";
 import { toDecisionResult } from "../decision/model.js";
 import type { GuardDecisionResult, GuardDecisionFinding } from "../decision/model.js";
 import { collectFiles, runWithConcurrency } from "../utils/files.js";
@@ -80,7 +80,7 @@ export function formatCliDecision(
     lines.push("");
 
     // Group findings by severity
-    const bySeverity: Partial<Record<string, GuardDecisionFinding[]>> = {};
+    const bySeverity: Partial<Record<Finding["severity"], GuardDecisionFinding[]>> = {};
     for (const f of decision.findings) {
       if (!bySeverity[f.severity]) bySeverity[f.severity] = [];
       bySeverity[f.severity]!.push(f);

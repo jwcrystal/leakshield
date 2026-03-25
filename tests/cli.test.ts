@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { filterBySeverity, validateCliScanPath } from "../src/transports/cli.js";
+import { filterBySeverity, validateCliScanPath, formatCliDecision } from "../src/transports/cli.js";
 import type { ScanResult } from "../src/types.js";
+import type { GuardDecisionResult } from "../src/decision/model.js";
 
 // 建立假的 ScanResult，包含三種嚴重度的 findings
 function makeMockResult(): ScanResult {
@@ -45,6 +46,70 @@ describe("validateCliScanPath()", () => {
     expect(() => validateCliScanPath("/repo", "../secret", false)).toThrow(
       /outside allowed workspace/
     );
+  });
+});
+
+describe("formatCliDecision()", () => {
+  it("shows a reminder for WARN and continues", () => {
+    const result: GuardDecisionResult = {
+      decision: "WARN",
+      riskLevel: "LOW",
+      summary: "warn",
+      findings: [],
+      recommendedAction: "CONTINUE",
+    };
+    const view = formatCliDecision({ label: "(stdin)", result });
+    expect(view).toContain("WARN");
+    expect(view.toLowerCase()).toContain("continue");
+  });
+
+  it("shows explicit confirm actions for CONFIRM / HIGH", () => {
+    const result: GuardDecisionResult = {
+      decision: "CONFIRM",
+      riskLevel: "HIGH",
+      summary: "unsafe",
+      findings: [{ type: "API_KEY", severity: "HIGH", preview: "sk-****ab" }],
+      recommendedAction: "CANCEL",
+    };
+    const view = formatCliDecision({ label: "secret.env", result });
+    expect(view.toLowerCase()).toContain("send redacted");
+    expect(view.toLowerCase()).toContain("send original anyway");
+  });
+
+  it("includes target label in output", () => {
+    const result: GuardDecisionResult = {
+      decision: "WARN",
+      riskLevel: "LOW",
+      summary: "warn",
+      findings: [],
+      recommendedAction: "CONTINUE",
+    };
+    const view = formatCliDecision({ label: "myfile.ts", result });
+    expect(view).toContain("myfile.ts");
+  });
+
+  it("shows ALLOW as safe/clean", () => {
+    const result: GuardDecisionResult = {
+      decision: "ALLOW",
+      riskLevel: "LOW",
+      summary: "✅ No sensitive content detected, safe to send.",
+      findings: [],
+      recommendedAction: "CONTINUE",
+    };
+    const view = formatCliDecision({ label: "safe.ts", result });
+    expect(view).toContain("ALLOW");
+  });
+
+  it("includes finding type for CONFIRM", () => {
+    const result: GuardDecisionResult = {
+      decision: "CONFIRM",
+      riskLevel: "MEDIUM",
+      summary: "unsafe",
+      findings: [{ type: "PII_EMAIL", severity: "MEDIUM", preview: "****" }],
+      recommendedAction: "SEND_REDACTED",
+    };
+    const view = formatCliDecision({ label: "data.csv", result });
+    expect(view).toContain("PII_EMAIL");
   });
 });
 

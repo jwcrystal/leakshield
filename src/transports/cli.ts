@@ -2,8 +2,10 @@ import * as fs from "fs";
 import * as path from "path";
 import chalk from "chalk";
 import type { FindingType, Finding, ScanResult } from "../types.js";
+import type { GuardDecisionResult } from "../decision/model.js";
 import { loadConfig } from "../config/loader.js";
 import { scanText, redactText } from "../scanner/engine.js";
+import { toDecisionResult } from "../decision/model.js";
 import { collectFiles, runWithConcurrency } from "../utils/files.js";
 import { validateCliScanPath } from "../utils/path-security.js";
 import { t } from "../i18n/index.js";
@@ -81,6 +83,74 @@ export function printCliResult(result: ScanResult, label: string) {
   console.log("");
 }
 
+// ─── Decision-aware formatter ─────────────────────────────────────────────────
+
+const DECISION_COLOR = {
+  ALLOW:   (s: string) => chalk.green(s),
+  WARN:    (s: string) => chalk.yellow(s),
+  CONFIRM: (s: string) => chalk.red(s),
+  BLOCK:   (s: string) => chalk.red(s),
+} as const;
+
+/**
+ * Pure formatter that converts a `GuardDecisionResult` into a display string.
+ * Does not call `console.log` so that tests can inspect the output directly.
+ */
+export function formatCliDecision({
+  label,
+  result,
+}: {
+  label: string;
+  result: GuardDecisionResult;
+}): string {
+  const lines: string[] = [];
+  const colorFn = DECISION_COLOR[result.decision] ?? ((s: string) => s);
+  const sep = "─".repeat(60);
+
+  lines.push("");
+  lines.push(chalk.bold(`📋 Scan target: ${label}`));
+  lines.push(sep);
+  lines.push(colorFn(`Decision: ${result.decision}  |  Risk: ${result.riskLevel}`));
+  lines.push(result.summary);
+
+  if (result.findings.length > 0) {
+    lines.push("");
+    const byType: Record<string, typeof result.findings> = {};
+    for (const f of result.findings) {
+      if (!byType[f.type]) byType[f.type] = [];
+      byType[f.type].push(f);
+    }
+    for (const [type, items] of Object.entries(byType)) {
+      const sev = items[0].severity;
+      const c = sev === "HIGH" ? chalk.red : sev === "MEDIUM" ? chalk.yellow : chalk.gray;
+      lines.push(c(`  [${sev}] ${type} — ${items.length} hit(s)`));
+      for (const item of items.slice(0, 5)) {
+        const loc = item.line ? chalk.dim(` (line ${item.line})`) : "";
+        lines.push(`    • preview: ${item.preview ?? "****"}${loc}`);
+      }
+    }
+  }
+
+  lines.push("");
+
+  if (result.decision === "ALLOW") {
+    lines.push(chalk.green("✅ ALLOW — content looks safe, you may continue."));
+  } else if (result.decision === "WARN") {
+    lines.push(chalk.yellow("⚠️  WARN — low-risk content detected."));
+    lines.push(chalk.yellow("   Recommended: continue (or send redacted to be safe)."));
+  } else if (result.decision === "CONFIRM") {
+    lines.push(chalk.red("🚨 CONFIRM — medium/high risk content detected. Choose an action:"));
+    lines.push(chalk.bold("   [1] cancel                  — do not send"));
+    lines.push(chalk.bold("   [2] send redacted            — send with placeholders"));
+    lines.push(chalk.bold("   [3] send original anyway     — explicit override (not recommended)"));
+  }
+
+  lines.push(sep);
+  lines.push("");
+
+  return lines.join("\n");
+}
+
 // ─── CLI entry ───────────────────────────────────────────────────────────────
 
 export async function runCli() {
@@ -103,12 +173,19 @@ export async function runCli() {
     (["high", "medium", "low"].includes(args[sevIdx + 1]) ? args[sevIdx + 1] : "low") as MinSeverity;
   const allowOutside = args.includes("--allow-outside");
 
-  function output(result: ScanResult, label: string) {
+  function output(result: ScanResult, label: string, originalContent?: string) {
     const filtered = filterBySeverity(result, minSeverity);
+    const decisionResult = toDecisionResult(filtered, originalContent ?? "");
     if (format === "json") {
-      console.log(JSON.stringify({ label, ...filtered }, null, 2));
+      console.log(JSON.stringify({ label, safe: filtered.safe, ...decisionResult }, null, 2));
     } else {
-      printCliResult(filtered, label);
+      // For ALLOW, fall back to the existing terse result printer to avoid
+      // extra noise; for WARN/CONFIRM, use the decision card.
+      if (decisionResult.decision === "ALLOW") {
+        printCliResult(filtered, label);
+      } else {
+        process.stdout.write(formatCliDecision({ label, result: decisionResult }));
+      }
     }
     return filtered;
   }
@@ -242,8 +319,9 @@ export async function runCli() {
 
   // --text mode
   if (textIdx !== -1 && args[textIdx + 1]) {
-    const result = scanText(args[textIdx + 1], config);
-    const filtered = output(result, t("cli.inline_label"));
+    const content = args[textIdx + 1];
+    const result = scanText(content, config);
+    const filtered = output(result, t("cli.inline_label"), content);
     process.exit(filtered.safe ? 0 : 1);
   }
 
@@ -260,8 +338,9 @@ export async function runCli() {
       console.error(chalk.red(t("cli.error_file_not_found", { path: filePath })));
       process.exit(2);
     }
-    const result = scanText(fs.readFileSync(filePath, "utf-8"), config);
-    const filtered = output(result, filePath);
+    const content = fs.readFileSync(filePath, "utf-8");
+    const result = scanText(content, config);
+    const filtered = output(result, filePath, content);
     process.exit(filtered.safe ? 0 : 1);
   }
 
@@ -269,8 +348,9 @@ export async function runCli() {
   if (stdinMode || !process.stdin.isTTY) {
     const chunks: Buffer[] = [];
     for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
-    const result = scanText(Buffer.concat(chunks).toString("utf-8"), config);
-    const filtered = output(result, "(stdin)");
+    const content = Buffer.concat(chunks).toString("utf-8");
+    const result = scanText(content, config);
+    const filtered = output(result, "(stdin)", content);
     process.exit(filtered.safe ? 0 : 1);
   }
 

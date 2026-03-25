@@ -2,6 +2,7 @@ import * as http from "http";
 import { loadConfig } from "../config/loader.js";
 import { scanText } from "../scanner/engine.js";
 import type { Finding } from "../types.js";
+import { t } from "../i18n/index.js";
 
 // ─── HTML UI ─────────────────────────────────────────────────────────────────
 
@@ -227,8 +228,8 @@ export async function runWeb(port: number) {
   });
 
   server.listen(port, "127.0.0.1", () => {
-    console.log(`🛡️  sensitive-guard web UI`);
-    console.log(`   http://localhost:${port}`);
-    console.log(`   Ctrl+C 停止`);
+    console.log(t("web.server_title"));
+    console.log(t("web.server_url", { port }));
+    console.log(t("web.server_stop"));
   });
 }

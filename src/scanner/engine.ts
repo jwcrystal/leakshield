@@ -88,7 +88,7 @@ export function redactText(text: string, config: GuardConfig): RedactResult {
     }
   }
 
-  // 倒序替換，避免前面替換後導致後面 index 偏移
+  // Sort descending by index so later replacements don't shift earlier offsets
   matches.sort((a, b) => b.index - a.index);
   let redacted = truncated;
   for (const m of matches) {

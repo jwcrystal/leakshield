@@ -103,10 +103,10 @@ export async function runCli() {
     return filtered;
   }
 
-  // --redact / --dry-run 模式（支援 --text、--file、--stdin）
+  // --redact / --dry-run mode (supports --text, --file, --stdin)
   if (redactMode) {
     let inputText: string | null = null;
-    let label = "(直接輸入文字)";
+    let label = "(inline text)";
 
     if (textIdx !== -1 && args[textIdx + 1]) {
       inputText = args[textIdx + 1];
@@ -133,15 +133,15 @@ export async function runCli() {
     const result = redactText(inputText, config);
 
     if (dryRun) {
-      // dry-run：只顯示預覽，不輸出脫敏文字
-      console.error(chalk.bold(`\n[DRY-RUN] 以下內容將被脫敏（${label}，共 ${result.total_findings} 處）：`));
+      // Dry-run: show preview only, do not output redacted text
+      console.error(chalk.bold(`\n[DRY-RUN] Would redact ${result.total_findings} finding(s) in ${label}:`));
       if (result.total_findings === 0) {
-        console.error(chalk.green("  ✅ 未偵測到敏感內容，無需脫敏。"));
+        console.error(chalk.green("  ✅ No sensitive content detected, nothing to redact."));
       } else {
         for (const f of result.findings) {
-          const loc = f.line ? chalk.dim(` 第 ${f.line} 行, 欄 ${f.column}`) : "";
+          const loc = f.line ? chalk.dim(` line ${f.line}, col ${f.column}`) : "";
           console.error(`  ${chalk.yellow(f.type)}${loc} — ${f.description}`);
-          console.error(chalk.dim(`    預覽：${f.preview} → [REDACTED_${f.type}]`));
+          console.error(chalk.dim(`    preview: ${f.preview} → [REDACTED_${f.type}]`));
         }
       }
       process.exit(result.total_findings > 0 ? 1 : 0);
@@ -150,15 +150,14 @@ export async function runCli() {
     if (format === "json") {
       console.log(JSON.stringify({ label, ...result }, null, 2));
     } else {
-      // 脫敏文字輸出到 stdout
+      // Write redacted text to stdout (or file); summary goes to stderr
       const outPath = outIdx !== -1 ? args[outIdx + 1] : undefined;
       if (outPath) {
         fs.writeFileSync(path.resolve(outPath), result.redacted, "utf-8");
-        console.error(chalk.green(`✅ 脫敏後內容已寫入：${path.resolve(outPath)}`));
+        console.error(chalk.green(`✅ Redacted content written to: ${path.resolve(outPath)}`));
       } else {
         process.stdout.write(result.redacted);
       }
-      // findings 摘要輸出到 stderr
       console.error(chalk.dim(`\n[sensitive-guard] ${result.summary}`));
     }
     process.exit(0);

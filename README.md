@@ -4,9 +4,9 @@
 
 **A gatekeeper that scans for sensitive content before you feed code, documents, or data to AI services.**
 
-Three usage modes:
+Four usage modes:
 - **MCP Server**: Integrates with OpenCode / Claude Code — automatically triggers before AI reads any file
-- **CLI**: Manually scan text, files, or directories
+- **CLI**: Manually scan text, files, or directories; also supports **redaction** to replace sensitive content in-place
 - **Web UI**: Browser interface — paste content and scan instantly; also exposes a REST API
 
 ---
@@ -73,6 +73,30 @@ node dist/index.js --cli --file ./config.ts
 ```
 
 Exit codes: `0` = safe, `1` = findings detected, `2` = file not found
+
+#### Redaction Mode
+
+Replace sensitive content with `[REDACTED_TYPE]` placeholders instead of just reporting it:
+
+```bash
+# Redact stdin and print to stdout
+echo 'token=sk-proj-abc123...' | npm run scan -- --redact --stdin
+
+# Redact a file and write result to a new file
+npm run scan -- --redact --file .env --out .env.redacted
+
+# Dry-run: preview what would be redacted without producing any output
+npm run scan -- --redact --dry-run --file .env
+```
+
+Redacted output goes to **stdout**; the findings summary goes to **stderr** so they can be separated in pipelines.
+
+| Flag | Behaviour |
+|------|-----------|
+| `--redact` | Replace findings with `[REDACTED_TYPE]`, write to stdout |
+| `--redact --dry-run` | Preview findings only, no output; exit `1` if any found |
+| `--redact --out <path>` | Write redacted text to file instead of stdout |
+| `--redact --format json` | Return JSON with `redacted`, `findings`, and `summary` fields |
 
 ---
 
@@ -176,6 +200,7 @@ Stop and report if safe is false.
 | `scan_text` | Scan a text snippet (code / data you paste in) |
 | `scan_file` | Scan a single local file |
 | `scan_dir` | Scan an entire directory (recursive, skips node_modules / .git) |
+| `redact_text` | Replace sensitive findings with `[REDACTED_TYPE]` and return the clean text |
 | `reload_config` | Reload YAML config without restarting the server |
 
 ---

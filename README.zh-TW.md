@@ -4,9 +4,9 @@
 
 **在把程式碼、文件、資料丟給 AI 服務之前，先掃描敏感內容的守門員。**
 
-支援三種使用模式：
+支援四種使用模式：
 - **MCP Server**：整合進 OpenCode / Claude Code，AI 讀檔前自動觸發守門
-- **CLI**：手動掃描指定文字、檔案或目錄
+- **CLI**：手動掃描指定文字、檔案或目錄；支援**脫敏模式**，可直接替換敏感內容
 - **Web UI**：瀏覽器介面，貼上內容即可掃描；同時提供 REST API
 
 ---
@@ -73,6 +73,30 @@ node dist/index.js --cli --file ./config.ts
 ```
 
 Exit code：`0` = 安全，`1` = 有問題，`2` = 檔案不存在
+
+#### 脫敏模式（Redaction）
+
+將敏感內容替換為 `[REDACTED_TYPE]` 佔位符，而非只是回報：
+
+```bash
+# 脫敏 stdin，結果輸出到 stdout
+echo 'token=sk-proj-abc123...' | npm run scan -- --redact --stdin
+
+# 脫敏檔案，結果寫入新檔
+npm run scan -- --redact --file .env --out .env.redacted
+
+# Dry-run：只預覽哪些內容會被脫敏，不產生任何輸出
+npm run scan -- --redact --dry-run --file .env
+```
+
+脫敏後的文字輸出至 **stdout**；findings 摘要輸出至 **stderr**，方便在 pipeline 中分開處理。
+
+| Flag | 行為 |
+|------|------|
+| `--redact` | 替換命中內容為 `[REDACTED_TYPE]`，寫入 stdout |
+| `--redact --dry-run` | 僅預覽命中位置，不輸出；有命中時 exit `1` |
+| `--redact --out <path>` | 脫敏結果寫入指定檔案，不寫到 stdout |
+| `--redact --format json` | 以 JSON 格式回傳 `redacted`、`findings`、`summary` |
 
 #### CLI 選項
 
@@ -189,6 +213,7 @@ npm run build
 | `scan_text` | 掃描一段文字（你貼進去的 code / 資料） |
 | `scan_file` | 掃描本機單一檔案 |
 | `scan_dir` | 掃描整個目錄（遞迴，跳過 node_modules / .git） |
+| `redact_text` | 將命中的敏感內容替換為 `[REDACTED_TYPE]`，回傳乾淨文字 |
 | `reload_config` | 修改 YAML 後重新載入，不用重啟 server |
 
 #### MCP 路徑限制

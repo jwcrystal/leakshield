@@ -47,7 +47,7 @@ export function createMcpServer() {
 
   server.tool(
     "scan_text",
-    "在將任何程式碼、文件或資料傳送給 AI 服務之前，先用此工具掃描是否含有敏感內容（API Key、PII、NDA 關鍵字、DB 連線字串等）。若偵測到問題，會攔截並報告，不會自動修改內容。",
+    "在將任何程式碼、文件或資料傳送給 AI 服務之前，先用此工具掃描是否含有敏感內容（API Key、PII、NDA 關鍵字、DB 連線字串等）。\n\n**REQUIRED BEHAVIOR**:\n- If result.decision === 'ALLOW' or 'WARN': you may continue, but surface the warning to the user.\n- If result.decision === 'CONFIRM': YOU MUST STOP. Do NOT send the original content to any AI service. Ask the user to choose one of: (1) cancel, (2) send redacted — use result.redactedContent if available, (3) send original anyway — only if the user explicitly says so with words like 'override', 'send original', or 'continue with original'.\n- Never treat an ambiguous acknowledgment ('ok', 'sure', 'continue') as an override.",
     {
       content: z.string().describe("要掃描的文字內容（程式碼、JSON、文件等）"),
       label: z.string().optional().describe("這段內容的說明標籤，方便識別（例如：config.ts、用戶資料 CSV）"),
@@ -65,7 +65,7 @@ export function createMcpServer() {
 
   server.tool(
     "scan_file",
-    "掃描本機檔案的敏感內容。在讀取並傳送檔案給 AI 之前，先呼叫此工具確認安全。",
+    "掃描本機檔案的敏感內容。在讀取並傳送檔案給 AI 之前，先呼叫此工具確認安全。\n\n**REQUIRED BEHAVIOR**: Same as scan_text — if result.decision === 'CONFIRM', YOU MUST STOP and ask the user to choose: cancel, send redacted, or explicit override. Do not proceed automatically.",
     {
       file_path: z.string().describe("要掃描的檔案絕對路徑或相對路徑"),
       allow_outside: z.boolean().optional().describe("允許掃描工作目錄以外的檔案（預設 false）。請謹慎使用，僅在明確需要掃描外部路徑時傳入 true"),

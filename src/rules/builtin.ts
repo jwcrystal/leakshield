@@ -131,7 +131,8 @@ export const BUILTIN_RULES: Rule[] = [
     type: "PII_PHONE_INTL",
     severity: "LOW",
     description: "國際電話號碼",
-    pattern: /\+[1-9]\d{6,14}\b/g,
+    // Matches E.164 (+886912345678) and formatted variants (+1-800-555-1234, +44 20 7946 0958)
+    pattern: /\+[1-9][\d\s\-]{5,18}\d/g,
   },
   {
     type: "PII_ID_TW",

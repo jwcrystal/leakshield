@@ -16,6 +16,14 @@ export { BUILTIN_RULES } from "./rules/builtin.js";
 export { buildDynamicRules } from "./rules/dynamic.js";
 export { redact, getLineCol } from "./scanner/utils.js";
 export { scanText } from "./scanner/engine.js";
+export type {
+  GuardDecision,
+  GuardRiskLevel,
+  GuardRecommendedAction,
+  GuardDecisionFinding,
+  GuardDecisionResult,
+} from "./decision/model.js";
+export { toDecisionResult } from "./decision/model.js";
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 

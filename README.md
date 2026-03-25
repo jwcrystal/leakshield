@@ -28,6 +28,44 @@ Four usage modes:
 
 ---
 
+## Decision Model
+
+Every scan produces a **decision** that tells the caller how to handle the content:
+
+| Decision | When | Risk Level | Meaning |
+|----------|------|-----------|---------|
+| `ALLOW` | No findings | LOW | Content is clean — safe to send |
+| `WARN` | LOW-severity findings only | MEDIUM | Minor items detected — reminder shown, content can be sent |
+| `CONFIRM` | MEDIUM or HIGH findings | HIGH / CRITICAL | Sensitive content detected — user must explicitly confirm |
+
+### CONFIRM Actions
+
+When the decision is `CONFIRM`, the CLI presents three options:
+
+1. **cancel** — do not send this content
+2. **send redacted** — use the sanitized version with sensitive spans replaced by `[REDACTED_TYPE]` placeholders
+3. **send original** — proceed at your own risk
+
+The `CONFIRM` decision also includes:
+- `recommendedAction`: `REVIEW` (MEDIUM findings) or `BLOCK` (HIGH findings)
+- `safePreview`: a masked excerpt around the first finding
+- `redactedContent`: the full content with all sensitive spans replaced
+
+### JSON Output Fields
+
+When using `--format json`, the output includes these decision-oriented fields:
+
+| Field | Description |
+|-------|-------------|
+| `decision` | `ALLOW`, `WARN`, or `CONFIRM` |
+| `riskLevel` | `LOW`, `MEDIUM`, `HIGH`, or `CRITICAL` |
+| `recommendedAction` | `REVIEW` or `BLOCK` (CONFIRM only) |
+| `findings` | Array of sanitized findings (no internal metadata) |
+| `safePreview` | Masked excerpt (CONFIRM only) |
+| `redactedContent` | Full redacted text (CONFIRM only) |
+
+---
+
 ## Installation
 
 ```bash
@@ -72,7 +110,7 @@ cat .env | npm run scan -- --stdin
 node dist/index.js --cli --file ./config.ts
 ```
 
-Exit codes: `0` = safe, `1` = findings detected, `2` = file not found
+Exit codes: `0` = safe (ALLOW), `1` = findings detected (WARN or CONFIRM), `2` = file not found
 
 #### Redaction Mode
 
@@ -152,7 +190,7 @@ curl -s -X POST http://localhost:3001/scan \
   "safe": false,
   "total_findings": 2,
   "findings": [
-    { "type": "API_KEY", "severity": "HIGH", "line": 1, ... }
+    { "type": "API_KEY", "severity": "HIGH", "line": 1, "preview": "****", "description": "OpenAI API Key" }
   ],
   "summary": "...",
   "recommendation": "..."
@@ -202,7 +240,11 @@ Add the following instruction to your OpenCode system prompt so the AI calls the
 ```
 Before reading any local file, or processing any code / config / data I provide,
 call sensitive-guard's scan_file or scan_text tool.
-If the scan result's safe field is false, stop immediately and tell me what was found.
+Check the "decision" field in the response:
+  - ALLOW: safe to proceed
+  - WARN: minor items found, safe to proceed but note them
+  - CONFIRM: sensitive content detected, STOP and report to me.
+    Use the "redactedContent" field if I ask to send a sanitized version.
 Wait for my confirmation before continuing. Do not auto-fix or proceed with sensitive content.
 ```
 
@@ -210,18 +252,20 @@ For **Claude Code**, add to your `CLAUDE.md`:
 
 ```
 Before reading any file, call the sensitive-guard MCP tool (scan_file or scan_text).
-Stop and report if safe is false.
+Check the "decision" field: ALLOW = proceed, WARN = note and proceed, CONFIRM = stop and report.
 ```
 
 #### MCP Tools
 
 | Tool | Purpose |
 |------|---------|
-| `scan_text` | Scan a text snippet (code / data you paste in) |
-| `scan_file` | Scan a single local file |
-| `scan_dir` | Scan an entire directory (recursive, skips node_modules / .git) |
-| `redact_text` | Replace sensitive findings with `[REDACTED_TYPE]` and return the clean text |
+| `scan_text` | Scan a text snippet (code / data you paste in). Returns `decision`, `riskLevel`, `safePreview`, `redactedContent` |
+| `scan_file` | Scan a single local file. Same decision-oriented response as `scan_text` |
+| `scan_dir` | Scan an entire directory (recursive, skips node_modules / .git). Returns per-file results |
+| `redact_text` | Replace sensitive findings with `[REDACTED_TYPE]` and return the clean text. Supports `dry_run` to preview only |
 | `reload_config` | Reload YAML config without restarting the server |
+
+> **Backward compatibility**: `scan_text` and `scan_file` still include a `safe` boolean field (`true` when decision is `ALLOW`). Existing integrations that only check `safe` will continue to work, but new integrations should use the `decision` field for finer control.
 
 #### MCP Path Restriction
 

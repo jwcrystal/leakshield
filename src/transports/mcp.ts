@@ -32,15 +32,18 @@ export function createMcpServer() {
   server.tool(
     "scan_file",
     "掃描本機檔案的敏感內容。在讀取並傳送檔案給 AI 之前，先呼叫此工具確認安全。",
-    { file_path: z.string().describe("要掃描的檔案絕對路徑或相對路徑") },
-    async ({ file_path }) => {
+    {
+      file_path: z.string().describe("要掃描的檔案絕對路徑或相對路徑"),
+      allow_outside: z.boolean().optional().describe("允許掃描工作目錄以外的檔案（預設 false）。請謹慎使用，僅在明確需要掃描外部路徑時傳入 true"),
+    },
+    async ({ file_path, allow_outside = false }) => {
       const requestedPath = resolveWorkspacePath(process.cwd(), file_path);
       if (!fs.existsSync(requestedPath)) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ error: `找不到檔案：${requestedPath}` }, null, 2) }] };
       }
       const resolved = fs.realpathSync(requestedPath);
-      if (!isPathInsideBase(workspaceRoot, resolved) && resolved !== workspaceRoot) {
-        return { content: [{ type: "text" as const, text: JSON.stringify({ error: "Path is outside allowed workspace" }, null, 2) }] };
+      if (!allow_outside && !isPathInsideBase(workspaceRoot, resolved) && resolved !== workspaceRoot) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ error: "Path is outside allowed workspace. Pass allow_outside: true to override." }, null, 2) }] };
       }
       const content = fs.readFileSync(resolved, "utf-8");
       const result = scanText(content, configRef.current);
@@ -55,15 +58,16 @@ export function createMcpServer() {
       dir_path: z.string().describe("要掃描的目錄絕對路徑或相對路徑"),
       extensions: z.array(z.string()).optional().describe("只掃描指定副檔名，例如 ['.ts', '.env', '.json']。不填則掃描所有文字檔"),
       max_files: z.number().optional().describe("最多掃描幾個檔案（預設 100）"),
+      allow_outside: z.boolean().optional().describe("允許掃描工作目錄以外的目錄（預設 false）。請謹慎使用，僅在明確需要掃描外部路徑時傳入 true"),
     },
-    async ({ dir_path, extensions, max_files = 100 }) => {
+    async ({ dir_path, extensions, max_files = 100, allow_outside = false }) => {
       const requestedPath = resolveWorkspacePath(process.cwd(), dir_path);
       if (!fs.existsSync(requestedPath)) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ error: `目錄不存在：${requestedPath}` }, null, 2) }] };
       }
       const resolved = fs.realpathSync(requestedPath);
-      if (!isPathInsideBase(workspaceRoot, resolved) && resolved !== workspaceRoot) {
-        return { content: [{ type: "text" as const, text: JSON.stringify({ error: "Path is outside allowed workspace" }, null, 2) }] };
+      if (!allow_outside && !isPathInsideBase(workspaceRoot, resolved) && resolved !== workspaceRoot) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ error: "Path is outside allowed workspace. Pass allow_outside: true to override." }, null, 2) }] };
       }
 
       const files = collectFiles(resolved, extensions, max_files);

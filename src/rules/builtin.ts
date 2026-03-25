@@ -65,8 +65,9 @@ export const BUILTIN_RULES: Rule[] = [
     severity: "HIGH",
     description: "Generic Secret / Password 賦值",
     // 同時涵蓋有引號（YAML/JSON）與無引號（.env）寫法
+    // (?!\$\{) 排除環境變數參照 ${VAR}；(?!\*) 排除遮罩值 ********
     pattern:
-      /(?:password|passwd|secret|private_key|client_secret)\s*[:=]\s*(?:['"]([^'"]{8,})['"]|(\S{8,}))/gi,
+      /(?:password|passwd|secret|private_key|client_secret)\s*[:=]\s*(?:['"](?!\$\{)[^'"]{8,}['"]|(?!['"\$\*])\S{8,})/gi,
   },
   {
     type: "TOKEN",

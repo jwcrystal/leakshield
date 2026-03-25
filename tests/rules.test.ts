@@ -122,6 +122,20 @@ describe("Generic Secret / Password 賦值", () => {
   it("值太短不命中（< 8 字元）", () => {
     expect(matches(pat, `password = "short"`)).toBe(false);
   });
+
+  it("遮罩值不命中（全 * 字元）", () => {
+    expect(matches(pat, `password = ********`)).toBe(false);
+    expect(matches(pat, `secret = ****************`)).toBe(false);
+  });
+
+  it("環境變數參照不命中（\${VAR} 格式）", () => {
+    expect(matches(pat, `secret = \${MY_SECRET_VAR}`)).toBe(false);
+    expect(matches(pat, `password = "\${DB_PASSWORD}"`)).toBe(false);
+  });
+
+  it("模板語法不命中（<%= %> 格式）", () => {
+    expect(matches(pat, `password = <%= @password %>`)).toBe(false);
+  });
 });
 
 // ─── PII ──────────────────────────────────────────────────────────────────────

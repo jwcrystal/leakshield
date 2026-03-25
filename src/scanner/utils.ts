@@ -1,6 +1,12 @@
-export function redact(value: string, _previewLen: number): string {
+// Redact a matched secret for display. previewLen controls the max output
+// length so callers can control how much of a long match is surfaced in
+// the masked preview (e.g. first N chars + "****" + last N chars).
+export function redact(value: string, previewLen: number): string {
   if (value.length <= 8) return "****";
-  return value.slice(0, 4) + "****" + value.slice(-2);
+  const masked = value.slice(0, 4) + "****" + value.slice(-2);
+  // Truncate the masked preview to previewLen — allows config to limit exposure
+  // of very long secrets while still showing a safe redacted snippet.
+  return masked.slice(0, previewLen);
 }
 
 export function getLineCol(text: string, index: number): { line: number; col: number } {

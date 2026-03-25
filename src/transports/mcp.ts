@@ -1,16 +1,17 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as fs from "fs";
-import * as path from "path";
 import type { Finding } from "../types.js";
 import { loadConfig } from "../config/loader.js";
 import { scanText } from "../scanner/engine.js";
 import { collectFiles, runWithConcurrency } from "../utils/files.js";
+import { resolveWorkspacePath, isPathInsideBase } from "../utils/path-security.js";
 
 const SCAN_CONCURRENCY = 8;
 
 export function createMcpServer() {
   const configRef = { current: loadConfig() };
+  const workspaceRoot = fs.realpathSync(process.cwd());
   const server = new McpServer({ name: "sensitive-guard", version: "1.0.0" });
 
   server.tool(
@@ -33,9 +34,13 @@ export function createMcpServer() {
     "掃描本機檔案的敏感內容。在讀取並傳送檔案給 AI 之前，先呼叫此工具確認安全。",
     { file_path: z.string().describe("要掃描的檔案絕對路徑或相對路徑") },
     async ({ file_path }) => {
-      const resolved = path.resolve(file_path);
-      if (!fs.existsSync(resolved)) {
-        return { content: [{ type: "text" as const, text: JSON.stringify({ error: `找不到檔案：${resolved}` }, null, 2) }] };
+      const requestedPath = resolveWorkspacePath(process.cwd(), file_path);
+      if (!fs.existsSync(requestedPath)) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ error: `找不到檔案：${requestedPath}` }, null, 2) }] };
+      }
+      const resolved = fs.realpathSync(requestedPath);
+      if (!isPathInsideBase(workspaceRoot, resolved) && resolved !== workspaceRoot) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ error: "Path is outside allowed workspace" }, null, 2) }] };
       }
       const content = fs.readFileSync(resolved, "utf-8");
       const result = scanText(content, configRef.current);
@@ -52,9 +57,13 @@ export function createMcpServer() {
       max_files: z.number().optional().describe("最多掃描幾個檔案（預設 100）"),
     },
     async ({ dir_path, extensions, max_files = 100 }) => {
-      const resolved = path.resolve(dir_path);
-      if (!fs.existsSync(resolved)) {
-        return { content: [{ type: "text" as const, text: JSON.stringify({ error: `目錄不存在：${resolved}` }, null, 2) }] };
+      const requestedPath = resolveWorkspacePath(process.cwd(), dir_path);
+      if (!fs.existsSync(requestedPath)) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ error: `目錄不存在：${requestedPath}` }, null, 2) }] };
+      }
+      const resolved = fs.realpathSync(requestedPath);
+      if (!isPathInsideBase(workspaceRoot, resolved) && resolved !== workspaceRoot) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ error: "Path is outside allowed workspace" }, null, 2) }] };
       }
 
       const files = collectFiles(resolved, extensions, max_files);

@@ -2,12 +2,43 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as fs from "fs";
 import type { Finding } from "../types.js";
+import type { GuardDecisionResult } from "../decision/model.js";
 import { loadConfig } from "../config/loader.js";
 import { scanText, redactText } from "../scanner/engine.js";
+import { toDecisionResult } from "../decision/model.js";
 import { collectFiles, runWithConcurrency } from "../utils/files.js";
 import { resolveWorkspacePath, isPathInsideBase } from "../utils/path-security.js";
 
 const SCAN_CONCURRENCY = 8;
+
+// ─── Shared decision serializer ───────────────────────────────────────────────
+
+/**
+ * Shape the MCP response payload from a `GuardDecisionResult`.
+ * Preserves the `safe` field for backward-compatible callers while adding the
+ * full decision contract.  Never includes raw `match_text` in the output.
+ */
+export function serializeDecisionPayload({
+  label,
+  content: _content,
+  result,
+}: {
+  label: string;
+  content: string;
+  result: GuardDecisionResult;
+}): Record<string, unknown> {
+  return {
+    label,
+    safe: result.decision === "ALLOW",
+    decision: result.decision,
+    riskLevel: result.riskLevel,
+    summary: result.summary,
+    findings: result.findings,
+    recommendedAction: result.recommendedAction,
+    ...(result.safePreview !== undefined ? { safePreview: result.safePreview } : {}),
+    ...(result.redactedContent !== undefined ? { redactedContent: result.redactedContent } : {}),
+  };
+}
 
 export function createMcpServer() {
   const configRef = { current: loadConfig() };
@@ -22,9 +53,12 @@ export function createMcpServer() {
       label: z.string().optional().describe("這段內容的說明標籤，方便識別（例如：config.ts、用戶資料 CSV）"),
     },
     async ({ content, label }) => {
-      const result = scanText(content, configRef.current);
+      const scanResult = scanText(content, configRef.current);
+      const decisionResult = toDecisionResult(scanResult, content);
+      const lbl = label ?? "(未命名)";
+      const payload = serializeDecisionPayload({ label: lbl, content, result: decisionResult });
       return {
-        content: [{ type: "text" as const, text: JSON.stringify({ label: label ?? "(未命名)", ...result }, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
       };
     }
   );
@@ -46,8 +80,10 @@ export function createMcpServer() {
         return { content: [{ type: "text" as const, text: JSON.stringify({ error: "Path is outside allowed workspace. Pass allow_outside: true to override." }, null, 2) }] };
       }
       const content = fs.readFileSync(resolved, "utf-8");
-      const result = scanText(content, configRef.current);
-      return { content: [{ type: "text" as const, text: JSON.stringify({ file: resolved, ...result }, null, 2) }] };
+      const scanResult = scanText(content, configRef.current);
+      const decisionResult = toDecisionResult(scanResult, content);
+      const payload = serializeDecisionPayload({ label: resolved, content, result: decisionResult });
+      return { content: [{ type: "text" as const, text: JSON.stringify({ file: resolved, ...payload }, null, 2) }] };
     }
   );
 

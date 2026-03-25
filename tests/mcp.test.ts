@@ -3,7 +3,78 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { isPathInsideBase } from "../src/utils/path-security.js";
-import { createMcpServer } from "../src/transports/mcp.js";
+import { createMcpServer, serializeDecisionPayload } from "../src/transports/mcp.js";
+import type { GuardDecisionResult } from "../src/decision/model.js";
+
+describe("serializeDecisionPayload", () => {
+  it("includes decision fields and backward-compatible safe=false", () => {
+    const result: GuardDecisionResult = {
+      decision: "CONFIRM",
+      riskLevel: "HIGH",
+      summary: "unsafe",
+      findings: [{ type: "API_KEY", severity: "HIGH", preview: "sk-****ab" }],
+      recommendedAction: "CANCEL",
+    };
+    const payload = serializeDecisionPayload({ label: "config.ts", content: "sk-abcdefghij1234567890abcde", result });
+    expect(payload.safe).toBe(false);
+    expect(payload.decision).toBe("CONFIRM");
+    expect(payload.riskLevel).toBe("HIGH");
+    expect(payload.recommendedAction).toBe("CANCEL");
+    expect(payload.label).toBe("config.ts");
+  });
+
+  it("ALLOW result has safe=true", () => {
+    const result: GuardDecisionResult = {
+      decision: "ALLOW",
+      riskLevel: "LOW",
+      summary: "✅ safe",
+      findings: [],
+      recommendedAction: "CONTINUE",
+    };
+    const payload = serializeDecisionPayload({ label: "clean.ts", content: "safe text", result });
+    expect(payload.safe).toBe(true);
+    expect(payload.decision).toBe("ALLOW");
+  });
+
+  it("WARN result has safe=false", () => {
+    const result: GuardDecisionResult = {
+      decision: "WARN",
+      riskLevel: "LOW",
+      summary: "low risk",
+      findings: [{ type: "PII_PHONE_INTL", severity: "LOW", preview: "****" }],
+      recommendedAction: "CONTINUE",
+    };
+    const payload = serializeDecisionPayload({ label: "data.txt", content: "+1234567890", result });
+    expect(payload.safe).toBe(false);
+    expect(payload.decision).toBe("WARN");
+  });
+
+  it("does not expose raw match_text in the payload", () => {
+    const result: GuardDecisionResult = {
+      decision: "CONFIRM",
+      riskLevel: "HIGH",
+      summary: "unsafe",
+      findings: [{ type: "API_KEY", severity: "HIGH", preview: "****" }],
+      recommendedAction: "CANCEL",
+    };
+    const payload = serializeDecisionPayload({ label: "test", content: "sk-secret", result });
+    const str = JSON.stringify(payload);
+    expect(str).not.toContain("sk-secret");
+  });
+
+  it("includes redactedContent when present in result", () => {
+    const result: GuardDecisionResult = {
+      decision: "CONFIRM",
+      riskLevel: "HIGH",
+      summary: "unsafe",
+      findings: [{ type: "API_KEY", severity: "HIGH", preview: "****" }],
+      recommendedAction: "CANCEL",
+      redactedContent: "const key = '[REDACTED_API_KEY]';",
+    };
+    const payload = serializeDecisionPayload({ label: "test", content: "original", result });
+    expect(payload.redactedContent).toBe("const key = '[REDACTED_API_KEY]';");
+  });
+});
 
 describe("isPathInsideBase()", () => {
   it("accepts files inside base directory", () => {

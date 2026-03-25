@@ -4,9 +4,10 @@ import * as fs from "fs";
 import type { TransportSafeFinding } from "../decision/redaction.js";
 import { loadConfig } from "../config/loader.js";
 import { scanText, redactText } from "../scanner/engine.js";
-import { sanitizeScanResultForExport, sanitizeRedactResultForExport, sanitizeFindingsForExport } from "../decision/redaction.js";
+import { sanitizeRedactResultForExport, sanitizeFindingsForExport } from "../decision/redaction.js";
 import { collectFiles, runWithConcurrency } from "../utils/files.js";
 import { resolveWorkspacePath, isPathInsideBase } from "../utils/path-security.js";
+import { toMcpDecisionPayload } from "./mcp-payload.js";
 
 const SCAN_CONCURRENCY = 8;
 
@@ -24,8 +25,11 @@ export function createMcpServer() {
     },
     async ({ content, label }) => {
       const result = scanText(content, configRef.current);
+      const payload = toMcpDecisionPayload(result, content, configRef.current, {
+        label: label ?? "(未命名)",
+      });
       return {
-        content: [{ type: "text" as const, text: JSON.stringify({ label: label ?? "(未命名)", ...sanitizeScanResultForExport(result) }, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
       };
     }
   );
@@ -48,7 +52,10 @@ export function createMcpServer() {
       }
       const content = fs.readFileSync(resolved, "utf-8");
       const result = scanText(content, configRef.current);
-      return { content: [{ type: "text" as const, text: JSON.stringify({ file: resolved, ...sanitizeScanResultForExport(result) }, null, 2) }] };
+      const payload = toMcpDecisionPayload(result, content, configRef.current, {
+        file: resolved,
+      });
+      return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
     }
   );
 

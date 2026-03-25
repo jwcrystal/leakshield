@@ -134,6 +134,28 @@ document.getElementById('input').addEventListener('keydown', e => {
 
 // ─── Web Server ───────────────────────────────────────────────────────────────
 
+const MAX_BODY_BYTES = 512 * 1024; // 512 KB — reject oversized payloads early
+const BODY_TIMEOUT_MS = 10_000;    // 10 s   — abort stalled uploads
+const RATE_LIMIT_MAX = 60;         // max requests per window per IP
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+// Sliding-window rate limiter keyed by remote IP.
+const rateLimitMap = new Map<string, number[]>();
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const window = (rateLimitMap.get(ip) ?? []).filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+  if (window.length >= RATE_LIMIT_MAX) return true;
+  window.push(now);
+  rateLimitMap.set(ip, window);
+  return false;
+}
+
+function jsonError(res: http.ServerResponse, status: number, message: string) {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify({ error: message }));
+}
+
 export async function runWeb(port: number) {
   const config = loadConfig();
 
@@ -145,9 +167,43 @@ export async function runWeb(port: number) {
     }
 
     if (req.method === "POST" && req.url === "/scan") {
+      const ip = req.socket.remoteAddress ?? "unknown";
+
+      if (isRateLimited(ip)) {
+        jsonError(res, 429, "rate limit exceeded — max 60 requests per minute");
+        return;
+      }
+
+      const contentLength = parseInt(req.headers["content-length"] ?? "0", 10);
+      if (contentLength > MAX_BODY_BYTES) {
+        jsonError(res, 413, "request body too large — max 512 KB");
+        return;
+      }
+
       const chunks: Buffer[] = [];
-      req.on("data", (chunk) => chunks.push(chunk as Buffer));
+      let received = 0;
+      let timedOut = false;
+
+      const timer = setTimeout(() => {
+        timedOut = true;
+        req.destroy();
+        jsonError(res, 408, "request timeout");
+      }, BODY_TIMEOUT_MS);
+
+      req.on("data", (chunk: Buffer) => {
+        received += chunk.length;
+        if (received > MAX_BODY_BYTES) {
+          clearTimeout(timer);
+          req.destroy();
+          jsonError(res, 413, "request body too large — max 512 KB");
+          return;
+        }
+        chunks.push(chunk);
+      });
+
       req.on("end", () => {
+        clearTimeout(timer);
+        if (timedOut) return;
         try {
           const body = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as { content?: string };
           const content = body.content ?? "";
@@ -155,10 +211,14 @@ export async function runWeb(port: number) {
           res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
           res.end(JSON.stringify(result));
         } catch {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "invalid request body" }));
+          jsonError(res, 400, "invalid JSON body");
         }
       });
+
+      req.on("error", () => {
+        clearTimeout(timer);
+      });
+
       return;
     }
 

@@ -23,6 +23,27 @@ private_domains:
   # - "dev.yourcompany.io"
   # - "staging.yourcompany.com"
 
+# 自訂規則（使用正則表達式，大小寫不敏感）
+# severity 可填 HIGH / MEDIUM / LOW，不填預設 HIGH
+# pattern 長度上限 200 字元；危險的 ReDoS pattern 會被自動略過並顯示警告
+custom_rules:
+# 取消下方範例的註解來啟用自訂規則，例如：
+# - description: "員工編號"
+#   pattern: "\\bEMP-\\d{6}\\b"
+#   severity: HIGH
+#
+# - description: "台灣護照號碼"
+#   pattern: "\\b[A-Z]{1,2}[0-9]{7,9}\\b"
+#   severity: HIGH
+#
+# - description: "信用卡號（Visa / Mastercard）"
+#   pattern: "\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14})\\b"
+#   severity: HIGH
+#
+# - description: "Jira 工單編號"
+#   pattern: "\\b[A-Z]{2,10}-\\d{1,6}\\b"
+#   severity: LOW
+
 # 掃描設定
 settings:
   # 要掃描的最大字元數（超過會截斷，避免掃描太久）

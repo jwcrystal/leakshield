@@ -119,7 +119,9 @@ export const BUILTIN_RULES: Rule[] = [
     type: "PII_EMAIL",
     severity: "MEDIUM",
     description: "Email 地址",
-    pattern: /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g,
+    // Negative lookbehind prevents matching URL credentials (user:password123@host)
+    // by requiring the match to start at a non-alphanumeric, non-colon boundary.
+    pattern: /(?<![a-zA-Z0-9:_])[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g,
   },
   {
     type: "PII_PHONE_TW",

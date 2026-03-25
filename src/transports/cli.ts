@@ -6,6 +6,7 @@ import { loadConfig } from "../config/loader.js";
 import { scanText, redactText } from "../scanner/engine.js";
 import { collectFiles, runWithConcurrency } from "../utils/files.js";
 import { validateCliScanPath } from "../utils/path-security.js";
+import { t } from "../i18n/index.js";
 
 export { validateCliScanPath };
 
@@ -24,8 +25,13 @@ export function filterBySeverity(result: ScanResult, min: MinSeverity): ScanResu
   const highCount = findings.filter((f) => f.severity === "HIGH").length;
   const medCount = findings.filter((f) => f.severity === "MEDIUM").length;
   const summary = safe
-    ? "✅ 未偵測到敏感內容，可以安全傳送。"
-    : `🚨 發現 ${findings.length} 個潛在敏感項目（HIGH: ${highCount}, MEDIUM: ${medCount}, LOW: ${findings.length - highCount - medCount}）`;
+    ? t("scan.safe_summary")
+    : t("scan.unsafe_summary", {
+        count: findings.length,
+        high: highCount,
+        med: medCount,
+        low: findings.length - highCount - medCount,
+      });
   return { ...result, findings, total_findings: findings.length, safe, summary };
 }
 
@@ -33,7 +39,7 @@ export function filterBySeverity(result: ScanResult, min: MinSeverity): ScanResu
 
 export function printCliResult(result: ScanResult, label: string) {
   console.log("");
-  console.log(chalk.bold(`📋 掃描目標：${label}`));
+  console.log(chalk.bold(t("cli.scan_target", { label })));
   console.log("─".repeat(60));
 
   if (result.safe) {
@@ -53,23 +59,23 @@ export function printCliResult(result: ScanResult, label: string) {
       const color =
         severity === "HIGH" ? chalk.red : severity === "MEDIUM" ? chalk.yellow : chalk.gray;
 
-      console.log(color(`\n  [${severity}] ${type} — ${items.length} 個命中`));
+      console.log(color(`\n  [${severity}] ${type} — ${t("cli.hits", { count: items.length })}`));
       for (const item of items.slice(0, 5)) {
-        const loc = item.line ? chalk.dim(` (第 ${item.line} 行, 欄 ${item.column})`) : "";
+        const loc = item.line
+          ? chalk.dim(t("cli.location", { line: item.line, col: item.column ?? 0 }))
+          : "";
         console.log(`    • ${item.description}${loc}`);
-        console.log(chalk.dim(`      預覽：${item.preview}`));
+        console.log(chalk.dim(t("cli.preview", { preview: item.preview })));
       }
       if (items.length > 5) {
-        console.log(chalk.dim(`    … 還有 ${items.length - 5} 個相同類型`));
+        console.log(chalk.dim(t("cli.more_of_type", { count: items.length - 5 })));
       }
     }
   }
 
   console.log("");
   console.log(
-    result.safe
-      ? chalk.green("💡 " + result.recommendation)
-      : chalk.red("⚠️  " + result.recommendation)
+    result.safe ? chalk.green("💡 " + result.recommendation) : chalk.red("⚠️  " + result.recommendation)
   );
   console.log("─".repeat(60));
   console.log("");
@@ -117,7 +123,7 @@ export async function runCli() {
     } else if (fileIdx !== -1 && args[fileIdx + 1]) {
       const filePath = path.resolve(args[fileIdx + 1]);
       if (!fs.existsSync(filePath)) {
-        console.error(chalk.red(`❌ 找不到檔案：${filePath}`));
+        console.error(chalk.red(t("cli.error_file_not_found", { path: filePath })));
         process.exit(2);
       }
       inputText = fs.readFileSync(filePath, "utf-8");
@@ -130,7 +136,7 @@ export async function runCli() {
     }
 
     if (inputText === null) {
-      console.error(chalk.red("❌ --redact 需搭配 --text、--file 或 --stdin"));
+      console.error(chalk.red(t("cli.error_redact_no_input")));
       process.exit(2);
     }
 
@@ -138,14 +144,16 @@ export async function runCli() {
 
     if (dryRun) {
       // Dry-run: show preview only, do not output redacted text
-      console.error(chalk.bold(`\n[DRY-RUN] Would redact ${result.total_findings} finding(s) in ${label}:`));
+      console.error(chalk.bold(t("cli.dryrun_header", { count: result.total_findings, label })));
       if (result.total_findings === 0) {
-        console.error(chalk.green("  ✅ No sensitive content detected, nothing to redact."));
+        console.error(chalk.green(t("cli.dryrun_safe")));
       } else {
         for (const f of result.findings) {
-          const loc = f.line ? chalk.dim(` line ${f.line}, col ${f.column}`) : "";
+          const loc = f.line
+            ? chalk.dim(t("cli.dryrun_location", { line: f.line, col: f.column ?? 0 }))
+            : "";
           console.error(`  ${chalk.yellow(f.type)}${loc} — ${f.description}`);
-          console.error(chalk.dim(`    preview: ${f.preview} → [REDACTED_${f.type}]`));
+          console.error(chalk.dim(t("cli.dryrun_preview", { preview: f.preview, type: f.type })));
         }
       }
       process.exit(result.total_findings > 0 ? 1 : 0);
@@ -158,11 +166,11 @@ export async function runCli() {
       const outPath = outIdx !== -1 ? args[outIdx + 1] : undefined;
       if (outPath) {
         fs.writeFileSync(path.resolve(outPath), result.redacted, "utf-8");
-        console.error(chalk.green(`✅ Redacted content written to: ${path.resolve(outPath)}`));
+        console.error(chalk.green(t("cli.redact_written", { path: path.resolve(outPath) })));
       } else {
         process.stdout.write(result.redacted);
       }
-      console.error(chalk.dim(`\n[sensitive-guard] ${result.summary}`));
+      console.error(chalk.dim("\n" + t("cli.redact_footer", { summary: result.summary })));
     }
     process.exit(0);
   }
@@ -173,23 +181,23 @@ export async function runCli() {
     try {
       dirPath = validateCliScanPath(process.cwd(), args[dirIdx + 1], allowOutside);
     } catch (e) {
-      console.error(chalk.red(`❌ ${e instanceof Error ? e.message : String(e)}`));
+      console.error(chalk.red(t("cli.error_path", { error: e instanceof Error ? e.message : String(e) })));
       process.exit(2);
     }
     if (!fs.existsSync(dirPath)) {
-      console.error(chalk.red(`❌ 找不到目錄：${dirPath}`));
+      console.error(chalk.red(t("cli.error_dir_not_found", { path: dirPath })));
       process.exit(2);
     }
     const extensions =
       extIdx !== -1 ? args.slice(extIdx + 1).filter((a) => a.startsWith(".")) : undefined;
 
     if (format === "text") {
-      console.log(chalk.bold(`\n🔍 掃描目錄：${dirPath}`));
-      if (extensions) console.log(chalk.dim(`   副檔名篩選：${extensions.join(", ")}`));
+      console.log(chalk.bold(t("cli.scan_dir", { path: dirPath })));
+      if (extensions) console.log(chalk.dim(t("cli.ext_filter", { exts: extensions.join(", ") })));
     }
 
     const files = collectFiles(dirPath, extensions, 200);
-    if (format === "text") console.log(chalk.dim(`   找到 ${files.length} 個檔案\n`));
+    if (format === "text") console.log(chalk.dim(t("cli.found_files", { count: files.length })));
 
     const jsonResults: object[] = [];
     let anyUnsafe = false;
@@ -221,35 +229,35 @@ export async function runCli() {
     }
 
     if (skippedFiles > 0 && format === "text") {
-      console.log(chalk.dim(`   跳過 ${skippedFiles} 個無法讀取的檔案\n`));
+      console.log(chalk.dim(t("cli.skipped_files", { count: skippedFiles })));
     }
 
     if (format === "json") {
       console.log(JSON.stringify({ dir: dirPath, scanned_files: files.length, skipped_files: skippedFiles, unsafe_files: jsonResults.length, results: jsonResults }, null, 2));
     } else if (!anyUnsafe) {
-      console.log(chalk.green(`✅ 掃描完成，${files.length} 個檔案均未發現敏感內容。\n`));
+      console.log(chalk.green(t("cli.dir_complete", { count: files.length })));
     }
     process.exit(anyUnsafe ? 1 : 0);
   }
 
-  // --text 模式
+  // --text mode
   if (textIdx !== -1 && args[textIdx + 1]) {
     const result = scanText(args[textIdx + 1], config);
-    const filtered = output(result, "(直接輸入文字)");
+    const filtered = output(result, t("cli.inline_label"));
     process.exit(filtered.safe ? 0 : 1);
   }
 
-  // --file 模式
+  // --file mode
   if (fileIdx !== -1 && args[fileIdx + 1]) {
     let filePath: string;
     try {
       filePath = validateCliScanPath(process.cwd(), args[fileIdx + 1], allowOutside);
     } catch (e) {
-      console.error(chalk.red(`❌ ${e instanceof Error ? e.message : String(e)}`));
+      console.error(chalk.red(t("cli.error_path", { error: e instanceof Error ? e.message : String(e) })));
       process.exit(2);
     }
     if (!fs.existsSync(filePath)) {
-      console.error(chalk.red(`❌ 找不到檔案：${filePath}`));
+      console.error(chalk.red(t("cli.error_file_not_found", { path: filePath })));
       process.exit(2);
     }
     const result = scanText(fs.readFileSync(filePath, "utf-8"), config);
@@ -266,31 +274,31 @@ export async function runCli() {
     process.exit(filtered.safe ? 0 : 1);
   }
 
-  // 無輸入 → 顯示用法
-  console.log(chalk.bold("\n🛡️  sensitive-guard — 敏感內容守門員\n"));
-  console.log("用法：");
-  console.log("  npm run scan -- --text '你的內容'");
-  console.log("  npm run scan -- --file ./path/to/file.ts");
-  console.log("  npm run scan -- --dir ./src");
-  console.log("  npm run scan -- --dir ./src --ext .ts .env .json");
-  console.log("  cat file.ts | npm run scan -- --stdin");
+  // No input → show usage
+  console.log(chalk.bold(t("cli.usage_title")));
+  console.log(t("cli.usage_heading"));
+  console.log(t("cli.usage_text"));
+  console.log(t("cli.usage_file"));
+  console.log(t("cli.usage_dir"));
+  console.log(t("cli.usage_dir_ext"));
+  console.log(t("cli.usage_stdin"));
   console.log("");
-  console.log("脫敏模式：");
-  console.log("  npm run scan -- --redact --text '你的內容'");
-  console.log("  npm run scan -- --redact --file ./secret.env");
-  console.log("  npm run scan -- --redact --file ./secret.env --out ./redacted.env");
-  console.log("  cat file.ts | npm run scan -- --redact --stdin");
-  console.log("  npm run scan -- --redact --dry-run --file ./secret.env   # 只預覽，不輸出");
+  console.log(t("cli.usage_redact_heading"));
+  console.log(t("cli.usage_redact_text"));
+  console.log(t("cli.usage_redact_file"));
+  console.log(t("cli.usage_redact_out"));
+  console.log(t("cli.usage_redact_stdin"));
+  console.log(t("cli.usage_redact_dryrun"));
   console.log("");
-  console.log("選項：");
-  console.log("  --format json          輸出 JSON（適合 CI/CD）");
-  console.log("  --min-severity high    只回報 HIGH（或 medium / low）");
-  console.log("  --redact               脫敏模式（輸出替換後文字）");
-  console.log("  --dry-run              搭配 --redact，只預覽不輸出");
-  console.log("  --out <path>           搭配 --redact --file，指定輸出路徑");
-  console.log("  --allow-outside        允許掃描工作目錄以外的路徑（預設禁止）");
+  console.log(t("cli.usage_options_heading"));
+  console.log(t("cli.usage_opt_format"));
+  console.log(t("cli.usage_opt_severity"));
+  console.log(t("cli.usage_opt_redact"));
+  console.log(t("cli.usage_opt_dryrun"));
+  console.log(t("cli.usage_opt_out"));
+  console.log(t("cli.usage_opt_outside"));
   console.log("");
-  console.log("MCP Server 模式（由 OpenCode 自動啟動）：");
-  console.log("  node dist/index.js");
+  console.log(t("cli.usage_mcp_heading"));
+  console.log(t("cli.usage_mcp"));
   console.log("");
 }

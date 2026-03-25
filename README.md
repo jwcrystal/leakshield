@@ -309,6 +309,29 @@ Values exceeding these limits will cause `loadConfig()` to throw a Zod validatio
 
 All secret previews in scan results are **fully masked** as `****`, regardless of the secret's length. No prefix or suffix characters from the original value are preserved. This eliminates partial secret exposure in logs, CI output, and MCP responses.
 
+## Internationalization (i18n)
+
+CLI output language is controlled by the `SENSITIVE_GUARD_LANG` environment variable.
+
+| Value | Language |
+|-------|----------|
+| `en` (default) | English |
+| `zh-TW` or `zh` | Traditional Chinese |
+
+```bash
+# English output (default)
+npm run scan -- --text "your content"
+
+# Traditional Chinese output
+SENSITIVE_GUARD_LANG=zh-TW npm run scan -- --text "你的內容"
+```
+
+You can also set it persistently in your shell profile:
+
+```bash
+export SENSITIVE_GUARD_LANG=zh-TW
+```
+
 ## Notes
 
 - This tool performs **static pattern matching** and cannot guarantee 100% coverage

@@ -2,6 +2,7 @@ import type { GuardConfig, Finding, ScanResult, RedactResult, Rule } from "../ty
 import { BUILTIN_RULES } from "../rules/builtin.js";
 import { buildDynamicRules } from "../rules/dynamic.js";
 import { redact, getLineCol, getIgnoredLines } from "./utils.js";
+import { t } from "../i18n/index.js";
 
 // Dynamic rules are derived from config; cache per config object so they are
 // rebuilt only when the config reference changes (e.g. after reload_config).
@@ -56,12 +57,17 @@ export function scanText(text: string, config: GuardConfig): ScanResult {
   const medCount = findings.filter((f) => f.severity === "MEDIUM").length;
 
   const summary = safe
-    ? "✅ 未偵測到敏感內容，可以安全傳送。"
-    : `🚨 發現 ${findings.length} 個潛在敏感項目（HIGH: ${highCount}, MEDIUM: ${medCount}, LOW: ${findings.length - highCount - medCount}）`;
+    ? t("scan.safe_summary")
+    : t("scan.unsafe_summary", {
+        count: findings.length,
+        high: highCount,
+        med: medCount,
+        low: findings.length - highCount - medCount,
+      });
 
   const recommendation = safe
-    ? "內容看起來安全，但仍請確認沒有業務邏輯上的機密資訊。"
-    : "⛔ 建議先處理上述敏感項目後再傳送給 AI 服務。請用假資料、佔位符或移除敏感欄位後再重試。";
+    ? t("scan.safe_recommendation")
+    : t("scan.unsafe_recommendation");
 
   return { safe, total_findings: findings.length, findings, summary, recommendation };
 }
@@ -97,8 +103,8 @@ export function redactText(text: string, config: GuardConfig): RedactResult {
 
   const { findings, total_findings } = scanText(text, config);
   const summary = total_findings === 0
-    ? "✅ 未偵測到敏感內容，無需脫敏。"
-    : `🔒 已脫敏 ${total_findings} 個敏感項目。`;
+    ? t("redact.safe_summary")
+    : t("redact.unsafe_summary", { count: total_findings });
 
   return { redacted, findings, total_findings, summary };
 }

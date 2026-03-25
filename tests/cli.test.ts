@@ -1,8 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { filterBySeverity, validateCliScanPath } from "../src/transports/cli.js";
+import {
+  filterBySeverity,
+  validateCliScanPath,
+  formatCliDecision,
+  buildDecisionJsonOutput,
+} from "../src/transports/cli.js";
 import type { ScanResult } from "../src/types.js";
+import type { GuardDecisionResult } from "../src/decision/model.js";
 
-// 建立假的 ScanResult，包含三種嚴重度的 findings
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
 function makeMockResult(): ScanResult {
   return {
     safe: false,
@@ -15,6 +22,19 @@ function makeMockResult(): ScanResult {
     summary: "🚨 發現 3 個潛在敏感項目",
     recommendation: "⛔ 建議先處理",
   };
+}
+
+function makeDecision(decision: GuardDecisionResult["decision"], overrides?: Partial<GuardDecisionResult>): GuardDecisionResult {
+  const base: GuardDecisionResult = {
+    decision,
+    riskLevel: decision === "ALLOW" ? "LOW" : decision === "WARN" ? "MEDIUM" : "HIGH",
+    findings: [
+      { type: "API_KEY", severity: "HIGH", preview: "sk-a****de", description: "OpenAI API Key" },
+    ],
+    originalContent: "some secret content here",
+    ...overrides,
+  };
+  return base;
 }
 
 // ─── validateCliScanPath() ─────────────────────────────────────────────────────
@@ -91,5 +111,174 @@ describe("filterBySeverity()", () => {
       summary: "✅", recommendation: "安全",
     };
     expect(filterBySeverity(safe, "high").safe).toBe(true);
+  });
+});
+
+// ─── formatCliDecision() ─────────────────────────────────────────────────────
+
+describe("formatCliDecision()", () => {
+  it("returns lines (array of strings) for ALLOW decision", () => {
+    const decision = makeDecision("ALLOW", {
+      findings: [],
+      riskLevel: "LOW",
+    });
+    const lines = formatCliDecision(decision, "(inline text)");
+    expect(Array.isArray(lines)).toBe(true);
+    expect(lines.length).toBeGreaterThan(0);
+    // ALLOW output should contain the scan target label
+    const joined = lines.join("\n");
+    expect(joined).toContain("(inline text)");
+    // ALLOW should not contain confirm actions
+    expect(joined).not.toContain("cancel");
+    expect(joined).not.toContain("send redacted");
+    expect(joined).not.toContain("send original anyway");
+  });
+
+  it("returns lines containing reminder for WARN decision", () => {
+    const decision = makeDecision("WARN", {
+      riskLevel: "MEDIUM",
+      findings: [
+        { type: "PRIVATE_DOMAIN", severity: "LOW", preview: "****", description: "Private domain" },
+      ],
+    });
+    const lines = formatCliDecision(decision, "my-file.ts");
+    expect(Array.isArray(lines)).toBe(true);
+    const joined = lines.join("\n");
+    expect(joined).toContain("my-file.ts");
+    // WARN should show a reminder, not confirm actions
+    expect(joined).not.toContain("cancel");
+    expect(joined).not.toContain("send redacted");
+  });
+
+  it("returns lines with confirm card for CONFIRM decision", () => {
+    const decision = makeDecision("CONFIRM", {
+      riskLevel: "CRITICAL",
+      recommendedAction: "BLOCK",
+      findings: [
+        { type: "API_KEY", severity: "HIGH", preview: "sk-a****de", description: "OpenAI API Key" },
+      ],
+    });
+    const lines = formatCliDecision(decision, "config.ts");
+    expect(Array.isArray(lines)).toBe(true);
+    const joined = lines.join("\n");
+    expect(joined).toContain("config.ts");
+    // CONFIRM must present the three action options
+    expect(joined).toContain("cancel");
+    expect(joined).toContain("send redacted");
+    expect(joined).toContain("send original anyway");
+  });
+
+  it("CONFIRM with REVIEW action includes the action label", () => {
+    const decision = makeDecision("CONFIRM", {
+      riskLevel: "HIGH",
+      recommendedAction: "REVIEW",
+      findings: [
+        { type: "PII_EMAIL", severity: "MEDIUM", preview: "****", description: "Email" },
+      ],
+    });
+    const lines = formatCliDecision(decision, "data.csv");
+    const joined = lines.join("\n");
+    expect(joined).toContain("REVIEW");
+  });
+
+  it("CONFIRM with BLOCK action includes the action label", () => {
+    const decision = makeDecision("CONFIRM", {
+      riskLevel: "CRITICAL",
+      recommendedAction: "BLOCK",
+      findings: [
+        { type: "API_KEY", severity: "HIGH", preview: "****", description: "API Key" },
+      ],
+    });
+    const lines = formatCliDecision(decision, "config.ts");
+    const joined = lines.join("\n");
+    expect(joined).toContain("BLOCK");
+  });
+
+  it("includes finding descriptions in output when findings exist", () => {
+    const decision = makeDecision("WARN", {
+      riskLevel: "MEDIUM",
+      findings: [
+        { type: "PRIVATE_DOMAIN", severity: "LOW", preview: "****", description: "Private domain reference" },
+      ],
+    });
+    const lines = formatCliDecision(decision, "doc.md");
+    const joined = lines.join("\n");
+    expect(joined).toContain("Private domain reference");
+  });
+
+  it("does not include originalContent in any output lines", () => {
+    const decision = makeDecision("CONFIRM", {
+      originalContent: "sk-proj-12345-secret-key-value",
+    });
+    const lines = formatCliDecision(decision, "secret.env");
+    const joined = lines.join("\n");
+    expect(joined).not.toContain("sk-proj-12345-secret-key-value");
+  });
+});
+
+// ─── buildDecisionJsonOutput() ───────────────────────────────────────────────
+
+describe("buildDecisionJsonOutput()", () => {
+  it("returns a JSON-stringifiable object with decision-oriented fields", () => {
+    const decision = makeDecision("ALLOW", { findings: [], riskLevel: "LOW" });
+    const obj = buildDecisionJsonOutput(decision, "(inline text)");
+    const parsed = JSON.parse(JSON.stringify(obj));
+    expect(parsed.label).toBe("(inline text)");
+    expect(parsed.decision).toBe("ALLOW");
+    expect(parsed.riskLevel).toBe("LOW");
+    expect(parsed.findings).toEqual([]);
+  });
+
+  it("never includes originalContent in JSON output", () => {
+    const decision = makeDecision("CONFIRM", {
+      originalContent: "super-secret-password-12345",
+    });
+    const obj = buildDecisionJsonOutput(decision, "config.ts");
+    const json = JSON.stringify(obj);
+    expect(json).not.toContain("super-secret-password-12345");
+  });
+
+  it("includes safePreview when available (CONFIRM decision)", () => {
+    const decision = makeDecision("CONFIRM", {
+      safePreview: "some [REDACTED_API_KEY] content",
+    });
+    const obj = buildDecisionJsonOutput(decision, "file.ts");
+    expect(obj.safePreview).toBe("some [REDACTED_API_KEY] content");
+  });
+
+  it("includes redactedContent when available (CONFIRM decision)", () => {
+    const decision = makeDecision("CONFIRM", {
+      redactedContent: "const key = [REDACTED_API_KEY];",
+    });
+    const obj = buildDecisionJsonOutput(decision, "file.ts");
+    expect(obj.redactedContent).toBe("const key = [REDACTED_API_KEY];");
+  });
+
+  it("includes recommendedAction for CONFIRM decisions", () => {
+    const decision = makeDecision("CONFIRM", {
+      recommendedAction: "BLOCK",
+    });
+    const obj = buildDecisionJsonOutput(decision, "file.ts");
+    expect(obj.recommendedAction).toBe("BLOCK");
+  });
+
+  it("omits recommendedAction for WARN decisions", () => {
+    const decision = makeDecision("WARN", { riskLevel: "MEDIUM" });
+    const obj = buildDecisionJsonOutput(decision, "file.ts");
+    expect(obj.recommendedAction).toBeUndefined();
+  });
+
+  it("findings have only transport-safe fields (no match_start, match_end, match_text)", () => {
+    const decision = makeDecision("CONFIRM", {
+      findings: [
+        { type: "API_KEY", severity: "HIGH", preview: "****", description: "API Key" },
+      ],
+    });
+    const obj = buildDecisionJsonOutput(decision, "file.ts");
+    for (const f of obj.findings) {
+      expect(f).not.toHaveProperty("match_start");
+      expect(f).not.toHaveProperty("match_end");
+      expect(f).not.toHaveProperty("match_text");
+    }
   });
 });

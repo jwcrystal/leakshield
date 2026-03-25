@@ -43,6 +43,14 @@ export const en = {
   // cli — inline label
   "cli.inline_label": "(inline text)",
 
+  // cli — decision-aware output
+  "cli.decision_warn_header": "Reminder — {risk} risk: {count} sensitive item(s) detected",
+  "cli.decision_confirm_header": "Warning — {risk} risk: {count} sensitive item(s) detected (recommended: {action})",
+  "cli.confirm_actions_header": "Choose an action:",
+  "cli.confirm_action_cancel": "cancel — do not send this content",
+  "cli.confirm_action_redacted": "send redacted — use sanitized version",
+  "cli.confirm_action_original": "send original anyway — proceed at your own risk",
+
   // cli — usage
   "cli.usage_title": "\n🛡️  sensitive-guard — Sensitive content guard\n",
   "cli.usage_heading": "Usage:",

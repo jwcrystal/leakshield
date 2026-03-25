@@ -5,6 +5,8 @@ import type { FindingType, Finding, ScanResult } from "../types.js";
 import { loadConfig } from "../config/loader.js";
 import { scanText, redactText } from "../scanner/engine.js";
 import { sanitizeScanResultForExport, sanitizeRedactResultForExport } from "../decision/redaction.js";
+import { toDecisionResult } from "../decision/model.js";
+import type { GuardDecisionResult, GuardDecisionFinding } from "../decision/model.js";
 import { collectFiles, runWithConcurrency } from "../utils/files.js";
 import { validateCliScanPath } from "../utils/path-security.js";
 import { t } from "../i18n/index.js";
@@ -34,6 +36,128 @@ export function filterBySeverity(result: ScanResult, min: MinSeverity): ScanResu
         low: findings.length - highCount - medCount,
       });
   return { ...result, findings, total_findings: findings.length, safe, summary };
+}
+
+// ─── Decision-aware CLI formatting ──────────────────────────────────────────
+
+const SEPARATOR = "─".repeat(60);
+
+/**
+ * Pure function that formats a GuardDecisionResult into CLI output lines.
+ *
+ * Does NOT write to console — returns an array of strings so callers can
+ * test formatting without capturing stdout.
+ *
+ * | decision | Behaviour                                   |
+ * |----------|---------------------------------------------|
+ * | ALLOW    | Clean summary, continue normally            |
+ * | WARN     | Reminder with findings, then continue       |
+ * | CONFIRM  | Warning card with actions (non-interactive) |
+ */
+export function formatCliDecision(
+  decision: GuardDecisionResult,
+  label: string,
+): string[] {
+  const lines: string[] = [];
+
+  lines.push("");
+  lines.push(chalk.bold(t("cli.scan_target", { label })));
+  lines.push(SEPARATOR);
+
+  if (decision.decision === "ALLOW") {
+    lines.push(chalk.green(t("scan.safe_summary")));
+  } else {
+    // WARN or CONFIRM — emit findings
+    const findingCount = decision.findings.length;
+    const riskLabel = `[${decision.riskLevel}]`;
+
+    if (decision.decision === "WARN") {
+      lines.push(chalk.yellow(`⚠️  ${t("cli.decision_warn_header", { risk: riskLabel, count: findingCount })}`));
+    } else {
+      lines.push(chalk.red(`🚨 ${t("cli.decision_confirm_header", { risk: riskLabel, count: findingCount, action: decision.recommendedAction ?? "REVIEW" })}`));
+    }
+
+    lines.push("");
+
+    // Group findings by severity
+    const bySeverity: Partial<Record<string, GuardDecisionFinding[]>> = {};
+    for (const f of decision.findings) {
+      if (!bySeverity[f.severity]) bySeverity[f.severity] = [];
+      bySeverity[f.severity]!.push(f);
+    }
+
+    for (const [severity, items] of Object.entries(bySeverity)) {
+      if (!items) continue;
+      const color =
+        severity === "HIGH" ? chalk.red : severity === "MEDIUM" ? chalk.yellow : chalk.gray;
+      lines.push(color(`  [${severity}] ${t("cli.hits", { count: items.length })}`));
+      for (const item of items.slice(0, 5)) {
+        lines.push(`    • ${item.description}`);
+        lines.push(chalk.dim(t("cli.preview", { preview: item.preview })));
+      }
+      if (items.length > 5) {
+        lines.push(chalk.dim(t("cli.more_of_type", { count: items.length - 5 })));
+      }
+    }
+
+    // CONFIRM card: present action options
+    if (decision.decision === "CONFIRM") {
+      lines.push("");
+      lines.push(chalk.red.bold(t("cli.confirm_actions_header")));
+      lines.push(chalk.yellow(`  1. ${t("cli.confirm_action_cancel")}`));
+      lines.push(chalk.green(`  2. ${t("cli.confirm_action_redacted")}`));
+      lines.push(chalk.dim(`  3. ${t("cli.confirm_action_original")}`));
+    }
+  }
+
+  lines.push("");
+  lines.push(SEPARATOR);
+  lines.push("");
+
+  return lines;
+}
+
+/**
+ * Build a decision-oriented JSON object safe for CLI/CI export.
+ *
+ * Strips `originalContent` and ensures findings carry only transport-safe fields.
+ */
+export function buildDecisionJsonOutput(
+  decision: GuardDecisionResult,
+  label: string,
+): Record<string, unknown> {
+  const { originalContent: _oc, ...safeDecision } = decision;
+
+  return {
+    label,
+    decision: safeDecision.decision,
+    riskLevel: safeDecision.riskLevel,
+    findings: safeDecision.findings.map((f) => ({
+      type: f.type,
+      severity: f.severity,
+      description: f.description,
+      preview: f.preview,
+    })),
+    ...(safeDecision.recommendedAction !== undefined
+      ? { recommendedAction: safeDecision.recommendedAction }
+      : {}),
+    ...(safeDecision.safePreview !== undefined
+      ? { safePreview: safeDecision.safePreview }
+      : {}),
+    ...(safeDecision.redactedContent !== undefined
+      ? { redactedContent: safeDecision.redactedContent }
+      : {}),
+  };
+}
+
+/**
+ * Print decision-aware output to console (text mode).
+ */
+function printCliDecision(decision: GuardDecisionResult, label: string): void {
+  const lines = formatCliDecision(decision, label);
+  for (const line of lines) {
+    console.log(line);
+  }
 }
 
 // ─── Text output ─────────────────────────────────────────────────────────────
@@ -104,14 +228,15 @@ export async function runCli() {
     (["high", "medium", "low"].includes(args[sevIdx + 1]) ? args[sevIdx + 1] : "low") as MinSeverity;
   const allowOutside = args.includes("--allow-outside");
 
-  function output(result: ScanResult, label: string) {
+  function output(result: ScanResult, label: string, originalContent: string) {
     const filtered = filterBySeverity(result, minSeverity);
+    const decision = toDecisionResult(filtered, originalContent, config);
     if (format === "json") {
-      console.log(JSON.stringify({ label, ...sanitizeScanResultForExport(filtered) }, null, 2));
+      console.log(JSON.stringify(buildDecisionJsonOutput(decision, label), null, 2));
     } else {
-      printCliResult(filtered, label);
+      printCliDecision(decision, label);
     }
-    return filtered;
+    return { filtered, decision };
   }
 
   // --redact / --dry-run mode (supports --text, --file, --stdin)
@@ -221,10 +346,11 @@ export async function runCli() {
       const filtered = filterBySeverity(result, minSeverity);
       if (!filtered.safe) {
         anyUnsafe = true;
+        const decision = toDecisionResult(filtered, item.content, config);
         if (format === "json") {
-          jsonResults.push({ file: item.file, ...sanitizeScanResultForExport(filtered) });
+          jsonResults.push({ file: item.file, ...buildDecisionJsonOutput(decision, item.file) });
         } else {
-          printCliResult(filtered, item.file);
+          printCliDecision(decision, item.file);
         }
       }
     }
@@ -243,9 +369,10 @@ export async function runCli() {
 
   // --text mode
   if (textIdx !== -1 && args[textIdx + 1]) {
-    const result = scanText(args[textIdx + 1], config);
-    const filtered = output(result, t("cli.inline_label"));
-    process.exit(filtered.safe ? 0 : 1);
+    const originalContent = args[textIdx + 1];
+    const result = scanText(originalContent, config);
+    const { decision } = output(result, t("cli.inline_label"), originalContent);
+    process.exit(decision.decision === "ALLOW" ? 0 : 1);
   }
 
   // --file mode
@@ -261,18 +388,20 @@ export async function runCli() {
       console.error(chalk.red(t("cli.error_file_not_found", { path: filePath })));
       process.exit(2);
     }
-    const result = scanText(fs.readFileSync(filePath, "utf-8"), config);
-    const filtered = output(result, filePath);
-    process.exit(filtered.safe ? 0 : 1);
+    const originalContent = fs.readFileSync(filePath, "utf-8");
+    const result = scanText(originalContent, config);
+    const { decision } = output(result, filePath, originalContent);
+    process.exit(decision.decision === "ALLOW" ? 0 : 1);
   }
 
   // stdin 模式
   if (stdinMode || !process.stdin.isTTY) {
     const chunks: Buffer[] = [];
     for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
-    const result = scanText(Buffer.concat(chunks).toString("utf-8"), config);
-    const filtered = output(result, "(stdin)");
-    process.exit(filtered.safe ? 0 : 1);
+    const originalContent = Buffer.concat(chunks).toString("utf-8");
+    const result = scanText(originalContent, config);
+    const { decision } = output(result, "(stdin)", originalContent);
+    process.exit(decision.decision === "ALLOW" ? 0 : 1);
   }
 
   // No input → show usage

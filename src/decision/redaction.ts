@@ -125,7 +125,7 @@ function extractSpans(findings: readonly Finding[]): Span[] | undefined {
 
 /**
  * Sort spans by start position ascending, then merge overlapping/adjacent spans.
- * When spans overlap, the first span (by type priority) wins.
+ * When spans overlap, the earlier-starting span wins; for equal starts, the longer span absorbs the shorter one.
  */
 function sortAndMergeSpans(spans: Span[]): Span[] {
   if (spans.length === 0) return [];

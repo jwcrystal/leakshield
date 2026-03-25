@@ -31,7 +31,7 @@
 ## 安裝
 
 ```bash
-git clone <此 repo>
+git clone https://github.com/jwcrystal/sensitive-guard.git
 cd sensitive-guard
 npm install
 npm run build

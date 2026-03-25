@@ -1,107 +1,109 @@
 # 🛡️ sensitive-guard
 
-**在把程式碼、文件、資料丟給 AI 服務之前，先掃描敏感內容的守門員。**
+> 🌐 English | [繁體中文](./README.zh-TW.md)
 
-支援三種使用模式：
-- **MCP Server**：整合進 OpenCode / Claude Code，AI 讀檔前自動觸發守門
-- **CLI**：手動掃描指定文字、檔案或目錄
-- **Web UI**：瀏覽器介面，貼上內容即可掃描；同時提供 REST API
+**A gatekeeper that scans for sensitive content before you feed code, documents, or data to AI services.**
 
----
-
-## 偵測範圍
-
-| 類型 | 說明 | 嚴重度 |
-|------|------|--------|
-| API Key | OpenAI、Anthropic、Google、AWS | 🔴 HIGH |
-| Secret / Password | 通用密碼賦值、AWS Secret | 🔴 HIGH |
-| Token | GitHub PAT、JWT、Bearer Token | 🔴 HIGH |
-| DB 連線字串 | MongoDB、PostgreSQL、MySQL、Redis 等 | 🔴 HIGH |
-| 台灣身份證字號 | 格式驗證 | 🔴 HIGH |
-| Email 地址 | 所有 email 格式 | 🟡 MEDIUM |
-| 台灣手機號碼 | 09xx-xxx-xxx | 🟡 MEDIUM |
-| 國際電話 | +國碼格式 | 🟢 LOW |
-| NDA 關鍵字 | 自訂（見 config/guard.config.yaml） | 🔴 HIGH |
-| 私有域名 | 自訂（見 config/guard.config.yaml） | 🟡 MEDIUM |
+Three usage modes:
+- **MCP Server**: Integrates with OpenCode / Claude Code — automatically triggers before AI reads any file
+- **CLI**: Manually scan text, files, or directories
+- **Web UI**: Browser interface — paste content and scan instantly; also exposes a REST API
 
 ---
 
-## 安裝
+## Detection Coverage
+
+| Type | Description | Severity |
+|------|-------------|----------|
+| API Key | OpenAI, Anthropic, Google, AWS | 🔴 HIGH |
+| Secret / Password | Generic password assignments, AWS Secret | 🔴 HIGH |
+| Token | GitHub PAT, JWT, Bearer Token | 🔴 HIGH |
+| DB Connection String | MongoDB, PostgreSQL, MySQL, Redis, etc. | 🔴 HIGH |
+| Taiwan National ID | Format validation | 🔴 HIGH |
+| Email Address | All email formats | 🟡 MEDIUM |
+| Taiwan Mobile Number | 09xx-xxx-xxx | 🟡 MEDIUM |
+| International Phone | +country-code format | 🟢 LOW |
+| NDA Keywords | Custom (see `config/guard.config.yaml`) | 🔴 HIGH |
+| Private Domains | Custom (see `config/guard.config.yaml`) | 🟡 MEDIUM |
+
+---
+
+## Installation
 
 ```bash
-git clone <此 repo>
+git clone <this repo>
 cd sensitive-guard
 npm install
 npm run build
 ```
 
-### npm scripts 速查
+### npm Scripts Reference
 
-| 指令 | 說明 |
-|------|------|
-| `npm run build` | 編譯 TypeScript → `dist/` |
-| `npm run dev` | 開發模式（MCP，不需先 build） |
-| `npm run scan` | CLI 掃描（不需先 build） |
-| `npm test` | 執行單元測試 |
+| Command | Description |
+|---------|-------------|
+| `npm run build` | Compile TypeScript → `dist/` |
+| `npm run dev` | Dev mode (MCP, no build needed) |
+| `npm run scan` | CLI scan (no build needed) |
+| `npm test` | Run unit tests |
 
 ---
 
-## 使用方式
+## Usage
 
-### 一、CLI 模式
+### Mode 1: CLI
 
 ```bash
-# 掃描文字
+# Scan text
 npm run cli -- --text 'sk-1234abcd my_password="super_secret"'
 
-# 掃描單一檔案
+# Scan a single file
 npm run cli -- --file ./src/config.ts
 
-# 掃描整個目錄
+# Scan an entire directory
 npm run cli -- --dir ./src
 
-# 只掃描特定副檔名
+# Scan specific file extensions only
 npm run cli -- --dir ./src --ext .ts .env .json
 
-# 從 stdin 讀取
+# Read from stdin
 cat .env | npm run cli -- --stdin
 
-# Build 後的版本
+# Built version
 node dist/index.js --cli --file ./config.ts
 ```
 
-Exit code：`0` = 安全，`1` = 有問題，`2` = 檔案不存在
+Exit codes: `0` = safe, `1` = findings detected, `2` = file not found
 
 ---
 
-### 二、Web UI 模式
+### Mode 2: Web UI
 
-啟動本地 Web 伺服器，在瀏覽器中使用：
+Start a local web server and use it in your browser:
 
 ```bash
-# 預設 port 3000
+# Default port 3000
 npx tsx src/index.ts --web
 
-# 指定 port
+# Custom port
 npx tsx src/index.ts --web --port 3001
 
-# Build 後的版本
+# Built version
 node dist/index.js --web --port 3001
 ```
 
-開啟瀏覽器 `http://localhost:3001`，貼上內容後按「掃描」或 Ctrl+Enter。
+Open `http://localhost:3001` in your browser, paste content, and press **Scan** or `Ctrl+Enter`.
 
 #### REST API
 
-也可直接呼叫 API：
+You can also call the API directly:
 
 ```bash
-# 掃描文字
+# Scan text
 curl -s -X POST http://localhost:3001/scan \
   -H 'Content-Type: application/json' \
   -d '{"content": "sk-proj-abc123 secret_key=test"}' | jq
 
-# 回應格式
+# Response format
 {
   "safe": false,
   "total_findings": 2,
@@ -113,24 +115,24 @@ curl -s -X POST http://localhost:3001/scan \
 }
 ```
 
-| 端點 | 方法 | 說明 |
-|------|------|------|
+| Endpoint | Method | Description |
+|----------|--------|-------------|
 | `/` | GET | Web UI HTML |
-| `/scan` | POST | 掃描 `{ "content": string }`，回傳 JSON |
+| `/scan` | POST | Scan `{ "content": string }`, returns JSON |
 
 ---
 
-### 三、MCP Server 模式（整合進 OpenCode / Claude Code）
+### Mode 3: MCP Server (OpenCode / Claude Code Integration)
 
-#### 步驟 1：Build
+#### Step 1: Build
 
 ```bash
 npm run build
 ```
 
-#### 步驟 2：設定 OpenCode
+#### Step 2: Configure OpenCode
 
-在你的 OpenCode 設定檔（通常是 `~/.config/opencode/config.json` 或 `opencode.json`）加入：
+Add the following to your OpenCode config file (typically `~/.config/opencode/config.json` or `opencode.json`):
 
 ```json
 {
@@ -139,7 +141,7 @@ npm run build
       "sensitive-guard": {
         "type": "local",
         "command": "node",
-        "args": ["/絕對路徑/sensitive-guard/dist/index.js"],
+        "args": ["/absolute/path/to/sensitive-guard/dist/index.js"],
         "env": {}
       }
     }
@@ -147,98 +149,105 @@ npm run build
 }
 ```
 
-> ⚠️ **務必用絕對路徑**，不要用 `~` 或相對路徑。
+> ⚠️ **Always use absolute paths** — do not use `~` or relative paths.
 
-#### 步驟 3：在 OpenCode System Prompt 中加入守門規則
+#### Step 3: Add a Guard Rule to Your System Prompt
 
-在你的 OpenCode system prompt 加入以下指令，讓 AI 在讀取任何檔案或處理你貼上的程式碼前，先呼叫掃描工具：
+Add the following instruction to your OpenCode system prompt so the AI calls the scan tool before reading any file or processing code you provide:
 
 ```
-在你讀取任何本機檔案、或我提供任何程式碼 / 設定檔 / 資料之前，
-請先呼叫 sensitive-guard 的 scan_file 或 scan_text 工具。
-如果掃描結果的 safe 欄位為 false，請立即停止並告訴我哪些內容有問題，
-等待我確認後再繼續。不要自動修改或繼續處理敏感內容。
+Before reading any local file, or processing any code / config / data I provide,
+call sensitive-guard's scan_file or scan_text tool.
+If the scan result's safe field is false, stop immediately and tell me what was found.
+Wait for my confirmation before continuing. Do not auto-fix or proceed with sensitive content.
 ```
 
-#### MCP 工具列表
+For **Claude Code**, add to your `CLAUDE.md`:
 
-| 工具 | 用途 |
-|------|------|
-| `scan_text` | 掃描一段文字（你貼進去的 code / 資料） |
-| `scan_file` | 掃描本機單一檔案 |
-| `scan_dir` | 掃描整個目錄（遞迴，跳過 node_modules / .git） |
-| `reload_config` | 修改 YAML 後重新載入，不用重啟 server |
+```
+Before reading any file, call the sensitive-guard MCP tool (scan_file or scan_text).
+Stop and report if safe is false.
+```
+
+#### MCP Tools
+
+| Tool | Purpose |
+|------|---------|
+| `scan_text` | Scan a text snippet (code / data you paste in) |
+| `scan_file` | Scan a single local file |
+| `scan_dir` | Scan an entire directory (recursive, skips node_modules / .git) |
+| `reload_config` | Reload YAML config without restarting the server |
 
 ---
 
-## 設定檔
+## Configuration
 
-編輯 `config/guard.config.yaml`：
+Edit `config/guard.config.yaml`:
 
 ```yaml
-# NDA 關鍵字（大小寫不敏感）
+# NDA keywords (case-insensitive)
 nda_keywords:
   - "CONFIDENTIAL"
   - "INTERNAL ONLY"
   - "DO NOT SHARE"
   - "NDA"
   - "PROPRIETARY"
-  # 加入你公司的內部關鍵字：
+  # Add your own internal keywords:
   # - "Project Phoenix"
   # - "MyCompany Internal"
 
-# 私有域名
+# Private domains
 private_domains:
   - "internal.mycompany.com"
   # - "dev.yourcompany.io"
 
 settings:
-  max_chars: 200000      # 超過截斷，避免掃太久
+  max_chars: 200000      # Truncate if exceeded to avoid long scans
   show_line_numbers: true
   preview_length: 60
 ```
 
-修改後：
-- **CLI**：下次執行自動載入
-- **MCP Server**：呼叫 `reload_config` 工具，或重啟 server
+After editing:
+- **CLI**: Reloaded automatically on next run
+- **MCP Server**: Call the `reload_config` tool, or restart the server
 
 ---
 
-## 實務使用建議
+## Practical Examples
 
-### 場景一：你要把一個設定檔交給 OpenCode 分析
+### Scenario 1: Asking OpenCode to review a config file
 
 ```
-你（對 OpenCode）：請幫我看看這個 config.ts 有沒有問題
-OpenCode（自動）：[呼叫 scan_file config.ts]
-→ 發現 API_KEY，HIGH severity，第 12 行
-→ 停止並報告給你
-你：把第 12 行換成假 key 後再繼續
+You (to OpenCode): Please review this config.ts for issues
+OpenCode (auto): [calls scan_file config.ts]
+→ API_KEY found, HIGH severity, line 12
+→ Stops and reports to you
+You: Replace line 12 with a dummy key, then continue
 ```
 
-### 場景二：你在 CLI 掃描整個專案再送出
+### Scenario 2: CLI scan before submitting a project
 
 ```bash
 npm run cli -- --dir ./my-project
-# 如果 exit code = 1，表示有問題，先處理再貼給 AI
+# If exit code = 1, there are findings — fix them before sharing with AI
 ```
 
-### 場景三：CI/CD 整合（防止含敏感資訊的 prompt 進入 pipeline）
+### Scenario 3: CI/CD integration (block sensitive prompts from the pipeline)
 
 ```bash
-# 在 CI script 加入
+# Add to your CI script
 node dist/index.js --cli --dir ./prompts
 if [ $? -ne 0 ]; then
-  echo "❌ 偵測到敏感內容，停止 pipeline"
+  echo "❌ Sensitive content detected — stopping pipeline"
   exit 1
 fi
 ```
 
 ---
 
-## 注意事項
+## Notes
 
-- 這個工具是**靜態 pattern 掃描**，無法保證 100% 覆蓋所有情況
-- **高誤報情境**：測試用的假 key（如 `sk-test123456`）、範例程式碼中的佔位符，可能被誤判為真實 key
-- 最終判斷仍需你自己確認，工具的作用是「提醒」而非「保證」
-- NDA 關鍵字請只填真正機密的詞，避免太多誤報影響使用體驗
+- This tool performs **static pattern matching** and cannot guarantee 100% coverage
+- **Common false positives**: test/dummy keys (e.g. `sk-test123456`), placeholder values in example code
+- The tool is meant to **warn**, not guarantee — final judgment is always yours
+- Keep NDA keywords focused on truly confidential terms to avoid excessive false positives

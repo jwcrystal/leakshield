@@ -8,6 +8,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createMcpServer } from "./transports/mcp.js";
 import { runCli } from "./transports/cli.js";
+import { runWeb } from "./transports/web.js";
 
 // Re-export for tests and external consumers
 export type { GuardConfig, Finding, ScanResult, FindingType, Rule } from "./types.js";
@@ -18,9 +19,15 @@ export { scanText } from "./scanner/engine.js";
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
-const isCliMode = process.argv.includes("--cli");
+const args = process.argv;
+const isCliMode = args.includes("--cli");
+const isWebMode = args.includes("--web");
 
-if (isCliMode) {
+if (isWebMode) {
+  const portIdx = args.indexOf("--port");
+  const port = portIdx !== -1 ? parseInt(args[portIdx + 1], 10) || 3000 : 3000;
+  await runWeb(port);
+} else if (isCliMode) {
   await runCli();
 } else {
   const server = createMcpServer();

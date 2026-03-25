@@ -190,11 +190,11 @@ export async function runCli() {
   // 無輸入 → 顯示用法
   console.log(chalk.bold("\n🛡️  sensitive-guard — 敏感內容守門員\n"));
   console.log("用法：");
-  console.log("  npx tsx src/index.ts --cli --text '你的內容'");
-  console.log("  npx tsx src/index.ts --cli --file ./path/to/file.ts");
-  console.log("  npx tsx src/index.ts --cli --dir ./src");
-  console.log("  npx tsx src/index.ts --cli --dir ./src --ext .ts .env .json");
-  console.log("  cat file.ts | npx tsx src/index.ts --cli --stdin");
+  console.log("  npm run scan -- --text '你的內容'");
+  console.log("  npm run scan -- --file ./path/to/file.ts");
+  console.log("  npm run scan -- --dir ./src");
+  console.log("  npm run scan -- --dir ./src --ext .ts .env .json");
+  console.log("  cat file.ts | npm run scan -- --stdin");
   console.log("");
   console.log("選項：");
   console.log("  --format json          輸出 JSON（適合 CI/CD）");

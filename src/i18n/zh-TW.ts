@@ -42,6 +42,11 @@ export const zhTW = {
   // cli — inline label
   "cli.inline_label": "(直接輸入文字)",
 
+  // cli — decision-aware output
+  "cli.decision_warn_header": "提醒 — {risk} 風險：偵測到 {count} 個敏感項目",
+  "cli.decision_confirm_header": "警告 — {risk} 風險：偵測到 {count} 個敏感項目（建議操作：{action}）",
+  "cli.confirm_next_step": "下一步：使用 --format json 取得 redactedContent，或用 --redact 輸出脫敏版本。Exit code 1 = 已攔截。",
+
   // cli — usage
   "cli.usage_title": "\n🛡️  sensitive-guard — 敏感內容守門員\n",
   "cli.usage_heading": "用法：",

@@ -37,6 +37,12 @@ export interface Finding {
   column?: number;
   preview: string;
   description: string;
+  /** Internal-only: byte offset of match start in the original content. */
+  match_start?: number;
+  /** Internal-only: byte offset of match end in the original content. */
+  match_end?: number;
+  /** Internal-only: the raw matched text. Never expose to CLI/MCP outputs. */
+  match_text?: string;
 }
 
 export interface ScanResult {

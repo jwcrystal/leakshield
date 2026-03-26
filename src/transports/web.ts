@@ -1,7 +1,7 @@
 import * as http from "http";
 import { loadConfig } from "../config/loader.js";
 import { scanText } from "../scanner/engine.js";
-import type { Finding } from "../types.js";
+import { sanitizeScanResultForExport } from "../decision/redaction.js";
 import { t } from "../i18n/index.js";
 
 // ─── HTML UI ─────────────────────────────────────────────────────────────────
@@ -210,7 +210,7 @@ export async function runWeb(port: number) {
           const content = body.content ?? "";
           const result = scanText(content, config);
           res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify(result));
+          res.end(JSON.stringify(sanitizeScanResultForExport(result)));
         } catch {
           jsonError(res, 400, "invalid JSON body");
         }

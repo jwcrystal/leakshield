@@ -1,11 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as fs from "fs";
-import type { Finding } from "../types.js";
+import type { TransportSafeFinding } from "../decision/redaction.js";
 import { loadConfig } from "../config/loader.js";
 import { scanText, redactText } from "../scanner/engine.js";
+import { sanitizeRedactResultForExport, sanitizeFindingsForExport } from "../decision/redaction.js";
 import { collectFiles, runWithConcurrency } from "../utils/files.js";
 import { resolveWorkspacePath, isPathInsideBase } from "../utils/path-security.js";
+import { toMcpDecisionPayload } from "./mcp-payload.js";
 
 const SCAN_CONCURRENCY = 8;
 
@@ -23,8 +25,11 @@ export function createMcpServer() {
     },
     async ({ content, label }) => {
       const result = scanText(content, configRef.current);
+      const payload = toMcpDecisionPayload(result, content, configRef.current, {
+        label: label ?? "(未命名)",
+      });
       return {
-        content: [{ type: "text" as const, text: JSON.stringify({ label: label ?? "(未命名)", ...result }, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
       };
     }
   );
@@ -47,7 +52,10 @@ export function createMcpServer() {
       }
       const content = fs.readFileSync(resolved, "utf-8");
       const result = scanText(content, configRef.current);
-      return { content: [{ type: "text" as const, text: JSON.stringify({ file: resolved, ...result }, null, 2) }] };
+      const payload = toMcpDecisionPayload(result, content, configRef.current, {
+        file: resolved,
+      });
+      return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
     }
   );
 
@@ -71,7 +79,7 @@ export function createMcpServer() {
       }
 
       const files = collectFiles(resolved, extensions, max_files);
-      const dirResults: { file: string; safe: boolean; total_findings: number; findings: Finding[] }[] = [];
+      const dirResults: { file: string; safe: boolean; total_findings: number; findings: TransportSafeFinding[] }[] = [];
       let totalFindings = 0;
       let unsafeFiles = 0;
       let skippedFiles = 0;
@@ -92,7 +100,7 @@ export function createMcpServer() {
         totalFindings += item.result.total_findings;
         if (!item.result.safe) {
           unsafeFiles++;
-          dirResults.push({ file: item.file, safe: item.result.safe, total_findings: item.result.total_findings, findings: item.result.findings });
+          dirResults.push({ file: item.file, safe: item.result.safe, total_findings: item.result.total_findings, findings: sanitizeFindingsForExport(item.result.findings) });
         }
       }
 
@@ -124,8 +132,8 @@ export function createMcpServer() {
     async ({ content, label, dry_run }) => {
       const result = redactText(content, configRef.current);
       const output = dry_run
-        ? { label: label ?? "(未命名)", dry_run: true, total_findings: result.total_findings, summary: result.summary, findings: result.findings }
-        : { label: label ?? "(未命名)", ...result };
+        ? { label: label ?? "(未命名)", dry_run: true, total_findings: result.total_findings, summary: result.summary, findings: sanitizeFindingsForExport(result.findings) }
+        : { label: label ?? "(未命名)", ...sanitizeRedactResultForExport(result) };
       return {
         content: [{ type: "text" as const, text: JSON.stringify(output, null, 2) }],
       };

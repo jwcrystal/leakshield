@@ -43,6 +43,11 @@ export const en = {
   // cli — inline label
   "cli.inline_label": "(inline text)",
 
+  // cli — decision-aware output
+  "cli.decision_warn_header": "Reminder — {risk} risk: {count} sensitive item(s) detected",
+  "cli.decision_confirm_header": "Warning — {risk} risk: {count} sensitive item(s) detected (recommended: {action})",
+  "cli.confirm_next_step": "Next: use --format json to get redactedContent, or --redact for sanitized output. Exit code 1 = blocked.",
+
   // cli — usage
   "cli.usage_title": "\n🛡️  sensitive-guard — Sensitive content guard\n",
   "cli.usage_heading": "Usage:",

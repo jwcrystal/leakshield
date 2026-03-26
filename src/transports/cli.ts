@@ -4,6 +4,9 @@ import chalk from "chalk";
 import type { FindingType, Finding, ScanResult } from "../types.js";
 import { loadConfig } from "../config/loader.js";
 import { scanText, redactText } from "../scanner/engine.js";
+import { sanitizeRedactResultForExport } from "../decision/redaction.js";
+import { toDecisionResult } from "../decision/model.js";
+import type { GuardDecisionResult, GuardDecisionFinding } from "../decision/model.js";
 import { collectFiles, runWithConcurrency } from "../utils/files.js";
 import { validateCliScanPath } from "../utils/path-security.js";
 import { t } from "../i18n/index.js";
@@ -33,6 +36,147 @@ export function filterBySeverity(result: ScanResult, min: MinSeverity): ScanResu
         low: findings.length - highCount - medCount,
       });
   return { ...result, findings, total_findings: findings.length, safe, summary };
+}
+
+// ─── Decision-aware CLI formatting ──────────────────────────────────────────
+
+const SEPARATOR = "─".repeat(60);
+
+/**
+ * Pure function that formats a GuardDecisionResult into CLI output lines.
+ *
+ * Does NOT write to console — returns an array of strings so callers can
+ * test formatting without capturing stdout.
+ *
+ * | decision | Behaviour                                   |
+ * |----------|---------------------------------------------|
+ * | ALLOW    | Clean summary, continue normally            |
+ * | WARN     | Reminder with findings, then continue       |
+ * | CONFIRM  | Warning card with actions (non-interactive) |
+ */
+export function formatCliDecision(
+  decision: GuardDecisionResult,
+  label: string,
+): string[] {
+  const lines: string[] = [];
+
+  lines.push("");
+  lines.push(chalk.bold(t("cli.scan_target", { label })));
+  lines.push(SEPARATOR);
+
+  const DECISION_COLOR = {
+    ALLOW: chalk.green,
+    WARN: chalk.yellow,
+    CONFIRM: chalk.red,
+  } as const;
+
+  const colorFn = DECISION_COLOR[decision.decision] ?? ((s: string) => s);
+
+  if (decision.decision === "ALLOW") {
+    lines.push(colorFn(t("scan.safe_summary")));
+  } else {
+    // Decision + Risk title line
+    const actionPart = decision.recommendedAction
+      ? `  |  Action: ${decision.recommendedAction}`
+      : "";
+    lines.push(colorFn(
+      `Decision: ${decision.decision}  |  Risk: ${decision.riskLevel}${actionPart}`,
+    ));
+
+    lines.push(decision.summary);
+    lines.push("");
+
+    // Group findings by type
+    const byType: Partial<Record<string, GuardDecisionFinding[]>> = {};
+    for (const f of decision.findings) {
+      if (!byType[f.type]) byType[f.type] = [];
+      byType[f.type]!.push(f);
+    }
+
+    for (const [type, items] of Object.entries(byType)) {
+      if (!items) continue;
+      const severity = items[0].severity;
+      const color =
+        severity === "HIGH" ? chalk.red : severity === "MEDIUM" ? chalk.yellow : chalk.gray;
+      lines.push(
+        color(`  [${severity}] ${type} — ${t("cli.hits", { count: items.length })}`),
+      );
+      for (const item of items.slice(0, 5)) {
+        const loc = item.line
+          ? chalk.dim(` (line ${item.line})`)
+          : "";
+        lines.push(`    • ${item.description}${loc}`);
+        lines.push(chalk.dim(t("cli.preview", { preview: item.preview })));
+      }
+      if (items.length > 5) {
+        lines.push(
+          chalk.dim(t("cli.more_of_type", { count: items.length - 5 })),
+        );
+      }
+    }
+
+    // CONFIRM: next step hint
+    if (decision.decision === "CONFIRM") {
+      lines.push("");
+      lines.push(
+        chalk.dim(
+          `💡 ${t("cli.confirm_next_step")}`,
+        ),
+      );
+    }
+  }
+
+  lines.push("");
+  lines.push(SEPARATOR);
+  lines.push("");
+
+  return lines;
+}
+
+/**
+ * Build a decision-oriented JSON object safe for CLI/CI export.
+ *
+ * Strips `originalContent` and ensures findings carry only transport-safe fields.
+ */
+export function buildDecisionJsonOutput(
+  decision: GuardDecisionResult,
+  label: string,
+): Record<string, unknown> {
+  const { originalContent: _oc, ...safeDecision } = decision;
+
+  return {
+    label,
+    safe: safeDecision.decision === "ALLOW",
+    decision: safeDecision.decision,
+    riskLevel: safeDecision.riskLevel,
+    summary: safeDecision.summary,
+    findings: safeDecision.findings.map((f) => ({
+      type: f.type,
+      severity: f.severity,
+      description: f.description,
+      preview: f.preview,
+      ...(f.line !== undefined ? { line: f.line } : {}),
+    })),
+    ...(safeDecision.recommendedAction !== undefined
+      ? { recommendedAction: safeDecision.recommendedAction }
+      : {}),
+    ...(safeDecision.safePreview !== undefined
+      ? { safePreview: safeDecision.safePreview }
+      : {}),
+    ...(safeDecision.redactedContent !== undefined
+      ? { redactedContent: safeDecision.redactedContent }
+      : {}),
+  };
+}
+
+/**
+ * Print decision-aware output to console (text mode).
+ */
+function printCliDecision(decision: GuardDecisionResult, label: string): void {
+  const lines = formatCliDecision(decision, label);
+  for (const line of lines) {
+    console.log(line);
+  }
 }
 
 // ─── Text output ─────────────────────────────────────────────────────────────
@@ -103,14 +247,15 @@ export async function runCli() {
     (["high", "medium", "low"].includes(args[sevIdx + 1]) ? args[sevIdx + 1] : "low") as MinSeverity;
   const allowOutside = args.includes("--allow-outside");
 
-  function output(result: ScanResult, label: string) {
+  function output(result: ScanResult, label: string, originalContent: string) {
     const filtered = filterBySeverity(result, minSeverity);
+    const decision = toDecisionResult(filtered, originalContent, config);
     if (format === "json") {
-      console.log(JSON.stringify({ label, ...filtered }, null, 2));
+      console.log(JSON.stringify(buildDecisionJsonOutput(decision, label), null, 2));
     } else {
-      printCliResult(filtered, label);
+      printCliDecision(decision, label);
     }
-    return filtered;
+    return { filtered, decision };
   }
 
   // --redact / --dry-run mode (supports --text, --file, --stdin)
@@ -160,7 +305,7 @@ export async function runCli() {
     }
 
     if (format === "json") {
-      console.log(JSON.stringify({ label, ...result }, null, 2));
+      console.log(JSON.stringify({ label, ...sanitizeRedactResultForExport(result) }, null, 2));
     } else {
       // Write redacted text to stdout (or file); summary goes to stderr
       const outPath = outIdx !== -1 ? args[outIdx + 1] : undefined;
@@ -220,10 +365,11 @@ export async function runCli() {
       const filtered = filterBySeverity(result, minSeverity);
       if (!filtered.safe) {
         anyUnsafe = true;
+        const decision = toDecisionResult(filtered, item.content, config);
         if (format === "json") {
-          jsonResults.push({ file: item.file, ...filtered });
+          jsonResults.push({ file: item.file, ...buildDecisionJsonOutput(decision, item.file) });
         } else {
-          printCliResult(filtered, item.file);
+          printCliDecision(decision, item.file);
         }
       }
     }
@@ -242,9 +388,10 @@ export async function runCli() {
 
   // --text mode
   if (textIdx !== -1 && args[textIdx + 1]) {
-    const result = scanText(args[textIdx + 1], config);
-    const filtered = output(result, t("cli.inline_label"));
-    process.exit(filtered.safe ? 0 : 1);
+    const originalContent = args[textIdx + 1];
+    const result = scanText(originalContent, config);
+    const { decision } = output(result, t("cli.inline_label"), originalContent);
+    process.exit(decision.decision === "ALLOW" ? 0 : 1);
   }
 
   // --file mode
@@ -260,18 +407,20 @@ export async function runCli() {
       console.error(chalk.red(t("cli.error_file_not_found", { path: filePath })));
       process.exit(2);
     }
-    const result = scanText(fs.readFileSync(filePath, "utf-8"), config);
-    const filtered = output(result, filePath);
-    process.exit(filtered.safe ? 0 : 1);
+    const originalContent = fs.readFileSync(filePath, "utf-8");
+    const result = scanText(originalContent, config);
+    const { decision } = output(result, filePath, originalContent);
+    process.exit(decision.decision === "ALLOW" ? 0 : 1);
   }
 
   // stdin 模式
   if (stdinMode || !process.stdin.isTTY) {
     const chunks: Buffer[] = [];
     for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
-    const result = scanText(Buffer.concat(chunks).toString("utf-8"), config);
-    const filtered = output(result, "(stdin)");
-    process.exit(filtered.safe ? 0 : 1);
+    const originalContent = Buffer.concat(chunks).toString("utf-8");
+    const result = scanText(originalContent, config);
+    const { decision } = output(result, "(stdin)", originalContent);
+    process.exit(decision.decision === "ALLOW" ? 0 : 1);
   }
 
   // No input → show usage

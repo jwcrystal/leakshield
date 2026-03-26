@@ -11,6 +11,13 @@
 
 ---
 
+
+## 🚀 新成員快速上手
+
+- 3 分鐘 Onboarding：[`ONBOARDING.zh-TW.md`](./ONBOARDING.zh-TW.md)
+
+---
+
 ## 偵測範圍
 
 | 類型 | 說明 | 嚴重度 |

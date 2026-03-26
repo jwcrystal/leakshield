@@ -268,3 +268,32 @@ describe("toMcpDecisionPayload() — type shape", () => {
     expect(true).toBe(true);
   });
 });
+
+// ─── redactedContent exclusion ───────────────────────────────────────────
+
+describe("toMcpDecisionPayload() — redactedContent exclusion", () => {
+  it("never includes redactedContent in MCP payload, even for CONFIRM/BLOCK", () => {
+    const content = "const apiKey = sk-proj-real-secret-key-value;";
+    const payload = toMcpDecisionPayload(scanWith([HIGH]), content);
+    expect(payload.decision).toBe("CONFIRM");
+    expect(payload.recommendedAction).toBe("BLOCK");
+    // redactedContent must not be present — MCP consumers should call redact_text instead
+    expect(payload).not.toHaveProperty("redactedContent");
+  });
+
+  it("never includes redactedContent for CONFIRM/REVIEW either", () => {
+    const content = "contact: user@example.com";
+    const payload = toMcpDecisionPayload(scanWith([MEDIUM]), content);
+    expect(payload.decision).toBe("CONFIRM");
+    expect(payload.recommendedAction).toBe("REVIEW");
+    expect(payload).not.toHaveProperty("redactedContent");
+  });
+
+  it("does not include redactedContent for WARN or ALLOW", () => {
+    const payloadWarn = toMcpDecisionPayload(scanWith([LOW]), "some text");
+    expect(payloadWarn).not.toHaveProperty("redactedContent");
+
+    const payloadAllow = toMcpDecisionPayload(safeScan(), "hello");
+    expect(payloadAllow).not.toHaveProperty("redactedContent");
+  });
+});

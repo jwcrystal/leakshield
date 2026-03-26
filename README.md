@@ -259,10 +259,10 @@ Check the "decision" field: ALLOW = proceed, WARN = note and proceed, CONFIRM = 
 
 | Tool | Purpose |
 |------|---------|
-| `scan_text` | Scan a text snippet (code / data you paste in). Returns `decision`, `riskLevel`, `safePreview`, `redactedContent` |
+| `scan_text` | Scan a text snippet (code / data you paste in). Returns `decision`, `riskLevel`, `safePreview` |
 | `scan_file` | Scan a single local file. Same decision-oriented response as `scan_text` |
 | `scan_dir` | Scan an entire directory (recursive, skips node_modules / .git). Returns per-file results |
-| `redact_text` | Replace sensitive findings with `[REDACTED_TYPE]` and return the clean text. Supports `dry_run` to preview only |
+| `redact_text` | Replace sensitive findings with `[REDACTED_TYPE]` and return the clean text. Use this to get the full redacted version when `scan_text` / `scan_file` report `CONFIRM`. Supports `dry_run` to preview only |
 | `reload_config` | Reload YAML config without restarting the server |
 
 > **Backward compatibility**: `scan_text` and `scan_file` still include a `safe` boolean field (`true` when decision is `ALLOW`). Existing integrations that only check `safe` will continue to work, but new integrations should use the `decision` field for finer control.

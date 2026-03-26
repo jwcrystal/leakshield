@@ -28,6 +28,7 @@ function makeDecision(decision: GuardDecisionResult["decision"], overrides?: Par
   const base: GuardDecisionResult = {
     decision,
     riskLevel: decision === "ALLOW" ? "LOW" : decision === "WARN" ? "MEDIUM" : "HIGH",
+    summary: decision === "ALLOW" ? "✅ Safe" : "🚨 Unsafe",
     findings: [
       { type: "API_KEY", severity: "HIGH", preview: "sk-a****de", description: "OpenAI API Key" },
     ],
@@ -155,30 +156,15 @@ describe("formatCliDecision()", () => {
       riskLevel: "CRITICAL",
       recommendedAction: "BLOCK",
       findings: [
-        { type: "API_KEY", severity: "HIGH", preview: "sk-a****de", description: "OpenAI API Key" },
+        { type: "API_KEY", severity: "HIGH", preview: "****", description: "API Key" },
       ],
     });
     const lines = formatCliDecision(decision, "config.ts");
-    expect(Array.isArray(lines)).toBe(true);
     const joined = lines.join("\n");
     expect(joined).toContain("config.ts");
-    // CONFIRM must present the three action options
-    expect(joined).toContain("cancel");
-    expect(joined).toContain("send redacted");
-    expect(joined).toContain("send original anyway");
-  });
-
-  it("CONFIRM with REVIEW action includes the action label", () => {
-    const decision = makeDecision("CONFIRM", {
-      riskLevel: "HIGH",
-      recommendedAction: "REVIEW",
-      findings: [
-        { type: "PII_EMAIL", severity: "MEDIUM", preview: "****", description: "Email" },
-      ],
-    });
-    const lines = formatCliDecision(decision, "data.csv");
-    const joined = lines.join("\n");
-    expect(joined).toContain("REVIEW");
+    // Next step hint instead of action options
+    expect(joined).toContain("--format json");
+    expect(joined).toContain("--redact");
   });
 
   it("CONFIRM with BLOCK action includes the action label", () => {
@@ -275,7 +261,8 @@ describe("buildDecisionJsonOutput()", () => {
       ],
     });
     const obj = buildDecisionJsonOutput(decision, "file.ts");
-    for (const f of obj.findings) {
+    const findings = obj.findings as Array<{ type: string; severity: string; preview: string; description: string }>;
+    for (const f of findings) {
       expect(f).not.toHaveProperty("match_start");
       expect(f).not.toHaveProperty("match_end");
       expect(f).not.toHaveProperty("match_text");

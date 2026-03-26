@@ -115,13 +115,14 @@ export function formatCliDecision(
       }
     }
 
-    // CONFIRM card: present action options
+    // CONFIRM: next step hint
     if (decision.decision === "CONFIRM") {
       lines.push("");
-      lines.push(chalk.red.bold(t("cli.confirm_actions_header")));
-      lines.push(chalk.yellow(`  1. ${t("cli.confirm_action_cancel")}`));
-      lines.push(chalk.green(`  2. ${t("cli.confirm_action_redacted")}`));
-      lines.push(chalk.dim(`  3. ${t("cli.confirm_action_original")}`));
+      lines.push(
+        chalk.dim(
+          `💡 ${t("cli.confirm_next_step")}`,
+        ),
+      );
     }
   }
 

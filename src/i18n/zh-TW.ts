@@ -45,10 +45,7 @@ export const zhTW = {
   // cli — decision-aware output
   "cli.decision_warn_header": "提醒 — {risk} 風險：偵測到 {count} 個敏感項目",
   "cli.decision_confirm_header": "警告 — {risk} 風險：偵測到 {count} 個敏感項目（建議操作：{action}）",
-  "cli.confirm_actions_header": "請選擇操作：",
-  "cli.confirm_action_cancel": "cancel — 取消，不傳送此內容",
-  "cli.confirm_action_redacted": "send redacted — 使用脫敏版本傳送",
-  "cli.confirm_action_original": "send original anyway — 仍以原始內容傳送（自行承擔風險）",
+  "cli.confirm_next_step": "下一步：使用 --format json 取得 redactedContent，或用 --redact 輸出脫敏版本。Exit code 1 = 已攔截。",
 
   // cli — usage
   "cli.usage_title": "\n🛡️  sensitive-guard — 敏感內容守門員\n",

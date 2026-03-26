@@ -46,10 +46,7 @@ export const en = {
   // cli — decision-aware output
   "cli.decision_warn_header": "Reminder — {risk} risk: {count} sensitive item(s) detected",
   "cli.decision_confirm_header": "Warning — {risk} risk: {count} sensitive item(s) detected (recommended: {action})",
-  "cli.confirm_actions_header": "Choose an action:",
-  "cli.confirm_action_cancel": "cancel — do not send this content",
-  "cli.confirm_action_redacted": "send redacted — use sanitized version",
-  "cli.confirm_action_original": "send original anyway — proceed at your own risk",
+  "cli.confirm_next_step": "Next: use --format json to get redactedContent, or --redact for sanitized output. Exit code 1 = blocked.",
 
   // cli — usage
   "cli.usage_title": "\n🛡️  sensitive-guard — Sensitive content guard\n",

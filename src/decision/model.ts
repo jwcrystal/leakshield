@@ -23,12 +23,14 @@ export interface GuardDecisionFinding {
   severity: Finding["severity"];
   description: string;
   preview: string;
+  line?: number;
 }
 
 /** The full decision result consumed by the UI / MCP layer. */
 export interface GuardDecisionResult {
   decision: GuardDecision;
   riskLevel: GuardRiskLevel;
+  summary: string;
   findings: readonly GuardDecisionFinding[];
   recommendedAction?: GuardRecommendedAction;
   safePreview?: string;
@@ -54,6 +56,7 @@ function toGuardFinding(f: Finding): GuardDecisionFinding {
     severity: f.severity,
     description: f.description,
     preview: f.preview,
+    line: f.line,
   };
 }
 
@@ -80,6 +83,7 @@ export function toDecisionResult(
     return {
       decision: "ALLOW",
       riskLevel: "LOW",
+      summary: scan.summary,
       findings,
       originalContent,
     };
@@ -89,6 +93,7 @@ export function toDecisionResult(
     return {
       decision: "CONFIRM",
       riskLevel: "CRITICAL",
+      summary: scan.summary,
       findings,
       recommendedAction: "BLOCK",
       safePreview: buildSafePreview(originalContent, scan.findings, config),
@@ -105,6 +110,7 @@ export function toDecisionResult(
     return {
       decision: "CONFIRM",
       riskLevel: "HIGH",
+      summary: scan.summary,
       findings,
       recommendedAction: "REVIEW",
       safePreview: buildSafePreview(originalContent, scan.findings, config),
@@ -121,6 +127,7 @@ export function toDecisionResult(
   return {
     decision: "WARN",
     riskLevel: "MEDIUM",
+    summary: scan.summary,
     findings,
     originalContent,
   };

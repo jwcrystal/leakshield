@@ -64,39 +64,54 @@ export function formatCliDecision(
   lines.push(chalk.bold(t("cli.scan_target", { label })));
   lines.push(SEPARATOR);
 
+  const DECISION_COLOR = {
+    ALLOW: chalk.green,
+    WARN: chalk.yellow,
+    CONFIRM: chalk.red,
+  } as const;
+
+  const colorFn = DECISION_COLOR[decision.decision] ?? ((s: string) => s);
+
   if (decision.decision === "ALLOW") {
-    lines.push(chalk.green(t("scan.safe_summary")));
+    lines.push(colorFn(t("scan.safe_summary")));
   } else {
-    // WARN or CONFIRM — emit findings
-    const findingCount = decision.findings.length;
-    const riskLabel = `[${decision.riskLevel}]`;
+    // Decision + Risk title line
+    const actionPart = decision.recommendedAction
+      ? `  |  Action: ${decision.recommendedAction}`
+      : "";
+    lines.push(colorFn(
+      `Decision: ${decision.decision}  |  Risk: ${decision.riskLevel}${actionPart}`,
+    ));
 
-    if (decision.decision === "WARN") {
-      lines.push(chalk.yellow(`⚠️  ${t("cli.decision_warn_header", { risk: riskLabel, count: findingCount })}`));
-    } else {
-      lines.push(chalk.red(`🚨 ${t("cli.decision_confirm_header", { risk: riskLabel, count: findingCount, action: decision.recommendedAction ?? "REVIEW" })}`));
-    }
-
+    lines.push(decision.summary);
     lines.push("");
 
-    // Group findings by severity
-    const bySeverity: Partial<Record<Finding["severity"], GuardDecisionFinding[]>> = {};
+    // Group findings by type
+    const byType: Partial<Record<string, GuardDecisionFinding[]>> = {};
     for (const f of decision.findings) {
-      if (!bySeverity[f.severity]) bySeverity[f.severity] = [];
-      bySeverity[f.severity]!.push(f);
+      if (!byType[f.type]) byType[f.type] = [];
+      byType[f.type]!.push(f);
     }
 
-    for (const [severity, items] of Object.entries(bySeverity)) {
+    for (const [type, items] of Object.entries(byType)) {
       if (!items) continue;
+      const severity = items[0].severity;
       const color =
         severity === "HIGH" ? chalk.red : severity === "MEDIUM" ? chalk.yellow : chalk.gray;
-      lines.push(color(`  [${severity}] ${t("cli.hits", { count: items.length })}`));
+      lines.push(
+        color(`  [${severity}] ${type} — ${t("cli.hits", { count: items.length })}`),
+      );
       for (const item of items.slice(0, 5)) {
-        lines.push(`    • ${item.description}`);
+        const loc = item.line
+          ? chalk.dim(` (line ${item.line})`)
+          : "";
+        lines.push(`    • ${item.description}${loc}`);
         lines.push(chalk.dim(t("cli.preview", { preview: item.preview })));
       }
       if (items.length > 5) {
-        lines.push(chalk.dim(t("cli.more_of_type", { count: items.length - 5 })));
+        lines.push(
+          chalk.dim(t("cli.more_of_type", { count: items.length - 5 })),
+        );
       }
     }
 
@@ -130,13 +145,16 @@ export function buildDecisionJsonOutput(
 
   return {
     label,
+    safe: safeDecision.decision === "ALLOW",
     decision: safeDecision.decision,
     riskLevel: safeDecision.riskLevel,
+    summary: safeDecision.summary,
     findings: safeDecision.findings.map((f) => ({
       type: f.type,
       severity: f.severity,
       description: f.description,
       preview: f.preview,
+      ...(f.line !== undefined ? { line: f.line } : {}),
     })),
     ...(safeDecision.recommendedAction !== undefined
       ? { recommendedAction: safeDecision.recommendedAction }

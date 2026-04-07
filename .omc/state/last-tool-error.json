@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"npm test -- tests/security-enhancements.test.ts 2>&1\",\"description\":\"運行安全增強測試\"}",
+  "error": "Exit code 1\n\n> sensitive-guard@1.0.0 test\n> vitest run tests/security-enhancements.test.ts\n\n\n\u001b[1m\u001b[46m RUN \u001b[49m\u001b[22m \u001b[36mv4.1.1 \u001b[39m\u001b[90m/Users/jwang/Documents/Workspace/sensitive-guard/.claude/worktrees/security-fixes\u001b[39m\n\n \u001b[31m❯\u001b[39m tests/security-enhancements.test.ts \u001b[2m(\u001b[22m\u001b[2m11 tests\u001b[22m\u001b[2m | \u001b[22m\u001b[31m6 failed\u001b[39m\u001b[2m)\u001b[22m\u001b[33m 22035\u001b[2mms\u001b[22m\u001b[39m\n\u001b[31m       \u001b[31m×\u001b[31m 應該檢測 Base64 編碼的 API Key\u001b[39m\u001b[32m 4\u001b[2mms\u001b[22m\u001b[39m\n\u001b[31m       \u001b[31m×\u001b[31m 應該檢測 Base64 編碼的密碼\u001b[39m\u001b[32m ...",
+  "timestamp": "2026-04-07T06:54:44.531Z",
+  "retry_count": 1
+}

@@ -3,6 +3,8 @@ import { BUILTIN_RULES } from "../rules/builtin.js";
 import { buildDynamicRules } from "../rules/dynamic.js";
 import { redact, getLineCol, getIgnoredLines } from "./utils.js";
 import { t } from "../i18n/index.js";
+import * as encoding from "./encoding.js";
+import { sanitizeForScanning, isLikelyHomographAttack, detectSuspiciousUnicode } from "./unicode.js";
 
 // Dynamic rules are derived from config; cache per config object so they are
 // rebuilt only when the config reference changes (e.g. after reload_config).
@@ -18,12 +20,42 @@ function getRules(config: GuardConfig): Rule[] {
 }
 
 export function scanText(text: string, config: GuardConfig): ScanResult {
+  // Step 1: Check for truncation
+  const wasTruncated = text.length > config.settings.max_chars;
   const truncated = text.slice(0, config.settings.max_chars);
+
   const allRules = getRules(config);
   const findings: Finding[] = [];
   const seen = new Set<string>();
   const ignoredLines = getIgnoredLines(truncated);
 
+  // Step 2: Scan for suspicious Unicode patterns ONLY if there's an actual threat
+  // This doesn't modify the text, just detects issues
+  const suspicious = detectSuspiciousUnicode(truncated);
+  if (suspicious.hasZeroWidth || suspicious.hasHomographs) {
+    // Only add Unicode finding if there's a clear attack pattern
+    findings.push({
+      type: "CUSTOM",
+      severity: suspicious.hasZeroWidth ? "HIGH" : "MEDIUM",
+      line: 1,
+      column: 1,
+      preview: "****",
+      description: suspicious.hasZeroWidth
+        ? "檢測到零寬字符 (可能用於繞過敏感資料檢測)"
+        : "檢測到可疑的 Unicode 字符 (可能的同形異義字攻擊)",
+      match_start: 0,
+      match_end: truncated.length,
+      match_text: truncated.substring(0, 50), // Only store first 50 chars
+      unicode_detected: {
+        had_zero_width: suspicious.hasZeroWidth,
+        had_homographs: suspicious.hasHomographs,
+        details: suspicious.details,
+      },
+    } as any);
+  }
+
+  // Step 3: Regular pattern scanning on the original text
+  // We scan the original text, not normalized, to preserve accurate offsets
   for (const rule of allRules) {
     // Reuse the compiled RegExp; reset lastIndex before each scan so the
     // stateful global flag starts from the beginning of the input.
@@ -72,7 +104,24 @@ export function scanText(text: string, config: GuardConfig): ScanResult {
     ? t("scan.safe_recommendation")
     : t("scan.unsafe_recommendation");
 
-  return { safe, total_findings: findings.length, findings, summary, recommendation };
+  // Add warnings for Unicode issues and truncation
+  const warnings = [];
+  if (suspicious.hasZeroWidth) warnings.push("零寬字符");
+  if (suspicious.hasHomographs) warnings.push("可疑 Unicode");
+  if (wasTruncated) warnings.push("內容截斷");
+
+  const finalSummary = warnings.length > 0
+    ? summary + ` ⚠️ (${warnings.join(', ')})`
+    : summary;
+
+  return {
+    safe,
+    total_findings: findings.length,
+    findings,
+    summary: finalSummary,
+    recommendation,
+    was_truncated: wasTruncated || undefined,
+  };
 }
 
 export function redactText(text: string, config: GuardConfig): RedactResult {
@@ -111,3 +160,14 @@ export function redactText(text: string, config: GuardConfig): RedactResult {
 
   return { redacted, findings, total_findings, summary };
 }
+
+// ─── Export utilities ───────────────────────────────────────────────────────────
+
+export { scanTextWithDecoding } from "./encoding.js";
+export type { ScanWithDecodingResult } from "./encoding.js";
+
+export {
+  sanitizeForScanning,
+  isLikelyHomographAttack,
+  detectSuspiciousUnicode,
+} from "./unicode.js";

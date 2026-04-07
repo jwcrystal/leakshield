@@ -85,6 +85,7 @@ const PLACEHOLDER_MAP: Record<FindingType, string> = {
   DB_CONNECTION: "[REDACTED_DB_CONNECTION]",
   PRIVATE_DOMAIN: "[REDACTED_PRIVATE_DOMAIN]",
   NDA_KEYWORD: "[REDACTED_NDA_TERM]",
+  CUSTOM: "[REDACTED_CUSTOM]",
 };
 
 // ─── Span types ──────────────────────────────────────────────────────────────

@@ -112,6 +112,57 @@ npm run scan -- --redact --dry-run --file .env
 | `--format json` | 輸出 JSON（適合 CI/CD） |
 | `--min-severity high` | 只回報 HIGH（或 `medium` / `low`） |
 | `--allow-outside` | 允許掃描工作目錄以外的路徑（預設禁止） |
+| `--enable-encoding-detection` | 啟用 Base64/URL/Hex 解碼檢測（預設關閉） |
+
+#### 編碼檢測功能
+
+**為什麼需要編碼檢測？**
+
+攻擊者可能使用編碼技巧繞過敏感資料檢測：
+- **Base64 編碼**：將 API Key 或密碼編碼後傳送
+- **URL 編碼**：使用 `%20` 等格式隱藏關鍵字
+- **Hex 編碼**：十六進制編碼繞過模式匹配
+
+**啟用編碼檢測**
+
+```bash
+# 啟用編碼檢測掃描
+npm run scan -- --enable-encoding-detection --text "c2stcHJvai1hYmMxMjM="
+
+# 結合其他選項使用
+npm run scan -- --enable-encoding-detection --file ./config.yaml --format json
+
+# 掃描目錄時啟用
+npm run scan -- --enable-encoding-detection --dir ./src --ext .ts .env
+```
+
+**效能考量**
+
+編碼檢測會額外嘗試解碼並重新掃描內容，可能增加 10-30% 的掃描時間。建議：
+- **預設關閉**：一般掃描使用預設值即可
+- **按需啟用**：在處理外部來源或不明內容時啟用
+- **CI/CD 環境**：建議在 CI pipeline 中啟用以攔截編碼攻擊
+
+**檢測範例**
+
+```bash
+# Base64 編碼的 API Key
+echo "c2stcHJvai1hYmMxMjM=" | npm run scan -- --enable-encoding-detection --stdin
+# → 檢測到 "sk-proj-abc123" API Key
+
+# URL 編碼的敏感內容
+echo "password%3Dsecret123" | npm run scan -- --enable-encoding-detection --stdin
+# → 檢測到 password 關鍵字
+
+# 正常文字不受影響
+echo "This is safe content" | npm run scan -- --enable-encoding-detection --stdin
+# → 安全，無敏感內容
+```
+
+當啟用編碼檢測時，摘要會包含檢測到的編碼類型：
+```
+[WARNING: 編碼檢測: Base64, URL]
+```
 
 #### 工作目錄路徑限制
 
@@ -215,13 +266,29 @@ npm run build
 
 #### MCP 工具列表
 
-| 工具 | 用途 |
-|------|------|
-| `scan_text` | 掃描一段文字（你貼進去的 code / 資料） |
-| `scan_file` | 掃描本機單一檔案 |
-| `scan_dir` | 掃描整個目錄（遞迴，跳過 node_modules / .git） |
-| `redact_text` | 將命中的敏感內容替換為 `[REDACTED_TYPE]`，回傳乾淨文字 |
-| `reload_config` | 修改 YAML 後重新載入，不用重啟 server |
+| 工具 | 用途 | 編碼檢測參數 |
+|------|------|----------------|
+| `scan_text` | 掃描一段文字（你貼進去的 code / 資料） | ✅ `enable_encoding_detection` |
+| `scan_file` | 掃描本機單一檔案 | ✅ `enable_encoding_detection` |
+| `scan_dir` | 掃描整個目錄（遞迴，跳過 node_modules / .git） | - |
+| `redact_text` | 將命中的敏感內容替換為 `[REDACTED_TYPE]`，回傳乾淨文字 | - |
+| `reload_config` | 修改 YAML 後重新載入，不用重啟 server | - |
+
+**MCP 工具使用範例（含編碼檢測）**
+
+```typescript
+// 掃描文字並啟用編碼檢測
+await mcp.callTool("scan_text", {
+  content: "c2stcHJvai1hYmMxMjM=",  // Base64 編碼內容
+  enable_encoding_detection: true
+});
+
+// 掃描檔案並啟用編碼檢測
+await mcp.callTool("scan_file", {
+  file_path: "./config.yaml",
+  enable_encoding_detection: true
+});
+```
 
 #### MCP 路徑限制
 
@@ -254,6 +321,7 @@ settings:
   max_chars: 200000      # 超過截斷，避免掃太久
   show_line_numbers: true
   preview_length: 60
+  encoding_detection: false  # 編碼檢測（Base64/URL/Hex），預設關閉
 ```
 
 修改後：

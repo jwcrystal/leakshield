@@ -111,7 +111,7 @@ export function scanText(text: string, config: GuardConfig): ScanResult {
   if (wasTruncated) warnings.push("內容截斷");
 
   const finalSummary = warnings.length > 0
-    ? summary + ` ⚠️ (${warnings.join(', ')})`
+    ? summary + ` [WARNING: ${warnings.join(', ')}]`
     : summary;
 
   return {

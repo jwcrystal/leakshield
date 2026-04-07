@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -53,6 +53,12 @@ describe("isPathInsideBase()", () => {
 describe("scan_file — allow_outside", () => {
   let tmpFile: string;
 
+  afterEach(() => {
+    if (tmpFile && fs.existsSync(tmpFile)) {
+      fs.unlinkSync(tmpFile);
+    }
+  });
+
   it("rejects an outside path by default (allow_outside omitted)", async () => {
     // Create a temp file outside the workspace to test with
     tmpFile = path.join(os.tmpdir(), `mcp-test-${Date.now()}.txt`);
@@ -65,8 +71,6 @@ describe("scan_file — allow_outside", () => {
     const result = await handler({ file_path: tmpFile });
     const parsed = parseResult(result);
     expect(parsed.error).toMatch(/outside allowed workspace/);
-
-    fs.unlinkSync(tmpFile);
   });
 
   it("accepts an outside path when allow_outside=true", async () => {
@@ -81,8 +85,6 @@ describe("scan_file — allow_outside", () => {
     const parsed = parseResult(result);
     expect(parsed.error).toBeUndefined();
     expect(parsed.safe).toBe(true);
-
-    fs.unlinkSync(tmpFile);
   });
 });
 
@@ -165,13 +167,21 @@ describe("scan_text — decision payload", () => {
 // ─── scan_file decision payload ──────────────────────────────────────────────
 
 describe("scan_file — decision payload", () => {
+  let tmpFile: string;
+
+  afterEach(() => {
+    if (tmpFile && fs.existsSync(tmpFile)) {
+      fs.unlinkSync(tmpFile);
+    }
+  });
+
   it("returns decision field in response for safe file", async () => {
-    const tmpFile = path.join(os.tmpdir(), `mcp-test-${Date.now()}.txt`);
+    tmpFile = path.join(os.tmpdir(), `mcp-test-${Date.now()}.txt`);
     fs.writeFileSync(tmpFile, "safe content", "utf-8");
 
     const server = createMcpServer();
     const handler = getToolHandler(server, "scan_file");
-    if (!handler) { fs.unlinkSync(tmpFile); return; }
+    if (!handler) return;
 
     const result = await handler({ file_path: tmpFile, allow_outside: true });
     const parsed = parseResult(result);
@@ -180,17 +190,15 @@ describe("scan_file — decision payload", () => {
     expect(parsed.riskLevel).toBe("LOW");
     expect(parsed.safe).toBe(true);
     expect(parsed.file).toBeDefined();
-
-    fs.unlinkSync(tmpFile);
   });
 
   it("returns decision field for file with sensitive content", async () => {
-    const tmpFile = path.join(os.tmpdir(), `mcp-test-${Date.now()}.txt`);
+    tmpFile = path.join(os.tmpdir(), `mcp-test-${Date.now()}.txt`);
     fs.writeFileSync(tmpFile, "const apiKey = sk-proj-fake-secret-key-12345;", "utf-8");
 
     const server = createMcpServer();
     const handler = getToolHandler(server, "scan_file");
-    if (!handler) { fs.unlinkSync(tmpFile); return; }
+    if (!handler) return;
 
     const result = await handler({ file_path: tmpFile, allow_outside: true });
     const parsed = parseResult(result);
@@ -199,7 +207,5 @@ describe("scan_file — decision payload", () => {
     expect(parsed).toHaveProperty("riskLevel");
     expect(parsed).toHaveProperty("safe");
     expect(parsed.file).toBeDefined();
-
-    fs.unlinkSync(tmpFile);
   });
 });

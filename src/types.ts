@@ -43,6 +43,13 @@ export interface Finding {
   match_end?: number;
   /** Internal-only: the raw matched text. Never expose to CLI/MCP outputs. */
   match_text?: string;
+  /** Metadata about encoding detection (if found via decoding) */
+  encoding_detected?: {
+    type: 'Base64' | 'URL' | 'Hex';
+    confidence: number;
+    encoded_length?: number;
+    decoded_length?: number;
+  };
 }
 
 export interface ScanResult {
@@ -51,6 +58,15 @@ export interface ScanResult {
   findings: Finding[];
   summary: string;
   recommendation: string;
+  /** Indica se o conteúdo foi truncado durante a verificação */
+  was_truncated?: boolean;
+  /** Metadados sobre sanitização Unicode */
+  unicode_sanitized?: {
+    hadZeroWidth: boolean;
+    hadVariants: boolean;
+    removedChars: number;
+    homographSuspected: boolean;
+  };
 }
 
 export interface RedactResult {

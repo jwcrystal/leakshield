@@ -14,7 +14,7 @@ import { runWeb } from "./transports/web.js";
 export type { GuardConfig, Finding, ScanResult, FindingType, Rule } from "./types.js";
 export { BUILTIN_RULES } from "./rules/builtin.js";
 export { buildDynamicRules } from "./rules/dynamic.js";
-export { redact, getLineCol } from "./scanner/utils.js";
+export { redact, getLineCol, getIgnoredLines } from "./scanner/utils.js";
 export { scanText } from "./scanner/engine.js";
 export type {
   GuardDecision,
@@ -24,6 +24,15 @@ export type {
   GuardDecisionResult,
 } from "./decision/model.js";
 export { toDecisionResult } from "./decision/model.js";
+
+// Security enhancement exports
+export { scanTextWithDecoding } from "./scanner/engine.js";
+export type { ScanWithDecodingResult } from "./scanner/encoding.js";
+export {
+  sanitizeForScanning,
+  isLikelyHomographAttack,
+  detectSuspiciousUnicode,
+} from "./scanner/unicode.js";
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 

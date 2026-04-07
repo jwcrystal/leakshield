@@ -33,8 +33,10 @@ export const BUILTIN_RULES: Rule[] = [
     type: "SECRET",
     severity: "HIGH",
     description: "AWS Secret Access Key",
-    // 須有 aws 關鍵字為前綴，避免誤報一般 Base64 / SHA-1 hash
-    pattern: /aws.{0,20}['\"]?([A-Za-z0-9\/+]{40})['\"]?/gi,
+    // 改進規則：要求明確的 AWS secret 關鍵字前綴
+    // 匹配格式：aws_secret_access_key, aws_secret_key, secretAccessKey, etc.
+    // 避免誤報 Git commit hash 或一般 Base64 字串
+    pattern: /(?:aws_secret_access_key|aws_secret_key|aws.?secret|secretAccessKey|aws.?access)\s*[:=]\s*['"]?([A-Za-z0-9\/+]{40})['"]?/gi,
   },
   {
     type: "TOKEN",

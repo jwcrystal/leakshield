@@ -133,7 +133,26 @@ export function scanText(text: string, config: GuardConfig): ScanResult {
   if (config.settings.encoding_detection) {
     const result = encoding.scanTextWithDecoding(text, config);
 
-    // Add encoding warnings to summary
+    // Generate proper summary based on merged results
+    const safe = result.safe;
+    const highCount = result.findings.filter((f) => f.severity === "HIGH").length;
+    const medCount = result.findings.filter((f) => f.severity === "MEDIUM").length;
+    const lowCount = result.findings.length - highCount - medCount;
+
+    const summary = safe
+      ? t("scan.safe_summary")
+      : t("scan.unsafe_summary", {
+          count: result.findings.length,
+          high: highCount,
+          med: medCount,
+          low: lowCount,
+        });
+
+    const recommendation = safe
+      ? t("scan.safe_recommendation")
+      : t("scan.unsafe_recommendation");
+
+    // Add warnings for encoding detection and truncation
     const warnings = [];
     if (result.was_decoded) {
       warnings.push(`編碼檢測: ${result.encoding_types_found.join(', ')}`);
@@ -143,15 +162,15 @@ export function scanText(text: string, config: GuardConfig): ScanResult {
     }
 
     const finalSummary = warnings.length > 0
-      ? result.original.summary + ` [WARNING: ${warnings.join(', ')}]`
-      : result.original.summary;
+      ? summary + ` [WARNING: ${warnings.join(', ')}]`
+      : summary;
 
     return {
-      safe: result.safe,
+      safe,
       total_findings: result.total_findings,
       findings: result.findings,
       summary: finalSummary,
-      recommendation: result.original.recommendation,
+      recommendation,
       was_truncated: result.original.was_truncated,
     };
   }

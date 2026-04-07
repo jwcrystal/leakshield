@@ -27,8 +27,8 @@ export interface DecodingResult {
 function detectBase64(text: string): string[] {
   const candidates: string[] = [];
 
-  // Pattern for Base64 strings (32+ chars)
-  const base64Pattern = /[A-Za-z0-9+/]{32,}={0,2}/g;
+  // Pattern for Base64 strings (16+ chars, lowered threshold for security)
+  const base64Pattern = /[A-Za-z0-9+/]{16,}={0,2}/g;
   const matches = text.matchAll(base64Pattern);
 
   for (const match of matches) {
@@ -95,8 +95,8 @@ function tryDecodeBase64(encoded: string): DecodingResult | null {
 function detectUrlEncoding(text: string): string[] {
   const candidates: string[] = [];
 
-  // Look for strings with multiple percent-encoded characters
-  const urlEncodedPattern = /(?:%[0-9A-Fa-f]{2}){3,}/g;
+  // Look for strings with percent-encoded characters (lowered threshold)
+  const urlEncodedPattern = /(?:%[0-9A-Fa-f]{2}){1,}/g;
   const matches = text.matchAll(urlEncodedPattern);
 
   for (const match of matches) {

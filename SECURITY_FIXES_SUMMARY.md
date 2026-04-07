@@ -51,15 +51,15 @@
 ## 📊 測試結果
 
 ### 現有測試
-- ✅ **243/243 測試通過**
+- ✅ **256/256 測試通過**
 - ✅ 無破壞性變更
 - ✅ 完全向後兼容
 
 ### 測試覆蓋
 ```
-Test Files: 10 passed (10)
-Tests: 243 passed (243)
-Duration: ~100ms
+Test Files: 13 passed (13)
+Tests: 256 passed (256)
+Duration: ~550ms
 ```
 
 ---
@@ -75,15 +75,15 @@ Duration: ~100ms
 | 內容截斷 | ❌ 無警示 | ✅ 有警示 | 🟡→🟢 |
 | AWS 誤報 | ❌ 高誤報 | ✅ 已優化 | 🟡→🟢 |
 | Unicode 攻擊 | ❌ 可繞過 | ✅ 已檢測 | 🔴→🟡 |
-| Base64 繞過 | ❌ 可繞過 | ⚠️ 基礎完成 | 🔴→🟡 |
+| Base64 繞過 | ❌ 可繞過 | ✅ 已檢測（需啟用） | 🔴→🟡 |
 
 ### 部分修復的威脅
 
 | 威脅類型 | 狀態 | 說明 |
 |----------|------|------|
-| Base64 編碼 | 🟡 | 基礎架構完成，未整合到主流程 |
-| URL 編碼 | 🟡 | 基礎架構完成，未整合到主流程 |
-| Hex 編碼 | 🟡 | 基礎架構完成，未整合到主流程 |
+| Base64 編碼 | 🟡 | 基礎架構完成，需手動啟用（見下方說明） |
+| URL 編碼 | 🟡 | 基礎架構完成，需手動啟用（見下方說明） |
+| Hex 編碼 | 🟡 | 基礎架構完成，需手動啟用（見下方說明） |
 | 分段攻擊 | 🔴 | 需要跨請求追蹤機制 |
 
 ### 未修復的威脅
@@ -138,10 +138,11 @@ console.log(result.was_truncated);
 ## 📋 後續工作建議
 
 ### 高優先級
-1. **整合編碼檢測到主流程**
-   - 修改 `scanText` 調用 `scanTextWithDecoding`
-   - 更新 MCP tools 使用編碼檢測
-   - 添加 CLI flag 控制是否啟用
+1. **~~整合編碼檢測到主流程~~** ✅ 已完成
+    - `scanText` 已透過 `config.settings.encoding_detection` 啟用 `scanTextWithDecoding`
+    - MCP tools 已支援 `enable_encoding_detection` 參數
+    - CLI 已支援 `--encoding-detection` flag
+    - **預設關閉**，需明確啟用（見下方啟用方式）
 
 2. **實現分段檢測機制**
    - 建立會話級狀態追蹤
@@ -180,7 +181,7 @@ console.log(result.was_truncated);
 - ✅ 基礎編碼檢測能力
 - ✅ Unicode 安全防護
 - ✅ 改進的誤報控制
-- ⚠️ 需要後續整合編碼檢測
+- ⚠️ 編碼檢測預設關閉，需手動啟用
 ```
 
 ---
@@ -191,6 +192,34 @@ console.log(result.was_truncated);
 - **提交**: `a549589`
 - **Worktree**: `/Users/jwang/Documents/Workspace/sensitive-guard/.claude/worktrees/security-fixes`
 - **主分支**: `main` (待合併)
+
+---
+
+## 🔌 編碼檢測啟用方式
+
+編碼檢測 (Base64/URL/Hex) 預設為 **關閉**，可透過以下三種方式啟用：
+
+### 方式一：YAML 設定檔
+在 `config/guard.config.yaml` 中設定：
+```yaml
+settings:
+  encoding_detection: true
+```
+
+### 方式二：MCP Tool 參數
+呼叫 MCP tool 時傳入參數：
+```json
+{
+  "content": "c2stcHJvai1hYmMxMjNkZWY0NTY3ODkwMTI=",
+  "enable_encoding_detection": true
+}
+```
+
+### 方式三：CLI Flag
+使用 `--encoding-detection` flag：
+```bash
+sensitive-guard scan --encoding-detection
+```
 
 ---
 

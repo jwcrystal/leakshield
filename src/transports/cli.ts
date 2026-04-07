@@ -229,7 +229,7 @@ export function printCliResult(result: ScanResult, label: string) {
 
 export async function runCli() {
   const args = process.argv.slice(2);
-  const config = loadConfig();
+  let config = loadConfig();
 
   const textIdx = args.indexOf("--text");
   const fileIdx = args.indexOf("--file");
@@ -241,6 +241,18 @@ export async function runCli() {
   const stdinMode = args.includes("--stdin");
   const redactMode = args.includes("--redact");
   const dryRun = args.includes("--dry-run");
+  const encodingDetection = args.includes("--enable-encoding-detection");
+
+  // Override config if flag is provided
+  if (encodingDetection) {
+    config = {
+      ...config,
+      settings: {
+        ...config.settings,
+        encoding_detection: true,
+      },
+    };
+  }
 
   const format: "text" | "json" = args[fmtIdx + 1] === "json" ? "json" : "text";
   const minSeverity: MinSeverity =
@@ -446,6 +458,7 @@ export async function runCli() {
   console.log(t("cli.usage_opt_dryrun"));
   console.log(t("cli.usage_opt_out"));
   console.log(t("cli.usage_opt_outside"));
+  console.log(t("cli.usage_opt_encoding"));
   console.log("");
   console.log(t("cli.usage_mcp_heading"));
   console.log(t("cli.usage_mcp"));

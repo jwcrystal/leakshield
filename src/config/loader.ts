@@ -24,6 +24,7 @@ export const GuardConfigSchema = z.object({
     max_chars: z.number().int().positive().default(200000),
     show_line_numbers: z.boolean().default(true),
     preview_length: z.number().int().positive().default(60),
+    encoding_detection: z.boolean().default(false),
   }).default({}),
 });
 

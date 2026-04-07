@@ -14,6 +14,7 @@ export interface GuardConfig {
     max_chars: number;
     show_line_numbers: boolean;
     preview_length: number;
+    encoding_detection: boolean;
   };
 }
 

@@ -22,10 +22,21 @@ export function createMcpServer() {
     {
       content: z.string().describe("要掃描的文字內容（程式碼、JSON、文件等）"),
       label: z.string().optional().describe("這段內容的說明標籤，方便識別（例如：config.ts、用戶資料 CSV）"),
+      enable_encoding_detection: z.boolean().optional().describe("啟用 Base64/URL/Hex 解碼檢測（預設關閉）"),
     },
-    async ({ content, label }) => {
-      const result = scanText(content, configRef.current);
-      const payload = toMcpDecisionPayload(result, content, configRef.current, {
+    async ({ content, label, enable_encoding_detection }) => {
+      let config = configRef.current;
+      if (enable_encoding_detection) {
+        config = {
+          ...config,
+          settings: {
+            ...config.settings,
+            encoding_detection: true,
+          },
+        };
+      }
+      const result = scanText(content, config);
+      const payload = toMcpDecisionPayload(result, content, config, {
         label: label ?? "(未命名)",
       });
       return {
@@ -40,8 +51,19 @@ export function createMcpServer() {
     {
       file_path: z.string().describe("要掃描的檔案絕對路徑或相對路徑"),
       allow_outside: z.boolean().optional().describe("允許掃描工作目錄以外的檔案（預設 false）。請謹慎使用，僅在明確需要掃描外部路徑時傳入 true"),
+      enable_encoding_detection: z.boolean().optional().describe("啟用 Base64/URL/Hex 解碼檢測（預設關閉）"),
     },
-    async ({ file_path, allow_outside = false }) => {
+    async ({ file_path, allow_outside = false, enable_encoding_detection }) => {
+      let config = configRef.current;
+      if (enable_encoding_detection) {
+        config = {
+          ...config,
+          settings: {
+            ...config.settings,
+            encoding_detection: true,
+          },
+        };
+      }
       const requestedPath = resolveWorkspacePath(process.cwd(), file_path);
       if (!fs.existsSync(requestedPath)) {
         return { content: [{ type: "text" as const, text: JSON.stringify({ error: `找不到檔案：${requestedPath}` }, null, 2) }] };
@@ -51,8 +73,8 @@ export function createMcpServer() {
         return { content: [{ type: "text" as const, text: JSON.stringify({ error: "Path is outside allowed workspace. Pass allow_outside: true to override." }, null, 2) }] };
       }
       const content = fs.readFileSync(resolved, "utf-8");
-      const result = scanText(content, configRef.current);
-      const payload = toMcpDecisionPayload(result, content, configRef.current, {
+      const result = scanText(content, config);
+      const payload = toMcpDecisionPayload(result, content, config, {
         file: resolved,
       });
       return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };

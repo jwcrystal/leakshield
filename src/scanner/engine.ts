@@ -19,7 +19,11 @@ function getRules(config: GuardConfig): Rule[] {
   return [...BUILTIN_RULES, ...dynamic];
 }
 
-export function scanText(text: string, config: GuardConfig): ScanResult {
+/**
+ * Internal scan function without encoding detection.
+ * Used by scanTextWithDecoding to avoid infinite recursion.
+ */
+function scanTextInternal(text: string, config: GuardConfig): ScanResult {
   // Step 1: Check for truncation
   const wasTruncated = text.length > config.settings.max_chars;
   const truncated = text.slice(0, config.settings.max_chars);
@@ -123,6 +127,41 @@ export function scanText(text: string, config: GuardConfig): ScanResult {
     was_truncated: wasTruncated || undefined,
   };
 }
+
+export function scanText(text: string, config: GuardConfig): ScanResult {
+  // If encoding detection is enabled, use the enhanced scanner
+  if (config.settings.encoding_detection) {
+    const result = encoding.scanTextWithDecoding(text, config);
+
+    // Add encoding warnings to summary
+    const warnings = [];
+    if (result.was_decoded) {
+      warnings.push(`編碼檢測: ${result.encoding_types_found.join(', ')}`);
+    }
+    if (result.original.was_truncated) {
+      warnings.push("內容截斷");
+    }
+
+    const finalSummary = warnings.length > 0
+      ? result.original.summary + ` [WARNING: ${warnings.join(', ')}]`
+      : result.original.summary;
+
+    return {
+      safe: result.safe,
+      total_findings: result.total_findings,
+      findings: result.findings,
+      summary: finalSummary,
+      recommendation: result.original.recommendation,
+      was_truncated: result.original.was_truncated,
+    };
+  }
+
+  // Otherwise, use internal scan without encoding detection
+  return scanTextInternal(text, config);
+}
+
+// ─── Export scanTextInternal for use by encoding.ts ─────────────────────────────
+export { scanTextInternal };
 
 export function redactText(text: string, config: GuardConfig): RedactResult {
   const truncated = text.slice(0, config.settings.max_chars);

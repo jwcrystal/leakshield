@@ -4,7 +4,7 @@
  */
 
 import type { GuardConfig, ScanResult } from "../types.js";
-import { scanText as scanTextInternal } from "./engine.js";
+import { scanTextInternal } from "./engine.js";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -192,6 +192,9 @@ export interface ScanWithDecodingResult {
   decoded: ScanResult[];
   was_decoded: boolean;
   encoding_types_found: string[];
+  safe: boolean;
+  total_findings: number;
+  findings: import("../types.js").Finding[];
 }
 
 /**

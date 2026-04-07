@@ -71,6 +71,7 @@ export const en = {
   "cli.usage_opt_out": "  --out <path>           Output path (use with --redact --file)",
   "cli.usage_opt_outside":
     "  --allow-outside        Allow scanning paths outside the working directory (disabled by default)",
+  "cli.usage_opt_encoding": "  --enable-encoding-detection  Enable Base64/URL/Hex decoding detection (disabled by default)",
   "cli.usage_mcp_heading": "\nMCP Server mode (auto-started by OpenCode):",
   "cli.usage_mcp": "  node dist/index.js",
 

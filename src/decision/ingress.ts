@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { redactText, scanText } from "../scanner/engine.js";
 import type { GuardConfig } from "../types.js";
 
@@ -13,6 +14,20 @@ export interface ProtectedText {
 export interface ProtectionOptions {
   mode: IngressMode;
   context: string;
+}
+
+export type TextProtector = (
+  text: string,
+  config: GuardConfig,
+  options: ProtectionOptions,
+) => ProtectedText;
+
+const DEFAULT_CACHE_SIZE = 512;
+
+interface CachedDecision {
+  action: "allow" | "block";
+  totalFindings: number;
+  blockedText?: string;
 }
 
 function blockedText(context: string, totalFindings: number): string {
@@ -60,6 +75,63 @@ export function protectText(
   }
 }
 
+/**
+ * Bounded LRU cache for history replay. Entries store only a content hash and
+ * an allow/block decision; original text and redacted text are never retained.
+ */
+export class ContentHashCache {
+  private readonly entries = new Map<string, CachedDecision>();
+  private hits = 0;
+  private misses = 0;
+
+  constructor(private readonly maxEntries = DEFAULT_CACHE_SIZE) {}
+
+  get size(): number {
+    return this.entries.size;
+  }
+
+  get stats(): { hits: number; misses: number } {
+    return { hits: this.hits, misses: this.misses };
+  }
+
+  protect(text: string, config: GuardConfig, options: ProtectionOptions): ProtectedText {
+    const key = this.keyFor(text, config, options);
+    const cached = this.entries.get(key);
+    if (cached) {
+      this.hits++;
+      this.entries.delete(key);
+      this.entries.set(key, cached);
+      return cached.action === "allow"
+        ? { action: "allow", text, totalFindings: 0 }
+        : { action: "block", text: cached.blockedText!, totalFindings: cached.totalFindings };
+    }
+
+    this.misses++;
+    const result = protectText(text, config, options);
+    if (result.action !== "redact") {
+      this.set(key, result);
+    }
+    return result;
+  }
+
+  private keyFor(text: string, config: GuardConfig, options: ProtectionOptions): string {
+    return createHash("sha256")
+      .update(JSON.stringify({ text, config, mode: options.mode, context: options.context }))
+      .digest("hex");
+  }
+
+  private set(key: string, result: ProtectedText): void {
+    if (this.entries.size >= this.maxEntries) {
+      const oldestKey = this.entries.keys().next().value;
+      if (oldestKey !== undefined) this.entries.delete(oldestKey);
+    }
+
+    this.entries.set(key, result.action === "allow"
+      ? { action: "allow", totalFindings: 0 }
+      : { action: "block", totalFindings: result.totalFindings, blockedText: result.text });
+  }
+}
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null) return false;
   const prototype = Object.getPrototypeOf(value);
@@ -71,10 +143,11 @@ export function protectUnknownStrings(
   value: unknown,
   config: GuardConfig,
   options: ProtectionOptions,
+  protector: TextProtector = protectText,
   seen = new WeakMap<object, unknown>(),
 ): unknown {
   if (typeof value === "string") {
-    return protectText(value, config, options).text;
+    return protector(value, config, options).text;
   }
 
   if (typeof value !== "object" || value === null) return value;
@@ -84,7 +157,7 @@ export function protectUnknownStrings(
   if (Array.isArray(value)) {
     const copy: unknown[] = [];
     seen.set(value, copy);
-    copy.push(...value.map((item) => protectUnknownStrings(item, config, options, seen)));
+    copy.push(...value.map((item) => protectUnknownStrings(item, config, options, protector, seen)));
     return copy;
   }
 
@@ -95,7 +168,7 @@ export function protectUnknownStrings(
   const copy: Record<string, unknown> = {};
   seen.set(value, copy);
   for (const [key, item] of Object.entries(value)) {
-    copy[key] = protectUnknownStrings(item, config, options, seen);
+    copy[key] = protectUnknownStrings(item, config, options, protector, seen);
   }
   return copy;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { protectText, protectUnknownStrings } from "../src/decision/ingress.js";
+import { ContentHashCache, protectText, protectUnknownStrings } from "../src/decision/ingress.js";
 import type { GuardConfig } from "../src/types.js";
 
 const config: GuardConfig = {
@@ -80,5 +80,58 @@ describe("protectUnknownStrings()", () => {
 
     expect(protectedValue).not.toBe(original);
     expect(protectedValue.self).toBe(protectedValue);
+  });
+});
+
+describe("ContentHashCache", () => {
+  it("reuses identical allow decisions without retaining the input", () => {
+    const cache = new ContentHashCache();
+    const options = { mode: "block" as const, context: "history" };
+
+    expect(cache.protect("safe content", config, options).action).toBe("allow");
+    expect(cache.protect("safe content", config, options).text).toBe("safe content");
+
+    expect(cache.size).toBe(1);
+    expect(cache.stats).toEqual({ hits: 1, misses: 1 });
+  });
+
+  it("keys decisions by configuration, mode, and context", () => {
+    const cache = new ContentHashCache();
+    const options = { mode: "block" as const, context: "history" };
+    const changedConfig: GuardConfig = {
+      ...config,
+      private_domains: ["internal.example.com"],
+    };
+
+    expect(cache.protect("internal.example.com", config, options).action).toBe("allow");
+    expect(cache.protect("internal.example.com", changedConfig, options).action).toBe("block");
+    expect(cache.protect("internal.example.com", changedConfig, { ...options, context: "tool output" }).action).toBe("block");
+
+    expect(cache.size).toBe(3);
+    expect(cache.stats).toEqual({ hits: 0, misses: 3 });
+  });
+
+  it("evicts least recently used decisions when full", () => {
+    const cache = new ContentHashCache(2);
+    const options = { mode: "block" as const, context: "history" };
+
+    cache.protect("first", config, options);
+    cache.protect("second", config, options);
+    cache.protect("third", config, options);
+    cache.protect("first", config, options);
+
+    expect(cache.size).toBe(2);
+    expect(cache.stats).toEqual({ hits: 0, misses: 4 });
+  });
+
+  it("does not cache redacted text", () => {
+    const cache = new ContentHashCache();
+    const options = { mode: "redact" as const, context: "history" };
+
+    cache.protect(`token=${secret}`, config, options);
+    cache.protect(`token=${secret}`, config, options);
+
+    expect(cache.size).toBe(0);
+    expect(cache.stats).toEqual({ hits: 0, misses: 2 });
   });
 });

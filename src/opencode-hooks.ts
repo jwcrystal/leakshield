@@ -1,9 +1,10 @@
 import type { Hooks } from "@opencode-ai/plugin";
 import type { Part } from "@opencode-ai/sdk";
 import {
-  protectText,
+  ContentHashCache,
   protectUnknownStrings,
   type IngressMode,
+  type TextProtector,
 } from "./decision/ingress.js";
 import type { GuardConfig } from "./types.js";
 
@@ -21,32 +22,37 @@ function blockedAttachment(part: Part): Part {
   };
 }
 
-function protectParts(parts: readonly Part[], config: GuardConfig, mode: IngressMode): Part[] {
+function protectParts(
+  parts: readonly Part[],
+  config: GuardConfig,
+  mode: IngressMode,
+  protector: TextProtector,
+): Part[] {
   return parts.map((part) => {
     if (part.type === "file") return blockedAttachment(part);
     if (part.type === "text") {
-      const protectedText = protectText(part.text, config, { mode, context: "message text" });
+      const protectedText = protector(part.text, config, { mode, context: "message text" });
       return { ...part, text: protectedText.text };
     }
     if (part.type === "reasoning") {
-      const protectedText = protectText(part.text, config, { mode, context: "reasoning text" });
+      const protectedText = protector(part.text, config, { mode, context: "reasoning text" });
       return { ...part, text: protectedText.text };
     }
     if (part.type === "tool") {
       return {
         ...part,
-        state: protectUnknownStrings(part.state, config, { mode, context: "tool history" }) as typeof part.state,
+        state: protectUnknownStrings(part.state, config, { mode, context: "tool history" }, protector) as typeof part.state,
       };
     }
     if (part.type === "subtask") {
-      const protectedPrompt = protectText(part.prompt, config, { mode, context: "subtask prompt" });
-      const protectedDescription = protectText(part.description, config, { mode, context: "subtask description" });
+      const protectedPrompt = protector(part.prompt, config, { mode, context: "subtask prompt" });
+      const protectedDescription = protector(part.description, config, { mode, context: "subtask description" });
       return { ...part, prompt: protectedPrompt.text, description: protectedDescription.text };
     }
     if (part.type === "retry") {
       return {
         ...part,
-        error: protectUnknownStrings(part.error, config, { mode, context: "retry error" }) as typeof part.error,
+        error: protectUnknownStrings(part.error, config, { mode, context: "retry error" }, protector) as typeof part.error,
       };
     }
     return part;
@@ -54,32 +60,36 @@ function protectParts(parts: readonly Part[], config: GuardConfig, mode: Ingress
 }
 
 export function createHooks(config: GuardConfig, mode: IngressMode): Hooks {
+  const cache = new ContentHashCache();
+  const protectWithCache: TextProtector = (text, currentConfig, options) =>
+    cache.protect(text, currentConfig, options);
+
   return {
     "chat.message": async (_input, output) => {
-      output.parts.splice(0, output.parts.length, ...protectParts(output.parts, config, mode));
+      output.parts.splice(0, output.parts.length, ...protectParts(output.parts, config, mode, protectWithCache));
     },
     "tool.execute.after": async (_input, output) => {
-      const protectedTitle = protectText(output.title, config, { mode, context: "tool title" });
-      const protectedOutput = protectText(output.output, config, { mode, context: "tool output" });
+      const protectedTitle = protectWithCache(output.title, config, { mode, context: "tool title" });
+      const protectedOutput = protectWithCache(output.output, config, { mode, context: "tool output" });
       output.title = protectedTitle.text;
       output.output = protectedOutput.text;
-      output.metadata = protectUnknownStrings(output.metadata, config, { mode, context: "tool metadata" });
+      output.metadata = protectUnknownStrings(output.metadata, config, { mode, context: "tool metadata" }, protectWithCache);
     },
     "experimental.chat.messages.transform": async (_input, output) => {
       for (const message of output.messages) {
-        message.parts.splice(0, message.parts.length, ...protectParts(message.parts, config, mode));
+        message.parts.splice(0, message.parts.length, ...protectParts(message.parts, config, mode, protectWithCache));
       }
     },
     "experimental.chat.system.transform": async (_input, output) => {
       output.system.splice(
         0,
         output.system.length,
-        ...output.system.map((text) => protectText(text, config, { mode, context: "system prompt" }).text),
+        ...output.system.map((text) => protectWithCache(text, config, { mode, context: "system prompt" }).text),
       );
     },
     "tool.definition": async (_input, output) => {
-      output.description = protectText(output.description, config, { mode, context: "tool description" }).text;
-      output.parameters = protectUnknownStrings(output.parameters, config, { mode, context: "tool parameters" });
+      output.description = protectWithCache(output.description, config, { mode, context: "tool description" }).text;
+      output.parameters = protectUnknownStrings(output.parameters, config, { mode, context: "tool parameters" }, protectWithCache);
     },
   };
 }

@@ -24,6 +24,8 @@ export type {
   GuardDecisionResult,
 } from "./decision/model.js";
 export { toDecisionResult } from "./decision/model.js";
+export { protectText, protectUnknownStrings } from "./decision/ingress.js";
+export type { IngressMode, ProtectionAction, ProtectedText, ProtectionOptions } from "./decision/ingress.js";
 
 // Security enhancement exports
 export { scanTextWithDecoding } from "./scanner/engine.js";

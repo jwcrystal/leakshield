@@ -5,7 +5,8 @@
 **在把程式碼、文件、資料丟給 AI 服務之前，先掃描敏感內容的守門員。**
 
 支援四種使用模式：
-- **MCP Server**：整合進 OpenCode / Claude Code，AI 讀檔前自動觸發守門
+- **OpenCode Plugin**：在內容寫入 session 或送往 OpenCode 模型前強制執行入口檢查
+- **MCP Server**：提供 Claude Code、CI 或其他 MCP client 隨需掃描
 - **CLI**：手動掃描指定文字、檔案或目錄；支援**脫敏模式**，可直接替換敏感內容
 - **Web UI**：瀏覽器介面，貼上內容即可掃描；同時提供 REST API
 
@@ -224,7 +225,54 @@ curl -s -X POST http://localhost:3001/scan \
 
 ---
 
-### 三、MCP Server 模式（整合進 OpenCode / Claude Code）
+### 三、OpenCode Plugin 模式（建議使用）
+
+OpenCode plugin 成功載入後會成為強制性整合：它會在 OpenCode 儲存或送出使用者文字給模型前掃描並攔截，清理 system prompt 與 tool definition，並在下一輪模型讀取前清理工具輸出及歷史訊息。它會固定啟用編碼內容偵測。plugin 選項或掃描設定無效時，所有受保護 hook 都會 fail closed 並中止模型請求。
+
+先 build 專案，再將編譯後的 plugin 加到 `opencode.json`：
+
+```json
+{
+  "plugin": [
+    [
+      "file:///絕對路徑/sensitive-guard/dist/opencode.js",
+      { "mode": "block" }
+    ]
+  ]
+}
+```
+
+`block` 是預設值，會用不含機敏值的攔截訊息替換危險內容。只有在你明確希望已辨識的直接命中改為 `[REDACTED_TYPE]` 佔位符時，才設定 `mode: "redact"`。
+
+附件會被攔截，因為文字掃描器無法安全檢查任意二進位或遠端附件內容。既有 session 可能已存有原文，安裝 plugin 後請建立新 session。此 plugin 僅保護 OpenCode 發出的模型請求，不涵蓋其他 AI client 或本機工具。
+
+OpenCode 目前會記錄並跳過在 plugin factory 執行前就載入失敗的模組，例如套件缺失或 JavaScript 語法錯誤。安裝或升級後，請先用 `sk-` 加至少 20 個英數字元的合成測試 key 執行 smoke test，確認訊息已被 Sensitive Guard 替換，再處理真實機敏資料。
+
+#### 隔離 smoke test
+
+在專案根目錄執行下列指令。它會使用暫存的 OpenCode 設定目錄與合成值，不會使用真實憑證：
+
+```bash
+npm run build
+SMOKE_DIR="$(mktemp -d)"
+PROJECT_DIR="$(pwd)"
+cat > "$SMOKE_DIR/opencode.json" <<EOF
+{
+  "plugin": [
+    ["file://$PROJECT_DIR/dist/opencode.js", { "mode": "block" }]
+  ]
+}
+EOF
+OPENCODE_CONFIG_DIR="$SMOKE_DIR" opencode --prompt \
+  "Smoke test only. Do not reveal or use this token: sk-AAAAAAAAAAAAAAAAAAAA"
+rm -rf "$SMOKE_DIR"
+```
+
+模型可見的訊息必須包含 Sensitive Guard 的攔截通知，且不可包含該合成 token。不要用真實憑證執行此測試。
+
+發布到 npm 後，可用 `"sensitive-guard"` 取代上述 `file:` URL。
+
+### 四、MCP Server 模式（Claude Code / CI / 手動整合）
 
 #### 步驟 1：Build
 
@@ -232,7 +280,7 @@ curl -s -X POST http://localhost:3001/scan \
 npm run build
 ```
 
-#### 步驟 2：設定 OpenCode
+#### 步驟 2：設定 MCP client
 
 在你的 OpenCode 設定檔（通常是 `~/.config/opencode/config.json` 或 `opencode.json`）加入：
 
@@ -253,9 +301,9 @@ npm run build
 
 > ⚠️ **務必用絕對路徑**，不要用 `~` 或相對路徑。
 
-#### 步驟 3：在 OpenCode System Prompt 中加入守門規則
+#### 步驟 3：在 System Prompt 中加入守門規則
 
-在你的 OpenCode system prompt 加入以下指令，讓 AI 在讀取任何檔案或處理你貼上的程式碼前，先呼叫掃描工具：
+對沒有原生入口 hook 的 MCP client，在 system prompt 加入以下指令，讓 AI 在讀取任何檔案或處理你貼上的程式碼前，先呼叫掃描工具：
 
 ```
 在你讀取任何本機檔案、或我提供任何程式碼 / 設定檔 / 資料之前，

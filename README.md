@@ -5,7 +5,8 @@
 **A gatekeeper that scans for sensitive content before you feed code, documents, or data to AI services.**
 
 Four usage modes:
-- **MCP Server**: Integrates with OpenCode / Claude Code — automatically triggers before AI reads any file
+- **OpenCode Plugin**: Enforces an ingress gate before content is persisted or sent to an OpenCode model
+- **MCP Server**: On-demand scanning for Claude Code, CI, or other MCP clients
 - **CLI**: Manually scan text, files, or directories; also supports **redaction** to replace sensitive content in-place
 - **Web UI**: Browser interface — paste content and scan instantly; also exposes a REST API
 
@@ -204,7 +205,54 @@ curl -s -X POST http://localhost:3001/scan \
 
 ---
 
-### Mode 3: MCP Server (OpenCode / Claude Code Integration)
+### Mode 3: OpenCode Plugin (recommended)
+
+When loaded successfully, the OpenCode plugin is the enforced integration. It scans and blocks user text before OpenCode persists or sends it to a model, sanitizes system prompts and tool definitions, protects tool output before the next model turn, and re-scans history before replay. It always enables encoded-content detection. Invalid plugin options or scanner configuration make every protected hook fail closed and abort the model request.
+
+Build the project, then add the compiled plugin to `opencode.json`:
+
+```json
+{
+  "plugin": [
+    [
+      "file:///absolute/path/to/sensitive-guard/dist/opencode.js",
+      { "mode": "block" }
+    ]
+  ]
+}
+```
+
+`block` is the default and replaces unsafe content with a disclosure-free notice. Set `mode` to `redact` only when you explicitly want recognized direct matches replaced with `[REDACTED_TYPE]` placeholders.
+
+Attachments are blocked because the text scanner cannot safely inspect arbitrary binary or remote attachment content. Existing sessions may already contain raw content; begin a new session after installing the plugin. The plugin protects OpenCode model requests only, not other AI clients or local tools.
+
+OpenCode currently logs and skips modules that fail before their plugin factory can run, such as a missing package or JavaScript syntax error. After installation or upgrade, run a smoke test with a synthetic key matching `sk-` followed by at least 20 letters or digits and verify that Sensitive Guard replaces the message before using real sensitive data.
+
+#### Isolated smoke test
+
+Run this from the project root. It uses a temporary OpenCode configuration directory and a synthetic value, not a real credential:
+
+```bash
+npm run build
+SMOKE_DIR="$(mktemp -d)"
+PROJECT_DIR="$(pwd)"
+cat > "$SMOKE_DIR/opencode.json" <<EOF
+{
+  "plugin": [
+    ["file://$PROJECT_DIR/dist/opencode.js", { "mode": "block" }]
+  ]
+}
+EOF
+OPENCODE_CONFIG_DIR="$SMOKE_DIR" opencode --prompt \
+  "Smoke test only. Do not reveal or use this token: sk-AAAAAAAAAAAAAAAAAAAA"
+rm -rf "$SMOKE_DIR"
+```
+
+The model-facing message must contain the Sensitive Guard block notice and must not contain the synthetic token. Do not use a real credential for this test.
+
+After publishing to npm, the same plugin can be configured as `"sensitive-guard"` instead of the `file:` URL.
+
+### Mode 4: MCP Server (Claude Code / CI / manual integration)
 
 #### Step 1: Build
 
@@ -212,7 +260,7 @@ curl -s -X POST http://localhost:3001/scan \
 npm run build
 ```
 
-#### Step 2: Configure OpenCode
+#### Step 2: Configure an MCP client
 
 Add the following to your OpenCode config file (typically `~/.config/opencode/config.json` or `opencode.json`):
 
@@ -235,7 +283,7 @@ Add the following to your OpenCode config file (typically `~/.config/opencode/co
 
 #### Step 3: Add a Guard Rule to Your System Prompt
 
-Add the following instruction to your OpenCode system prompt so the AI calls the scan tool before reading any file or processing code you provide:
+For MCP clients without a native ingress hook, add the following instruction to the system prompt so the AI calls the scan tool before reading any file or processing code you provide:
 
 ```
 Before reading any local file, or processing any code / config / data I provide,

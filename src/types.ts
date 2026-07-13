@@ -42,7 +42,7 @@ export interface Finding {
   match_start?: number;
   /** Internal-only: byte offset of match end in the original content. */
   match_end?: number;
-  /** Internal-only: the raw matched text. Never expose to CLI/MCP outputs. */
+  /** Internal-only: the raw matched text. Never expose to transport outputs. */
   match_text?: string;
   /** Metadata about encoding detection (if found via decoding) */
   encoding_detected?: {

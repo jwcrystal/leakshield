@@ -26,7 +26,7 @@ export interface GuardDecisionFinding {
   line?: number;
 }
 
-/** The full decision result consumed by the UI / MCP layer. */
+/** The full decision result consumed by the UI layer. */
 export interface GuardDecisionResult {
   decision: GuardDecision;
   riskLevel: GuardRiskLevel;

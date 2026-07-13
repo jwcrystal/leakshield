@@ -459,8 +459,4 @@ export async function runCli() {
   console.log(t("cli.usage_opt_out"));
   console.log(t("cli.usage_opt_outside"));
   console.log(t("cli.usage_opt_encoding"));
-  console.log("");
-  console.log(t("cli.usage_mcp_heading"));
-  console.log(t("cli.usage_mcp"));
-  console.log("");
 }

@@ -71,9 +71,6 @@ export const zhTW = {
   "cli.usage_opt_out": "  --out <path>           搭配 --redact --file，指定輸出路徑",
   "cli.usage_opt_outside": "  --allow-outside        允許掃描工作目錄以外的路徑（預設禁止）",
   "cli.usage_opt_encoding": "  --enable-encoding-detection  啟用 Base64/URL/Hex 解碼檢測（預設關閉）",
-  "cli.usage_mcp_heading": "\nMCP Server 模式（由 OpenCode 自動啟動）：",
-  "cli.usage_mcp": "  node dist/index.js",
-
   // web — server start
   "web.server_title": "🛡️  sensitive-guard web UI",
   "web.server_url": "   http://localhost:{port}",

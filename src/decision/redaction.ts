@@ -3,14 +3,14 @@
  * and safe preview generation.
  *
  * Internal match metadata (match_start, match_end, match_text) is used
- * for replacement but MUST NOT be exposed via CLI/MCP-facing outputs.
+ * for replacement but MUST NOT be exposed via transport-facing outputs.
  */
 
 import type { Finding, FindingType, GuardConfig, ScanResult, RedactResult } from "../types.js";
 
 // ─── Transport-safe types ─────────────────────────────────────────────────────
 
-/** Keys that are internal-only and must never appear in CLI/MCP-facing outputs. */
+/** Keys that are internal-only and must never appear in transport-facing outputs. */
 const INTERNAL_FINDING_KEYS = ["match_start", "match_end", "match_text"] as const;
 type InternalFindingKey = (typeof INTERNAL_FINDING_KEYS)[number];
 
@@ -33,7 +33,7 @@ export interface TransportSafeRedactResult
 
 /**
  * Strip internal match metadata from a single finding.
- * The returned object is safe to serialize to CLI/MCP consumers.
+ * The returned object is safe to serialize to transport consumers.
  */
 export function sanitizeFindingForExport(
   f: Finding,

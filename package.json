@@ -1,7 +1,7 @@
 {
   "name": "sensitive-guard",
   "version": "1.0.0",
-  "description": "OpenCode plugin, MCP server, and CLI for scanning sensitive content before sending it to AI",
+  "description": "OpenCode plugin, CLI, and web scanner for sensitive content before sending it to AI",
   "type": "module",
   "main": "./dist/opencode.js",
   "files": [
@@ -11,16 +11,17 @@
     "sensitive-guard": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc",
     "prepack": "npm run build",
-    "start": "node dist/index.js",
-    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js --cli",
+    "dev": "tsx src/index.ts --cli",
     "scan": "tsx src/index.ts --cli",
+    "web": "tsx src/index.ts --web",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
     "chalk": "^5.3.0",
     "js-yaml": "^4.1.0",
     "zod": "^3.22.0"

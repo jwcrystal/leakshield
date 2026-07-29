@@ -31,6 +31,8 @@ export const zhTW = {
   "cli.dryrun_preview": "    預覽：{preview} → [REDACTED_{type}]",
   "cli.redact_written": "✅ 已將脫敏內容寫入：{path}",
   "cli.redact_footer": "[sensitive-guard] {summary}",
+  "cli.redact_incomplete": "⛔ 脫敏不完整：redact 後仍有 {residual} 個殘留命中。輸出已停止。",
+  "cli.redact_verified": "✅ 脫敏已驗證 — 無殘留命中。",
 
   // cli — dir mode
   "cli.scan_dir": "\n🔍 掃描目錄：{path}",

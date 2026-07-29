@@ -1,3 +1,5 @@
+import type { ExactValueDetector } from "./scanner/exact-values.js";
+
 // ─── Domain Types ────────────────────────────────────────────────────────────
 
 export interface CustomRuleConfig {
@@ -15,7 +17,10 @@ export interface GuardConfig {
     show_line_numbers: boolean;
     preview_length: number;
     encoding_detection: boolean;
+    env_files?: string[];
   };
+  /** In-memory only; serializes to a fingerprint without retaining raw values. */
+  exact_value_detector?: ExactValueDetector;
 }
 
 export type FindingType =
@@ -29,6 +34,7 @@ export type FindingType =
   | "DB_CONNECTION"
   | "PRIVATE_DOMAIN"
   | "NDA_KEYWORD"
+  | "ENV_SECRET"
   | "CUSTOM";
 
 export interface Finding {

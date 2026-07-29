@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ContentHashCache, protectText, protectUnknownStrings } from "../src/decision/ingress.js";
+import { ExactValueDetector } from "../src/scanner/exact-values.js";
 import type { GuardConfig } from "../src/types.js";
 
 const config: GuardConfig = {
@@ -109,6 +110,24 @@ describe("ContentHashCache", () => {
 
     expect(cache.size).toBe(3);
     expect(cache.stats).toEqual({ hits: 0, misses: 3 });
+  });
+
+  it("invalidates decisions when configured exact values change", () => {
+    const cache = new ContentHashCache();
+    const options = { mode: "block" as const, context: "history" };
+    const opaqueValue = "unclassified-opaque-value-987654321";
+    const previousConfig: GuardConfig = {
+      ...config,
+      exact_value_detector: new ExactValueDetector(["different-opaque-value-123456789"]),
+    };
+    const currentConfig: GuardConfig = {
+      ...config,
+      exact_value_detector: new ExactValueDetector([opaqueValue]),
+    };
+
+    expect(cache.protect(opaqueValue, previousConfig, options).action).toBe("allow");
+    expect(cache.protect(opaqueValue, currentConfig, options).action).toBe("block");
+    expect(cache.stats).toEqual({ hits: 0, misses: 2 });
   });
 
   it("evicts least recently used decisions when full", () => {

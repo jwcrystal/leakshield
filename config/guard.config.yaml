@@ -52,3 +52,8 @@ settings:
   show_line_numbers: true
   # 命中內容預覽的最大長度（遮蔽敏感值）
   preview_length: 60
+  # 已知 secret value 的來源檔案。預設不讀取；路徑相對專案根目錄。
+  # 檔案內的非空 value 會用於精確比對，但不會傳送、記錄或序列化。
+  # env_files:
+  #   - .env
+  #   - .env.local

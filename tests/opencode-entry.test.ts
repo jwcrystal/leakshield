@@ -7,6 +7,7 @@ import sensitiveGuardPlugin, * as pluginModule from "../src/opencode.js";
 
 const secret = "sk-12345678901234567890";
 const temporaryDirectories: string[] = [];
+const exactSecret = "unclassified-opaque-value-987654321";
 
 function textPart(text: string): Part {
   return {
@@ -53,6 +54,21 @@ describe("OpenCode plugin entry", () => {
     });
 
     await expect(invokeHook).rejects.toThrow("Sensitive Guard initialization failed");
+  });
+
+  it("loads configured env_files relative to the OpenCode workspace", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-"));
+    temporaryDirectories.push(directory);
+    const configPath = path.join(directory, "guard.config.yaml");
+    fs.writeFileSync(path.join(directory, ".env"), `TOKEN=${exactSecret}\n`, "utf8");
+    fs.writeFileSync(configPath, "settings:\n  env_files:\n    - .env\n", "utf8");
+
+    const hooks = await sensitiveGuardPlugin({ worktree: directory } as never, { configPath });
+    const parts = [textPart(`token=${exactSecret}`)];
+    await hooks["chat.message"]!({ sessionID: "session-1" }, { message: {} as never, parts });
+
+    expect(JSON.stringify(parts)).not.toContain(exactSecret);
+    expect(JSON.stringify(parts)).toContain("Sensitive Guard blocked message text");
   });
 
   it("blocks model requests when plugin options are invalid", async () => {

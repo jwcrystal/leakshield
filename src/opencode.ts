@@ -21,10 +21,18 @@ function withEncodingDetection(config: GuardConfig): GuardConfig {
   };
 }
 
-const sensitiveGuardPlugin = (async (_input, rawOptions) => {
+function getWorkspaceRoot(input: unknown): string {
+  if (typeof input !== "object" || input === null) return process.cwd();
+  const context = input as { worktree?: unknown; directory?: unknown };
+  if (typeof context.worktree === "string") return context.worktree;
+  if (typeof context.directory === "string") return context.directory;
+  return process.cwd();
+}
+
+const sensitiveGuardPlugin = (async (input, rawOptions) => {
   try {
     const options: PluginOptions = PluginOptionsSchema.parse(rawOptions);
-    const config = withEncodingDetection(loadConfig(options.configPath));
+    const config = withEncodingDetection(loadConfig(options.configPath, getWorkspaceRoot(input)));
     return createHooks(config, options.mode);
   } catch {
     return createFailClosedHooks();

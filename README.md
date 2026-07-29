@@ -270,6 +270,19 @@ After publishing to npm, the same plugin can be configured as `"sensitive-guard"
 
 Edit `config/guard.config.yaml`:
 
+### Exact `.env` Value Detection
+
+Enable this only for files whose values should never enter an LLM context:
+
+```yaml
+settings:
+  env_files:
+    - .env
+    - .env.local
+```
+
+Paths are relative to the workspace root and must remain inside it. Sensitive Guard reads non-empty values of at least eight characters, then detects exact occurrences in text sent to the model. It does not automatically read `.env`, process environment variables, or send, log, or serialize the loaded values. Restart OpenCode after changing an enabled env file.
+
 ```yaml
 # NDA keywords (case-insensitive)
 nda_keywords:

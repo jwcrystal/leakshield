@@ -32,6 +32,8 @@ export const en = {
   "cli.dryrun_preview": "    preview: {preview} → [REDACTED_{type}]",
   "cli.redact_written": "✅ Redacted content written to: {path}",
   "cli.redact_footer": "[sensitive-guard] {summary}",
+  "cli.redact_incomplete": "⛔ Redaction incomplete: {residual} residual finding(s) remain after redaction. Output suppressed.",
+  "cli.redact_verified": "✅ Redaction verified — no residual findings.",
 
   // cli — dir mode
   "cli.scan_dir": "\n🔍 Scanning directory: {path}",

@@ -306,7 +306,13 @@ settings:
   show_line_numbers: true
   preview_length: 60
   encoding_detection: false  # 編碼檢測（Base64/URL/Hex），預設關閉
+  # 選用：將指定檔案的 value 作為 exact-secret matcher，不會自動讀取 .env
+  env_files:
+    - .env
+    - .env.local
 ```
+
+`env_files` 路徑相對專案根目錄，且不能離開 workspace。Guard 只讀取非空且至少 8 字元的 value，掃描準備送往模型的內容是否出現完全相同的值。載入的 value 不會傳給模型、寫入 log 或序列化；也不會自動讀取所有 process environment variables。修改已啟用的 `.env` 後，請重啟 OpenCode。
 
 修改後：
 - **CLI**：下次執行自動載入

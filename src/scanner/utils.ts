@@ -8,7 +8,7 @@ export function redact(_value: string, _previewLen: number): string {
 
 export function getLineCol(text: string, index: number): { line: number; col: number } {
   const before = text.slice(0, index);
-  const lines = before.split("\n");
+  const lines = before.split(/\r?\n/);
   return { line: lines.length, col: lines[lines.length - 1].length + 1 };
 }
 
@@ -48,7 +48,7 @@ const IGNORE_PATTERNS = [
  */
 export function getIgnoredLines(text: string): Set<number> {
   const ignored = new Set<number>();
-  const lines = text.split("\n");
+  const lines = text.split(/\r?\n/);
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];

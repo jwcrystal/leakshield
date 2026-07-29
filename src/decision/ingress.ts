@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { redactText, scanText } from "../scanner/engine.js";
+import { scanText } from "../scanner/engine.js";
+import { redactAndVerify } from "../scanner/redaction-verifier.js";
 import type { GuardConfig } from "../types.js";
 
 export type IngressMode = "block" | "redact";
@@ -51,16 +52,13 @@ export function protectText(
     }
 
     if (options.mode === "redact" && !scan.was_truncated) {
-      const redacted = redactText(text, config).redacted;
-      if (redacted !== text) {
-        const verification = scanText(redacted, config);
-        if (verification.safe && !verification.was_truncated) {
-          return {
-            action: "redact",
-            text: redacted,
-            totalFindings: scan.total_findings,
-          };
-        }
+      const verified = redactAndVerify(text, config);
+      if (verified.verified && verified.redacted !== text) {
+        return {
+          action: "redact",
+          text: verified.redacted,
+          totalFindings: scan.total_findings,
+        };
       }
     }
 
@@ -115,8 +113,15 @@ export class ContentHashCache {
   }
 
   private keyFor(text: string, config: GuardConfig, options: ProtectionOptions): string {
+    const { exact_value_detector, ...serializableConfig } = config;
     return createHash("sha256")
-      .update(JSON.stringify({ text, config, mode: options.mode, context: options.context }))
+      .update(JSON.stringify({
+        text,
+        config: serializableConfig,
+        exactValueFingerprint: exact_value_detector?.fingerprint,
+        mode: options.mode,
+        context: options.context,
+      }))
       .digest("hex");
   }
 

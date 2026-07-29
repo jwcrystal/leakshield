@@ -10,6 +10,8 @@ import { sanitizeForScanning, isLikelyHomographAttack, detectSuspiciousUnicode }
 // rebuilt only when the config reference changes (e.g. after reload_config).
 const dynamicCache = new WeakMap<GuardConfig, Rule[]>();
 
+type MatchEntry = { index: number; length: number; type: string };
+
 function getRules(config: GuardConfig): Rule[] {
   let dynamic = dynamicCache.get(config);
   if (!dynamic) {
@@ -17,6 +19,67 @@ function getRules(config: GuardConfig): Rule[] {
     dynamicCache.set(config, dynamic);
   }
   return [...BUILTIN_RULES, ...dynamic];
+}
+
+function hasMatchingRange(findings: readonly Finding[], index: number, length: number): boolean {
+  return findings.some((finding) => finding.match_start === index && finding.match_end === index + length);
+}
+
+function collapseOverlappingMatches(matches: readonly MatchEntry[]): MatchEntry[] {
+  const sorted = [...matches].sort((left, right) => left.index - right.index || right.length - left.length);
+  const groups = sorted.reduce<Array<{ start: number; end: number; representative: MatchEntry }>>(
+    (collapsed, match) => {
+      const previous = collapsed.at(-1);
+      const matchEnd = match.index + match.length;
+      if (!previous || match.index >= previous.end) {
+        return [...collapsed, { start: match.index, end: matchEnd, representative: match }];
+      }
+
+      const representative = match.length > previous.representative.length
+        ? match
+        : previous.representative;
+      return [
+        ...collapsed.slice(0, -1),
+        { start: previous.start, end: Math.max(previous.end, matchEnd), representative },
+      ];
+    },
+    [],
+  );
+
+  return groups
+    .map(({ start, end, representative }) => ({
+      index: start,
+      length: end - start,
+      type: representative.type,
+    }))
+    .sort((left, right) => right.index - left.index);
+}
+
+function addExactValueFindings(
+  text: string,
+  config: GuardConfig,
+  ignoredLines: ReadonlySet<number>,
+  findings: Finding[],
+): void {
+  const detector = config.exact_value_detector;
+  if (!detector) return;
+
+  for (const match of detector.findAll(text)) {
+    if (hasMatchingRange(findings, match.index, match.length)) continue;
+    const { line, col } = getLineCol(text, match.index);
+    if (ignoredLines.has(line)) continue;
+    findings.push({
+      type: "ENV_SECRET",
+      severity: "HIGH",
+      line: config.settings.show_line_numbers ? line : undefined,
+      column: config.settings.show_line_numbers ? col : undefined,
+      preview: "****",
+      description: "Value from configured env file",
+      match_start: match.index,
+      match_end: match.index + match.length,
+      match_text: text.slice(match.index, match.index + match.length),
+    });
+  }
 }
 
 /**
@@ -90,6 +153,8 @@ function scanTextInternal(text: string, config: GuardConfig): ScanResult {
       });
     }
   }
+
+  addExactValueFindings(truncated, config, ignoredLines, findings);
 
   const safe = findings.length === 0;
   const highCount = findings.filter((f) => f.severity === "HIGH").length;
@@ -187,7 +252,6 @@ export function redactText(text: string, config: GuardConfig): RedactResult {
   const allRules = getRules(config);
   const ignoredLines = getIgnoredLines(truncated);
 
-  type MatchEntry = { index: number; length: number; type: string };
   const matches: MatchEntry[] = [];
   const seen = new Set<string>();
 
@@ -204,10 +268,18 @@ export function redactText(text: string, config: GuardConfig): RedactResult {
     }
   }
 
-  // Sort descending by index so later replacements don't shift earlier offsets
-  matches.sort((a, b) => b.index - a.index);
+  const detector = config.exact_value_detector;
+  if (detector) {
+    for (const match of detector.findAll(truncated)) {
+      if (matches.some((entry) => entry.index === match.index && entry.length === match.length)) continue;
+      const { line } = getLineCol(truncated, match.index);
+      if (ignoredLines.has(line)) continue;
+      matches.push({ index: match.index, length: match.length, type: "ENV_SECRET" });
+    }
+  }
+
   let redacted = truncated;
-  for (const m of matches) {
+  for (const m of collapseOverlappingMatches(matches)) {
     redacted = redacted.slice(0, m.index) + `[REDACTED_${m.type}]` + redacted.slice(m.index + m.length);
   }
 

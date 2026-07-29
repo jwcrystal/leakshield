@@ -3,12 +3,14 @@ import * as path from "path";
 import * as yaml from "js-yaml";
 import { fileURLToPath } from "url";
 import { z } from "zod";
+import { loadExactValueDetector } from "../scanner/exact-values.js";
 import type { GuardConfig } from "../types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const MAX_DYNAMIC_RULE_LENGTH = 200;
 const MAX_PRIVATE_DOMAIN_LENGTH = 255;
+const MAX_ENV_FILE_PATH_LENGTH = 4096;
 
 const CustomRuleSchema = z.object({
   description: z.string().min(1).max(MAX_DYNAMIC_RULE_LENGTH),
@@ -25,10 +27,18 @@ export const GuardConfigSchema = z.object({
     show_line_numbers: z.boolean().default(true),
     preview_length: z.number().int().positive().default(60),
     encoding_detection: z.boolean().default(false),
+    env_files: z.array(z.string().min(1).max(MAX_ENV_FILE_PATH_LENGTH)).max(16).default([]),
   }).default({}),
 });
 
-export function loadConfig(overridePath?: string): GuardConfig {
+function finalizeConfig(config: GuardConfig, workspaceRoot: string): GuardConfig {
+  return {
+    ...config,
+    exact_value_detector: loadExactValueDetector(config.settings.env_files ?? [], workspaceRoot),
+  };
+}
+
+export function loadConfig(overridePath?: string, workspaceRoot = process.cwd()): GuardConfig {
   const configPaths = overridePath
     ? [overridePath]
     : [
@@ -40,9 +50,9 @@ export function loadConfig(overridePath?: string): GuardConfig {
   for (const p of configPaths) {
     if (fs.existsSync(p)) {
       const raw = fs.readFileSync(p, "utf-8");
-      return GuardConfigSchema.parse(yaml.load(raw));
+      return finalizeConfig(GuardConfigSchema.parse(yaml.load(raw)), workspaceRoot);
     }
   }
 
-  return GuardConfigSchema.parse({});
+  return finalizeConfig(GuardConfigSchema.parse({}), workspaceRoot);
 }

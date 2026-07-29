@@ -4,6 +4,7 @@ import chalk from "chalk";
 import type { FindingType, Finding, ScanResult } from "../types.js";
 import { loadConfig } from "../config/loader.js";
 import { scanText, redactText } from "../scanner/engine.js";
+import { redactAndVerify } from "../scanner/redaction-verifier.js";
 import { sanitizeRedactResultForExport } from "../decision/redaction.js";
 import { toDecisionResult } from "../decision/model.js";
 import type { GuardDecisionResult, GuardDecisionFinding } from "../decision/model.js";
@@ -283,12 +284,12 @@ export async function runCli() {
         console.error(chalk.red(t("cli.error_file_not_found", { path: filePath })));
         process.exit(2);
       }
-      inputText = fs.readFileSync(filePath, "utf-8");
+      inputText = fs.readFileSync(filePath, "utf-8").replace(/\r\n/g, "\n");
       label = filePath;
     } else if (stdinMode || !process.stdin.isTTY) {
       const chunks: Buffer[] = [];
       for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
-      inputText = Buffer.concat(chunks).toString("utf-8");
+      inputText = Buffer.concat(chunks).toString("utf-8").replace(/\r\n/g, "\n");
       label = "(stdin)";
     }
 
@@ -316,18 +317,39 @@ export async function runCli() {
       process.exit(result.total_findings > 0 ? 1 : 0);
     }
 
+    const verified = redactAndVerify(inputText, config);
+    if (!verified.verified) {
+      if (format === "json") {
+        console.log(JSON.stringify({
+          label,
+          verified: false,
+          totalFindings: verified.totalFindings,
+          residualFindings: verified.residualFindings,
+          truncated: verified.wasTruncated,
+          summary: verified.summary,
+        }, null, 2));
+      } else {
+        console.error(chalk.red(t("cli.redact_incomplete", { residual: verified.residualFindings })));
+      }
+      process.exit(1);
+    }
+
     if (format === "json") {
-      console.log(JSON.stringify({ label, ...sanitizeRedactResultForExport(result) }, null, 2));
+      console.log(JSON.stringify({
+        label,
+        verified: true,
+        ...sanitizeRedactResultForExport(result),
+      }, null, 2));
     } else {
-      // Write redacted text to stdout (or file); summary goes to stderr
       const outPath = outIdx !== -1 ? args[outIdx + 1] : undefined;
       if (outPath) {
-        fs.writeFileSync(path.resolve(outPath), result.redacted, "utf-8");
+        fs.writeFileSync(path.resolve(outPath), verified.redacted, "utf-8");
         console.error(chalk.green(t("cli.redact_written", { path: path.resolve(outPath) })));
       } else {
-        process.stdout.write(result.redacted);
+        process.stdout.write(verified.redacted);
       }
-      console.error(chalk.dim("\n" + t("cli.redact_footer", { summary: result.summary })));
+      console.error(chalk.green("\n" + t("cli.redact_verified")));
+      console.error(chalk.dim(t("cli.redact_footer", { summary: verified.summary })));
     }
     process.exit(0);
   }
@@ -362,7 +384,7 @@ export async function runCli() {
 
     const tasks = files.map((f) => async () => {
       try {
-        const content = await fs.promises.readFile(f, "utf-8");
+        const content = (await fs.promises.readFile(f, "utf-8")).replace(/\r\n/g, "\n");
         return { file: f, content };
       } catch {
         return null;
@@ -419,7 +441,7 @@ export async function runCli() {
       console.error(chalk.red(t("cli.error_file_not_found", { path: filePath })));
       process.exit(2);
     }
-    const originalContent = fs.readFileSync(filePath, "utf-8");
+    const originalContent = fs.readFileSync(filePath, "utf-8").replace(/\r\n/g, "\n");
     const result = scanText(originalContent, config);
     const { decision } = output(result, filePath, originalContent);
     process.exit(decision.decision === "ALLOW" ? 0 : 1);
@@ -429,7 +451,7 @@ export async function runCli() {
   if (stdinMode || !process.stdin.isTTY) {
     const chunks: Buffer[] = [];
     for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
-    const originalContent = Buffer.concat(chunks).toString("utf-8");
+    const originalContent = Buffer.concat(chunks).toString("utf-8").replace(/\r\n/g, "\n");
     const result = scanText(originalContent, config);
     const { decision } = output(result, "(stdin)", originalContent);
     process.exit(decision.decision === "ALLOW" ? 0 : 1);

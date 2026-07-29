@@ -4,10 +4,18 @@
 
 **在把程式碼、文件、資料丟給 AI 服務之前，先掃描敏感內容的守門員。**
 
-支援四種使用模式：
-- **MCP Server**：整合進 OpenCode / Claude Code，AI 讀檔前自動觸發守門
-- **CLI**：手動掃描指定文字、檔案或目錄；支援**脫敏模式**，可直接替換敏感內容
-- **Web UI**：瀏覽器介面，貼上內容即可掃描；同時提供 REST API
+支援三種使用模式：
+- **OpenCode Plugin**：OpenCode 的強制入口檢查；OpenCode 要把內容送往模型時使用。
+- **CLI**：手動或 CI 掃描文字、檔案與目錄；支援脫敏。
+- **Web UI**：本機瀏覽器介面與 REST endpoint，供手動掃描。
+
+MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行決定呼叫掃描工具，無法提供 plugin 的安全邊界。
+
+| 模式 | 啟動方式 | 適用情境 |
+|------|----------|----------|
+| OpenCode Plugin | 在 `opencode.json` 加入 `dist/opencode.js` | 自動且 fail-closed 地保護 OpenCode 模型輸入與工具輸出 |
+| CLI | `npm run scan -- --file ./path` | 明確的本機或 CI 掃描；不會把內容送到模型 |
+| Web UI | `npm run web` | 在 `http://localhost:3000` 手動以瀏覽器掃描 |
 
 ---
 
@@ -49,15 +57,16 @@ npm run build
 | 指令 | 說明 |
 |------|------|
 | `npm run build` | 編譯 TypeScript → `dist/` |
-| `npm run dev` | 開發模式（MCP，不需先 build） |
+| `npm run dev` | CLI 模式（不需先 build） |
 | `npm run scan` | CLI 掃描（不需先 build） |
+| `npm run web` | 啟動本機 Web UI（不需先 build） |
 | `npm test` | 執行單元測試 |
 
 ---
 
 ## 使用方式
 
-### 一、CLI 模式
+### CLI
 
 ```bash
 # 掃描文字
@@ -178,7 +187,7 @@ npm run scan -- --file ../shared.env --allow-outside
 
 ---
 
-### 二、Web UI 模式
+### Web UI
 
 啟動本地 Web 伺服器，在瀏覽器中使用：
 
@@ -224,77 +233,52 @@ curl -s -X POST http://localhost:3001/scan \
 
 ---
 
-### 三、MCP Server 模式（整合進 OpenCode / Claude Code）
+### OpenCode Plugin（建議使用）
 
-#### 步驟 1：Build
+OpenCode plugin 成功載入後會成為強制性整合：它會在 OpenCode 儲存或送出使用者文字給模型前掃描並攔截，清理 system prompt 與 tool definition，並在下一輪模型讀取前清理工具輸出及歷史訊息。它會固定啟用編碼內容偵測。plugin 選項或掃描設定無效時，所有受保護 hook 都會 fail closed 並中止模型請求。受限的 SHA-256 決策快取會避免重複掃描未變動歷史，同時不保留原文或脫敏後內容。
 
-```bash
-npm run build
-```
-
-#### 步驟 2：設定 OpenCode
-
-在你的 OpenCode 設定檔（通常是 `~/.config/opencode/config.json` 或 `opencode.json`）加入：
+先 build 專案，再將編譯後的 plugin 加到 `opencode.json`：
 
 ```json
 {
-  "mcp": {
-    "servers": {
-      "sensitive-guard": {
-        "type": "local",
-        "command": "node",
-        "args": ["/絕對路徑/sensitive-guard/dist/index.js"],
-        "env": {}
-      }
-    }
-  }
+  "plugin": [
+    [
+      "file:///絕對路徑/sensitive-guard/dist/opencode.js",
+      { "mode": "block" }
+    ]
+  ]
 }
 ```
 
-> ⚠️ **務必用絕對路徑**，不要用 `~` 或相對路徑。
+`block` 是預設值，會用不含機敏值的攔截訊息替換危險內容。只有在你明確希望已辨識的直接命中改為 `[REDACTED_TYPE]` 佔位符時，才設定 `mode: "redact"`。
 
-#### 步驟 3：在 OpenCode System Prompt 中加入守門規則
+附件會被攔截，因為文字掃描器無法安全檢查任意二進位或遠端附件內容。既有 session 可能已存有原文，安裝 plugin 後請建立新 session。此 plugin 僅保護 OpenCode 發出的模型請求，不涵蓋其他 AI client 或本機工具。
 
-在你的 OpenCode system prompt 加入以下指令，讓 AI 在讀取任何檔案或處理你貼上的程式碼前，先呼叫掃描工具：
+OpenCode 目前會記錄並跳過在 plugin factory 執行前就載入失敗的模組，例如套件缺失或 JavaScript 語法錯誤。安裝或升級後，請先用 `sk-` 加至少 20 個英數字元的合成測試 key 執行 smoke test，確認訊息已被 Sensitive Guard 替換，再處理真實機敏資料。
 
-```
-在你讀取任何本機檔案、或我提供任何程式碼 / 設定檔 / 資料之前，
-請先呼叫 sensitive-guard 的 scan_file 或 scan_text 工具。
-如果掃描結果的 safe 欄位為 false，請立即停止並告訴我哪些內容有問題，
-等待我確認後再繼續。不要自動修改或繼續處理敏感內容。
-```
+#### 隔離 smoke test
 
-#### MCP 工具列表
+在專案根目錄執行下列指令。它會使用暫存的 OpenCode 設定目錄與合成值，不會使用真實憑證：
 
-| 工具 | 用途 | 編碼檢測參數 |
-|------|------|----------------|
-| `scan_text` | 掃描一段文字（你貼進去的 code / 資料） | ✅ `enable_encoding_detection` |
-| `scan_file` | 掃描本機單一檔案 | ✅ `enable_encoding_detection` |
-| `scan_dir` | 掃描整個目錄（遞迴，跳過 node_modules / .git） | - |
-| `redact_text` | 將命中的敏感內容替換為 `[REDACTED_TYPE]`，回傳乾淨文字 | - |
-| `reload_config` | 修改 YAML 後重新載入，不用重啟 server | - |
-
-**MCP 工具使用範例（含編碼檢測）**
-
-```typescript
-// 掃描文字並啟用編碼檢測
-await mcp.callTool("scan_text", {
-  content: "c2stcHJvai1hYmMxMjM=",  // Base64 編碼內容
-  enable_encoding_detection: true
-});
-
-// 掃描檔案並啟用編碼檢測
-await mcp.callTool("scan_file", {
-  file_path: "./config.yaml",
-  enable_encoding_detection: true
-});
+```bash
+npm run build
+SMOKE_DIR="$(mktemp -d)"
+PROJECT_DIR="$(pwd)"
+cat > "$SMOKE_DIR/opencode.json" <<EOF
+{
+  "plugin": [
+    ["file://$PROJECT_DIR/dist/opencode.js", { "mode": "block" }]
+  ]
+}
+EOF
+OPENCODE_CONFIG_DIR="$SMOKE_DIR" opencode --prompt \
+  "Smoke test only. Do not reveal or use this token: sk-AAAAAAAAAAAAAAAAAAAA"
+rm -rf "$SMOKE_DIR"
 ```
 
-#### MCP 路徑限制
+模型可見的訊息必須包含 Sensitive Guard 的攔截通知，且不可包含該合成 token。不要用真實憑證執行此測試。
 
-`scan_file` 與 `scan_dir` 只接受解析後位於 **MCP Server 啟動目錄（工作目錄）以內**的路徑。任何指向工作目錄外的路徑（包含符號連結目標）都會被拒絕並回傳錯誤，防止 AI 透過 MCP 介面讀取主機上的任意檔案。
-
----
+發布到 npm 後，可用 `"sensitive-guard"` 取代上述 `file:` URL。
 
 ## 設定檔
 
@@ -326,7 +310,8 @@ settings:
 
 修改後：
 - **CLI**：下次執行自動載入
-- **MCP Server**：呼叫 `reload_config` 工具，或重啟 server
+- **OpenCode Plugin**：重啟 OpenCode 以重新載入 plugin 設定
+- **Web UI**：重啟本機 server
 
 ---
 
@@ -336,9 +321,10 @@ settings:
 
 ```
 你（對 OpenCode）：請幫我看看這個 config.ts 有沒有問題
-OpenCode（自動）：[呼叫 scan_file config.ts]
-→ 發現 API_KEY，HIGH severity，第 12 行
-→ 停止並報告給你
+OpenCode：[讀取 config.ts]
+→ 工具輸出含有 API_KEY
+→ plugin 在下一輪模型讀取前將其替換
+→ OpenCode 收到攔截通知，而非 secret
 你：把第 12 行換成假 key 後再繼續
 ```
 
@@ -375,7 +361,7 @@ fi
 
 ## 敏感資訊預覽行為
 
-掃描結果中所有敏感資訊的預覽一律顯示為 `****`，不論原始值長度為何，不保留任何前後綴字元。這樣可避免在日誌、CI 輸出或 MCP 回應中洩漏部分機密內容。
+掃描結果中所有敏感資訊的預覽一律顯示為 `****`，不論原始值長度為何，不保留任何前後綴字元。這樣可避免在日誌、CI 輸出或 Web UI 回應中洩漏部分機密內容。
 
 ## 注意事項
 

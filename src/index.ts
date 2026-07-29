@@ -1,12 +1,10 @@
 #!/usr/bin/env node
 /**
  * sensitive-guard — entry point
- * MCP Server 模式：由 OpenCode / Claude Code 自動呼叫
  * CLI 掃描模式：npx tsx src/index.ts --cli --text "..."
+ * Web 模式：npx tsx src/index.ts --web
  */
 
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { createMcpServer } from "./transports/mcp.js";
 import { runCli } from "./transports/cli.js";
 import { runWeb } from "./transports/web.js";
 
@@ -24,6 +22,8 @@ export type {
   GuardDecisionResult,
 } from "./decision/model.js";
 export { toDecisionResult } from "./decision/model.js";
+export { protectText, protectUnknownStrings } from "./decision/ingress.js";
+export type { IngressMode, ProtectionAction, ProtectedText, ProtectionOptions } from "./decision/ingress.js";
 
 // Security enhancement exports
 export { scanTextWithDecoding } from "./scanner/engine.js";
@@ -47,7 +47,5 @@ if (isWebMode) {
 } else if (isCliMode) {
   await runCli();
 } else {
-  const server = createMcpServer();
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  await runCli();
 }

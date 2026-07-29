@@ -72,9 +72,6 @@ export const en = {
   "cli.usage_opt_outside":
     "  --allow-outside        Allow scanning paths outside the working directory (disabled by default)",
   "cli.usage_opt_encoding": "  --enable-encoding-detection  Enable Base64/URL/Hex decoding detection (disabled by default)",
-  "cli.usage_mcp_heading": "\nMCP Server mode (auto-started by OpenCode):",
-  "cli.usage_mcp": "  node dist/index.js",
-
   // web — server start
   "web.server_title": "🛡️  sensitive-guard web UI",
   "web.server_url": "   http://localhost:{port}",

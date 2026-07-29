@@ -4,10 +4,18 @@
 
 **A gatekeeper that scans for sensitive content before you feed code, documents, or data to AI services.**
 
-Four usage modes:
-- **MCP Server**: Integrates with OpenCode / Claude Code — automatically triggers before AI reads any file
-- **CLI**: Manually scan text, files, or directories; also supports **redaction** to replace sensitive content in-place
-- **Web UI**: Browser interface — paste content and scan instantly; also exposes a REST API
+Three supported modes:
+- **OpenCode Plugin**: The enforced ingress gate for OpenCode. Use this when OpenCode sends content to a model.
+- **CLI**: Manual or CI scanning of text, files, and directories; supports redaction.
+- **Web UI**: Local browser interface and REST endpoint for manual scanning.
+
+MCP server mode has been removed. It depended on the model voluntarily calling a scan tool after it had already received the relevant context, so it cannot provide the plugin's security boundary.
+
+| Mode | Start it with | Use it for |
+|------|---------------|------------|
+| OpenCode Plugin | Add `dist/opencode.js` to `opencode.json` | Automatic, fail-closed protection for OpenCode model inputs and tool outputs |
+| CLI | `npm run scan -- --file ./path` | Explicit local or CI scans; it never sends content to a model |
+| Web UI | `npm run web` | Manual browser scans at `http://localhost:3000` |
 
 ---
 
@@ -80,15 +88,16 @@ npm run build
 | Command | Description |
 |---------|-------------|
 | `npm run build` | Compile TypeScript → `dist/` |
-| `npm run dev` | Dev mode (MCP, no build needed) |
+| `npm run dev` | CLI mode (no build needed) |
 | `npm run scan` | CLI scan (no build needed) |
+| `npm run web` | Start the local Web UI (no build needed) |
 | `npm test` | Run unit tests |
 
 ---
 
 ## Usage
 
-### Mode 1: CLI
+### CLI
 
 ```bash
 # Scan text
@@ -158,7 +167,7 @@ npm run scan -- --file ../shared.env --allow-outside
 
 ---
 
-### Mode 2: Web UI
+### Web UI
 
 Start a local web server and use it in your browser:
 
@@ -204,72 +213,56 @@ curl -s -X POST http://localhost:3001/scan \
 
 ---
 
-### Mode 3: MCP Server (OpenCode / Claude Code Integration)
+### OpenCode Plugin (recommended)
 
-#### Step 1: Build
+When loaded successfully, the OpenCode plugin is the enforced integration. It scans and blocks user text before OpenCode persists or sends it to a model, sanitizes system prompts and tool definitions, protects tool output before the next model turn, and re-scans history before replay. It always enables encoded-content detection. Invalid plugin options or scanner configuration make every protected hook fail closed and abort the model request. A bounded SHA-256 decision cache avoids repeatedly scanning unchanged history without retaining original or redacted content.
 
-```bash
-npm run build
-```
-
-#### Step 2: Configure OpenCode
-
-Add the following to your OpenCode config file (typically `~/.config/opencode/config.json` or `opencode.json`):
+Build the project, then add the compiled plugin to `opencode.json`:
 
 ```json
 {
-  "mcp": {
-    "servers": {
-      "sensitive-guard": {
-        "type": "local",
-        "command": "node",
-        "args": ["/absolute/path/to/sensitive-guard/dist/index.js"],
-        "env": {}
-      }
-    }
-  }
+  "plugin": [
+    [
+      "file:///absolute/path/to/sensitive-guard/dist/opencode.js",
+      { "mode": "block" }
+    ]
+  ]
 }
 ```
 
-> ⚠️ **Always use absolute paths** — do not use `~` or relative paths.
+`block` is the default and replaces unsafe content with a disclosure-free notice. Set `mode` to `redact` only when you explicitly want recognized direct matches replaced with `[REDACTED_TYPE]` placeholders.
 
-#### Step 3: Add a Guard Rule to Your System Prompt
+Attachments are blocked because the text scanner cannot safely inspect arbitrary binary or remote attachment content. Existing sessions may already contain raw content; begin a new session after installing the plugin. The plugin protects OpenCode model requests only, not other AI clients or local tools.
 
-Add the following instruction to your OpenCode system prompt so the AI calls the scan tool before reading any file or processing code you provide:
+OpenCode currently logs and skips modules that fail before their plugin factory can run, such as a missing package or JavaScript syntax error. After installation or upgrade, run a smoke test with a synthetic key matching `sk-` followed by at least 20 letters or digits and verify that Sensitive Guard replaces the message before using real sensitive data.
 
+#### Isolated smoke test
+
+Run this from the project root. It uses a temporary OpenCode configuration directory and a synthetic value, not a real credential:
+
+```bash
+npm run build
+SMOKE_DIR="$(mktemp -d)"
+PROJECT_DIR="$(pwd)"
+cat > "$SMOKE_DIR/opencode.json" <<EOF
+{
+  "plugin": [
+    ["file://$PROJECT_DIR/dist/opencode.js", { "mode": "block" }]
+  ]
+}
+EOF
+OPENCODE_CONFIG_DIR="$SMOKE_DIR" opencode --prompt \
+  "Smoke test only. Do not reveal or use this token: sk-AAAAAAAAAAAAAAAAAAAA"
+rm -rf "$SMOKE_DIR"
 ```
-Before reading any local file, or processing any code / config / data I provide,
-call sensitive-guard's scan_file or scan_text tool.
-Check the "decision" field in the response:
-  - ALLOW: safe to proceed
-  - WARN: minor items found, safe to proceed but note them
-  - CONFIRM: sensitive content detected, STOP and report to me.
-    Use the "redactedContent" field if I ask to send a sanitized version.
-Wait for my confirmation before continuing. Do not auto-fix or proceed with sensitive content.
-```
 
-For **Claude Code**, add to your `CLAUDE.md`:
+The model-facing message must contain the Sensitive Guard block notice and must not contain the synthetic token. Do not use a real credential for this test.
 
-```
-Before reading any file, call the sensitive-guard MCP tool (scan_file or scan_text).
-Check the "decision" field: ALLOW = proceed, WARN = note and proceed, CONFIRM = stop and report.
-```
+After publishing to npm, the same plugin can be configured as `"sensitive-guard"` instead of the `file:` URL.
 
-#### MCP Tools
-
-| Tool | Purpose |
-|------|---------|
-| `scan_text` | Scan a text snippet (code / data you paste in). Returns `decision`, `riskLevel`, `safePreview` |
-| `scan_file` | Scan a single local file. Same decision-oriented response as `scan_text` |
+<!-- Legacy transport row intentionally hidden.
 | `scan_dir` | Scan an entire directory (recursive, skips node_modules / .git). Returns per-file results |
-| `redact_text` | Replace sensitive findings with `[REDACTED_TYPE]` and return the clean text. Use this to get the full redacted version when `scan_text` / `scan_file` report `CONFIRM`. Supports `dry_run` to preview only |
-| `reload_config` | Reload YAML config without restarting the server |
-
-> **Backward compatibility**: `scan_text` and `scan_file` still include a `safe` boolean field (`true` when decision is `ALLOW`). Existing integrations that only check `safe` will continue to work, but new integrations should use the `decision` field for finer control.
-
-#### MCP Path Restriction
-
-`scan_file` and `scan_dir` only accept paths that resolve to within the **server's working directory** (the directory where the MCP server was started). Any path — including symlinks — that points outside the workspace is rejected with an error response. This prevents an AI agent from reading arbitrary host files through the MCP interface.
+-->
 
 ---
 
@@ -302,7 +295,8 @@ settings:
 
 After editing:
 - **CLI**: Reloaded automatically on next run
-- **MCP Server**: Call the `reload_config` tool, or restart the server
+- **OpenCode Plugin**: Restart OpenCode to reload the plugin configuration
+- **Web UI**: Restart the local server
 
 ---
 
@@ -312,9 +306,10 @@ After editing:
 
 ```
 You (to OpenCode): Please review this config.ts for issues
-OpenCode (auto): [calls scan_file config.ts]
-→ API_KEY found, HIGH severity, line 12
-→ Stops and reports to you
+OpenCode: [reads config.ts]
+→ Tool output contains an API_KEY
+→ Plugin replaces it before the next model turn
+→ OpenCode receives a block notice instead of the secret
 You: Replace line 12 with a dummy key, then continue
 ```
 
@@ -351,7 +346,7 @@ Values exceeding these limits will cause `loadConfig()` to throw a Zod validatio
 
 ## Secret Preview Behavior
 
-All secret previews in scan results are **fully masked** as `****`, regardless of the secret's length. No prefix or suffix characters from the original value are preserved. This eliminates partial secret exposure in logs, CI output, and MCP responses.
+All secret previews in scan results are **fully masked** as `****`, regardless of the secret's length. No prefix or suffix characters from the original value are preserved. This eliminates partial secret exposure in logs, CI output, and Web UI responses.
 
 ## Internationalization (i18n)
 

@@ -14,7 +14,7 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 | 模式 | 啟動方式 | 適用情境 |
 |------|----------|----------|
 | OpenCode Plugin | 在 `opencode.json` 加入 `dist/opencode.js` | 自動且 fail-closed 地保護 OpenCode 模型輸入與工具輸出 |
-| CLI | `npm run scan -- --file ./path` | 明確的本機或 CI 掃描；不會把內容送到模型 |
+| CLI | `npx sensitive-guard --file ./path` | 明確的本機或 CI 掃描；不會把內容送到模型 |
 | Web UI | `npm run web` | 在 `http://localhost:3000` 手動以瀏覽器掃描 |
 
 ---
@@ -52,6 +52,9 @@ npm install
 npm run build
 ```
 
+Build 後使用 `npx sensitive-guard`。若已全域安裝，可直接使用
+`sensitive-guard`；在此 repository 開發時仍可用 `npm run scan -- ...`。
+
 ### npm scripts 速查
 
 | 指令 | 說明 |
@@ -70,22 +73,22 @@ npm run build
 
 ```bash
 # 掃描文字
-npm run scan -- --text 'sk-1234abcd my_password="super_secret"'
+npx sensitive-guard --text 'sk-proj-test1234567890abcdef my_password="super_secret"'
 
 # 掃描單一檔案
-npm run scan -- --file ./src/config.ts
+npx sensitive-guard --file ./src/config.ts
 
 # 掃描整個目錄
-npm run scan -- --dir ./src
+npx sensitive-guard --dir ./src
 
 # 只掃描特定副檔名
-npm run scan -- --dir ./src --ext .ts .env .json
+npx sensitive-guard --dir ./src --ext .ts .env .json
 
 # 從 stdin 讀取
-cat .env | npm run scan -- --stdin
+cat .env | npx sensitive-guard --stdin
 
-# Build 後的版本
-node dist/index.js --cli --file ./config.ts
+# 全域安裝後
+sensitive-guard --file ./config.ts
 ```
 
 Exit code：`0` = 安全，`1` = 有問題，`2` = 檔案不存在
@@ -96,13 +99,13 @@ Exit code：`0` = 安全，`1` = 有問題，`2` = 檔案不存在
 
 ```bash
 # 脫敏 stdin，結果輸出到 stdout
-echo 'token=sk-proj-abc123...' | npm run scan -- --redact --stdin
+echo 'token=sk-proj-test1234567890abcdef' | npx sensitive-guard --redact --stdin
 
 # 脫敏檔案，結果寫入新檔
-npm run scan -- --redact --file .env --out .env.redacted
+npx sensitive-guard --redact --file .env --out .env.redacted
 
 # Dry-run：只預覽哪些內容會被脫敏，不產生任何輸出
-npm run scan -- --redact --dry-run --file .env
+npx sensitive-guard --redact --dry-run --file .env
 ```
 
 脫敏後的文字輸出至 **stdout**；findings 摘要輸出至 **stderr**，方便在 pipeline 中分開處理。
@@ -136,13 +139,13 @@ npm run scan -- --redact --dry-run --file .env
 
 ```bash
 # 啟用編碼檢測掃描
-npm run scan -- --enable-encoding-detection --text "c2stcHJvai1hYmMxMjM="
+npx sensitive-guard --enable-encoding-detection --text "c2stcHJvai1hYmMxMjM="
 
 # 結合其他選項使用
-npm run scan -- --enable-encoding-detection --file ./config.yaml --format json
+npx sensitive-guard --enable-encoding-detection --file ./config.yaml --format json
 
 # 掃描目錄時啟用
-npm run scan -- --enable-encoding-detection --dir ./src --ext .ts .env
+npx sensitive-guard --enable-encoding-detection --dir ./src --ext .ts .env
 ```
 
 **效能考量**
@@ -156,15 +159,15 @@ npm run scan -- --enable-encoding-detection --dir ./src --ext .ts .env
 
 ```bash
 # Base64 編碼的 API Key
-echo "c2stcHJvai1hYmMxMjM=" | npm run scan -- --enable-encoding-detection --stdin
+echo "c2stcHJvai1hYmMxMjM=" | npx sensitive-guard --enable-encoding-detection --stdin
 # → 檢測到 "sk-proj-abc123" API Key
 
 # URL 編碼的敏感內容
-echo "password%3Dsecret123" | npm run scan -- --enable-encoding-detection --stdin
+echo "password%3Dsecret123" | npx sensitive-guard --enable-encoding-detection --stdin
 # → 檢測到 password 關鍵字
 
 # 正常文字不受影響
-echo "This is safe content" | npm run scan -- --enable-encoding-detection --stdin
+echo "This is safe content" | npx sensitive-guard --enable-encoding-detection --stdin
 # → 安全，無敏感內容
 ```
 
@@ -180,7 +183,7 @@ echo "This is safe content" | npm run scan -- --enable-encoding-detection --stdi
 如需掃描工作目錄以外的路徑，請明確加上 `--allow-outside`：
 
 ```bash
-npm run scan -- --file ../shared.env --allow-outside
+npx sensitive-guard --file ../shared.env --allow-outside
 ```
 
 > ⚠️ 工作目錄外的掃描為選擇性開啟功能，僅在確實需要時使用。
@@ -337,7 +340,7 @@ OpenCode：[讀取 config.ts]
 ### 場景二：你在 CLI 掃描整個專案再送出
 
 ```bash
-npm run cli -- --dir ./my-project
+npx sensitive-guard --dir ./my-project
 # 如果 exit code = 1，表示有問題，先處理再貼給 AI
 ```
 

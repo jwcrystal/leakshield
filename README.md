@@ -14,7 +14,7 @@ MCP server mode has been removed. It depended on the model voluntarily calling a
 | Mode | Start it with | Use it for |
 |------|---------------|------------|
 | OpenCode Plugin | Add `dist/opencode.js` to `opencode.json` | Automatic, fail-closed protection for OpenCode model inputs and tool outputs |
-| CLI | `npm run scan -- --file ./path` | Explicit local or CI scans; it never sends content to a model |
+| CLI | `npx sensitive-guard --file ./path` | Explicit local or CI scans; it never sends content to a model |
 | Web UI | `npm run web` | Manual browser scans at `http://localhost:3000` |
 
 ---
@@ -83,6 +83,10 @@ npm install
 npm run build
 ```
 
+After building, use `npx sensitive-guard`. If installed globally, use
+`sensitive-guard` directly. `npm run scan -- ...` remains available for local
+development from this repository.
+
 ### npm Scripts Reference
 
 | Command | Description |
@@ -101,22 +105,22 @@ npm run build
 
 ```bash
 # Scan text
-npm run scan -- --text 'sk-1234abcd my_password="super_secret"'
+npx sensitive-guard --text 'sk-proj-test1234567890abcdef my_password="super_secret"'
 
 # Scan a single file
-npm run scan -- --file ./src/config.ts
+npx sensitive-guard --file ./src/config.ts
 
 # Scan an entire directory
-npm run scan -- --dir ./src
+npx sensitive-guard --dir ./src
 
 # Scan specific file extensions only
-npm run scan -- --dir ./src --ext .ts .env .json
+npx sensitive-guard --dir ./src --ext .ts .env .json
 
 # Read from stdin
-cat .env | npm run scan -- --stdin
+cat .env | npx sensitive-guard --stdin
 
-# Built version
-node dist/index.js --cli --file ./config.ts
+# Global installation
+sensitive-guard --file ./config.ts
 ```
 
 Exit codes: `0` = safe (ALLOW), `1` = findings detected (WARN or CONFIRM), `2` = file not found
@@ -127,13 +131,13 @@ Replace sensitive content with `[REDACTED_TYPE]` placeholders instead of just re
 
 ```bash
 # Redact stdin and print to stdout
-echo 'token=sk-proj-abc123...' | npm run scan -- --redact --stdin
+echo 'token=sk-proj-test1234567890abcdef' | npx sensitive-guard --redact --stdin
 
 # Redact a file and write result to a new file
-npm run scan -- --redact --file .env --out .env.redacted
+npx sensitive-guard --redact --file .env --out .env.redacted
 
 # Dry-run: preview what would be redacted without producing any output
-npm run scan -- --redact --dry-run --file .env
+npx sensitive-guard --redact --dry-run --file .env
 ```
 
 Redacted output goes to **stdout**; the findings summary goes to **stderr** so they can be separated in pipelines.
@@ -160,7 +164,7 @@ By default, `--file` and `--dir` only accept paths **inside the current working 
 To intentionally scan a path outside the workspace, pass `--allow-outside`:
 
 ```bash
-npm run scan -- --file ../shared.env --allow-outside
+npx sensitive-guard --file ../shared.env --allow-outside
 ```
 
 > ⚠️ Outside-workspace scanning is opt-in. Only use it when you explicitly need to scan a file that lives outside the project root.
@@ -372,10 +376,10 @@ CLI output language is controlled by the `SENSITIVE_GUARD_LANG` environment vari
 
 ```bash
 # English output (default)
-npm run scan -- --text "your content"
+npx sensitive-guard --text "your content"
 
 # Traditional Chinese output
-SENSITIVE_GUARD_LANG=zh-TW npm run scan -- --text "你的內容"
+SENSITIVE_GUARD_LANG=zh-TW npx sensitive-guard --text "你的內容"
 ```
 
 You can also set it persistently in your shell profile:

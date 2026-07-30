@@ -11,6 +11,7 @@ import type { GuardDecisionResult, GuardDecisionFinding } from "../decision/mode
 import { collectFiles, runWithConcurrency } from "../utils/files.js";
 import { validateCliScanPath } from "../utils/path-security.js";
 import { t } from "../i18n/index.js";
+import { initWindowsEncoding, readFileWithEncoding } from "../utils/win-encoding.js";
 
 export { validateCliScanPath };
 
@@ -229,6 +230,7 @@ export function printCliResult(result: ScanResult, label: string) {
 // ─── CLI entry ───────────────────────────────────────────────────────────────
 
 export async function runCli() {
+  initWindowsEncoding();
   const args = process.argv.slice(2);
   let config = loadConfig();
 
@@ -284,12 +286,19 @@ export async function runCli() {
         console.error(chalk.red(t("cli.error_file_not_found", { path: filePath })));
         process.exit(2);
       }
-      inputText = fs.readFileSync(filePath, "utf-8").replace(/\r\n/g, "\n");
+      inputText = readFileWithEncoding(filePath);
       label = filePath;
     } else if (stdinMode || !process.stdin.isTTY) {
       const chunks: Buffer[] = [];
       for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
-      inputText = Buffer.concat(chunks).toString("utf-8").replace(/\r\n/g, "\n");
+      const raw = Buffer.concat(chunks);
+      // UTF-16 input is recognized by BOM; input without a BOM must be UTF-8.
+      inputText = (raw[0] === 0xff && raw[1] === 0xfe
+        ? new TextDecoder("utf-16le").decode(raw)
+        : raw[0] === 0xef && raw[1] === 0xbb && raw[2] === 0xbf
+          ? raw.toString("utf-8").slice(1)
+          : raw.toString("utf-8"))
+        .replace(/\r\n/g, "\n");
       label = "(stdin)";
     }
 
@@ -384,7 +393,7 @@ export async function runCli() {
 
     const tasks = files.map((f) => async () => {
       try {
-        const content = (await fs.promises.readFile(f, "utf-8")).replace(/\r\n/g, "\n");
+        const content = readFileWithEncoding(f);
         return { file: f, content };
       } catch {
         return null;
@@ -441,7 +450,7 @@ export async function runCli() {
       console.error(chalk.red(t("cli.error_file_not_found", { path: filePath })));
       process.exit(2);
     }
-    const originalContent = fs.readFileSync(filePath, "utf-8").replace(/\r\n/g, "\n");
+    const originalContent = readFileWithEncoding(filePath);
     const result = scanText(originalContent, config);
     const { decision } = output(result, filePath, originalContent);
     process.exit(decision.decision === "ALLOW" ? 0 : 1);
@@ -451,7 +460,14 @@ export async function runCli() {
   if (stdinMode || !process.stdin.isTTY) {
     const chunks: Buffer[] = [];
     for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
-    const originalContent = Buffer.concat(chunks).toString("utf-8").replace(/\r\n/g, "\n");
+    const raw = Buffer.concat(chunks);
+    // UTF-16 input is recognized by BOM; input without a BOM must be UTF-8.
+    const originalContent = (raw[0] === 0xff && raw[1] === 0xfe
+      ? new TextDecoder("utf-16le").decode(raw)
+      : raw[0] === 0xef && raw[1] === 0xbb && raw[2] === 0xbf
+        ? raw.toString("utf-8").slice(1)
+        : raw.toString("utf-8"))
+      .replace(/\r\n/g, "\n");
     const result = scanText(originalContent, config);
     const { decision } = output(result, "(stdin)", originalContent);
     process.exit(decision.decision === "ALLOW" ? 0 : 1);

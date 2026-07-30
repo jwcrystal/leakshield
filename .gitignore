@@ -8,9 +8,12 @@ src/transports/*
 src/scanner/*
 !src/scanner/exact-values.ts
 !src/scanner/redaction-verifier.ts
+!src/utils/
+!src/utils/win-encoding.ts
 !tests/
 tests/*
 !tests/web.test.ts
 !tests/exact-values.test.ts
 !tests/redaction-verifier.test.ts
+!tests/win-encoding.test.ts
 !vitest.config.ts

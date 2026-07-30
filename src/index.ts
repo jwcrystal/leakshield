@@ -5,6 +5,7 @@
  * Web 模式：npx tsx src/index.ts --web
  */
 
+import { initWindowsEncoding } from "./utils/win-encoding.js";
 import { runCli } from "./transports/cli.js";
 import { runWeb } from "./transports/web.js";
 
@@ -35,6 +36,9 @@ export {
 } from "./scanner/unicode.js";
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
+
+// Ensure UTF-8 console on Windows before any I/O
+initWindowsEncoding();
 
 const args = process.argv;
 const isCliMode = args.includes("--cli");

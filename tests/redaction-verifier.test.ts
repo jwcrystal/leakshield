@@ -45,6 +45,19 @@ describe("redactAndVerify()", () => {
     expect(result.residualFindings).toBeGreaterThan(0);
   });
 
+  it("does not ignore encoded findings that share a placeholder offset", () => {
+    const ndaConfig: GuardConfig = {
+      ...config,
+      nda_keywords: ["secret"],
+    };
+    const encodedKeyword = Buffer.from("secret remaining", "utf8").toString("base64");
+    const result = redactAndVerify(`${secret} ${encodedKeyword}`, ndaConfig);
+
+    expect(result.verified).toBe(false);
+    expect(result.redacted).toContain(encodedKeyword);
+    expect(result.residualFindings).toBeGreaterThan(0);
+  });
+
   it("does not verify truncated input regardless of redaction", () => {
     const smallConfig: GuardConfig = {
       ...config,
@@ -54,6 +67,18 @@ describe("redactAndVerify()", () => {
 
     expect(result.verified).toBe(false);
     expect(result.wasTruncated).toBe(true);
+  });
+
+  it("ignores residual findings inside [REDACTED_*] placeholders", () => {
+    const ndaConfig: GuardConfig = {
+      ...config,
+      nda_keywords: ["secret"],
+    };
+    const result = redactAndVerify(`sk-proj-abc123def456ghi789jkl012 password="super_secret"`, ndaConfig);
+
+    expect(result.verified).toBe(true);
+    expect(result.redacted).toContain("[REDACTED_");
+    expect(result.residualFindings).toBe(0);
   });
 
   it("does not include match_text or raw secrets in the result", () => {

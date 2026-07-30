@@ -1,4 +1,9 @@
-# 🛡️ sensitive-guard
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./icon.svg">
+  <img alt="sensitive-guard" src="./icon.svg" width="64">
+</picture>
+
+# sensitive-guard
 
 > 🌐 [English](./README.md) | 繁體中文
 
@@ -64,6 +69,35 @@ Build 後使用 `npx sensitive-guard`。若已全域安裝，可直接使用
 | `npm run scan` | CLI 掃描（不需先 build） |
 | `npm run web` | 啟動本機 Web UI（不需先 build） |
 | `npm test` | 執行單元測試 |
+| `npm run binary` | 建置當前平台的獨立執行檔（macOS ARM） |
+| `npm run binary:win` | 跨編譯 Windows x64 |
+| `npm run binary:linux` | 跨編譯 Linux x64 |
+| `npm run binary:mac-intel` | 跨編譯 macOS Intel |
+| `npm run binary:all` | 一次建置所有平台 |
+
+---
+
+## 獨立執行檔
+
+無法使用 Node.js 或 npm？用 [Bun](https://bun.sh) 建置成單一執行檔，目標機器不需任何 runtime。
+
+```bash
+# 一鍵建置當前平台
+npm run binary
+
+# 跨平台編譯
+npm run binary:win     # Windows x64  → sensitive-guard.exe
+npm run binary:linux   # Linux x64    → sensitive-guard-linux
+npm run binary:all     # 全平台
+```
+
+或直接用 Bun：
+
+```bash
+bun build --compile --target=bun-windows-x64 ./src/index.ts --outfile=sensitive-guard.exe
+```
+
+產出單一執行檔，直接交給任何人，無任何相依套件。
 
 ---
 

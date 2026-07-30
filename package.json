@@ -19,7 +19,14 @@
     "scan": "tsx src/index.ts --cli",
     "web": "tsx src/index.ts --web",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "binary": "bun build --compile --target=bun-darwin-arm64 ./src/index.ts --outfile=sensitive-guard",
+    "binary:win": "bun build --compile --target=bun-windows-x64 ./src/index.ts --outfile=sensitive-guard.exe",
+    "binary:win-icon": "node scripts/build-win.js",
+    "binary:linux": "bun build --compile --target=bun-linux-x64 ./src/index.ts --outfile=sensitive-guard-linux",
+    "binary:mac-intel": "bun build --compile --target=bun-darwin-x64 ./src/index.ts --outfile=sensitive-guard-intel",
+    "binary:all": "npm run binary && npm run binary:win && npm run binary:linux && npm run binary:mac-intel",
+    "bundle:mac": "npm run binary && bash scripts/bundle-mac.sh"
   },
   "dependencies": {
     "chalk": "^5.3.0",
@@ -31,7 +38,8 @@
     "@opencode-ai/sdk": "^1.17.18",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
-    "tsx": "^4.0.0",
+    "rcedit": "^5.0.2",
+    "tsx": "^4.23.1",
     "typescript": "^5.0.0",
     "vitest": "^4.1.1"
   }

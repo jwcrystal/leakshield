@@ -1,0 +1,69 @@
+name: Build
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: bun-linux-x64
+            out: sensitive-guard-linux
+          - os: windows-latest
+            target: bun-windows-x64
+            out: sensitive-guard.exe
+          - os: macos-latest
+            target: bun-darwin-arm64
+            out: sensitive-guard-macos-arm
+          - os: macos-13
+            target: bun-darwin-x64
+            out: sensitive-guard-macos-intel
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Build binary
+        run: bun build --compile --target=${{ matrix.target }} ./src/index.ts --outfile=${{ matrix.out }}
+        shell: bash
+
+      - name: Embed icon (Windows)
+        if: matrix.os == 'windows-latest'
+        run: bun build --compile --target=bun-windows-x64 --windows-icon=icon.ico ./src/index.ts --outfile=sensitive-guard.exe
+        shell: bash
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.out }}
+          path: ${{ matrix.out }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sensitive-guard-*
+          merge-multiple: true
+
+      - name: Package
+        run: |
+          zip sensitive-guard-${{ github.ref_name }}.zip \
+            sensitive-guard.exe sensitive-guard-linux \
+            sensitive-guard-macos-arm sensitive-guard-macos-intel
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            sensitive-guard-${{ github.ref_name }}.zip
+            sensitive-guard.exe
+            sensitive-guard-linux
+            sensitive-guard-macos-arm
+            sensitive-guard-macos-intel

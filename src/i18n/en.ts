@@ -58,6 +58,7 @@ export const en = {
   "cli.usage_dir": "  sensitive-guard --dir ./src",
   "cli.usage_dir_ext": "  sensitive-guard --dir ./src --ext .ts .env .json",
   "cli.usage_stdin": "  cat file.ts | sensitive-guard --stdin",
+  "cli.usage_web": "  sensitive-guard --web [--port 3000]      Start local Web UI",
   "cli.usage_redact_heading": "\nRedact mode:",
   "cli.usage_redact_text": "  sensitive-guard --redact --text 'your content'",
   "cli.usage_redact_file": "  sensitive-guard --redact --file ./secret.env",
@@ -73,6 +74,8 @@ export const en = {
   "cli.usage_opt_out": "  --out <path>           Output path (use with --redact --file)",
   "cli.usage_opt_outside":
     "  --allow-outside        Allow scanning paths outside the working directory (disabled by default)",
+  "cli.usage_opt_web": "  --web                  Start local Web UI (default port 3000)",
+  "cli.usage_opt_port": "  --port <port>         Web UI port (use with --web)",
   "cli.usage_opt_encoding": "  --enable-encoding-detection  Enable Base64/URL/Hex decoding detection (disabled by default)",
   // web — server start
   "web.server_title": "🛡️  sensitive-guard web UI",

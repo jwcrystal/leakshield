@@ -465,6 +465,7 @@ export async function runCli() {
   console.log(t("cli.usage_dir"));
   console.log(t("cli.usage_dir_ext"));
   console.log(t("cli.usage_stdin"));
+  console.log(t("cli.usage_web"));
   console.log("");
   console.log(t("cli.usage_redact_heading"));
   console.log(t("cli.usage_redact_text"));
@@ -480,5 +481,7 @@ export async function runCli() {
   console.log(t("cli.usage_opt_dryrun"));
   console.log(t("cli.usage_opt_out"));
   console.log(t("cli.usage_opt_outside"));
+  console.log(t("cli.usage_opt_web"));
+  console.log(t("cli.usage_opt_port"));
   console.log(t("cli.usage_opt_encoding"));
 }

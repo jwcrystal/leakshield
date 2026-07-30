@@ -57,6 +57,7 @@ export const zhTW = {
   "cli.usage_dir": "  sensitive-guard --dir ./src",
   "cli.usage_dir_ext": "  sensitive-guard --dir ./src --ext .ts .env .json",
   "cli.usage_stdin": "  cat file.ts | sensitive-guard --stdin",
+  "cli.usage_web": "  sensitive-guard --web [--port 3000]      啟動本機 Web UI",
   "cli.usage_redact_heading": "\n脫敏模式：",
   "cli.usage_redact_text": "  sensitive-guard --redact --text '你的內容'",
   "cli.usage_redact_file": "  sensitive-guard --redact --file ./secret.env",
@@ -72,6 +73,8 @@ export const zhTW = {
   "cli.usage_opt_dryrun": "  --dry-run              搭配 --redact，只預覽不輸出",
   "cli.usage_opt_out": "  --out <path>           搭配 --redact --file，指定輸出路徑",
   "cli.usage_opt_outside": "  --allow-outside        允許掃描工作目錄以外的路徑（預設禁止）",
+  "cli.usage_opt_web": "  --web                   啟動本機 Web UI（預設 port 3000）",
+  "cli.usage_opt_port": "  --port <port>          指定 Web UI 埠號（搭配 --web）",
   "cli.usage_opt_encoding": "  --enable-encoding-detection  啟用 Base64/URL/Hex 解碼檢測（預設關閉）",
   // web — server start
   "web.server_title": "🛡️  sensitive-guard web UI",

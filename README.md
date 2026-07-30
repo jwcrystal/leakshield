@@ -1,4 +1,9 @@
-# 🛡️ sensitive-guard
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./icon.svg">
+  <img alt="sensitive-guard" src="./icon.svg" width="64">
+</picture>
+
+# sensitive-guard
 
 > 🌐 English | [繁體中文](./README.zh-TW.md)
 
@@ -87,7 +92,7 @@ After building, use `npx sensitive-guard`. If installed globally, use
 `sensitive-guard` directly. `npm run scan -- ...` remains available for local
 development from this repository.
 
-### npm Scripts Reference
+### npm Scripts
 
 | Command | Description |
 |---------|-------------|
@@ -96,6 +101,35 @@ development from this repository.
 | `npm run scan` | CLI scan (no build needed) |
 | `npm run web` | Start the local Web UI (no build needed) |
 | `npm test` | Run unit tests |
+| `npm run binary` | Build standalone binary for current platform (macOS ARM) |
+| `npm run binary:win` | Cross-compile for Windows x64 |
+| `npm run binary:linux` | Cross-compile for Linux x64 |
+| `npm run binary:mac-intel` | Cross-compile for macOS Intel |
+| `npm run binary:all` | Build all platforms at once |
+
+---
+
+## Standalone Binary
+
+Can't use Node.js or npm? Build a standalone binary with [Bun](https://bun.sh) — no runtime needed on the target machine.
+
+```bash
+# One-command build for current platform
+npm run binary
+
+# Cross-compile for other platforms
+npm run binary:win     # Windows x64  → sensitive-guard.exe
+npm run binary:linux   # Linux x64    → sensitive-guard-linux
+npm run binary:all     # All platforms
+```
+
+Or directly with Bun:
+
+```bash
+bun build --compile --target=bun-windows-x64 ./src/index.ts --outfile=sensitive-guard.exe
+```
+
+The output is a single executable — hand it to anyone, no dependencies required.
 
 ---
 

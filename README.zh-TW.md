@@ -99,6 +99,27 @@ bun build --compile --target=bun-windows-x64 ./src/index.ts --outfile=sensitive-
 
 產出單一執行檔，直接交給任何人，無任何相依套件。
 
+### 自訂設定（binary 使用者）
+
+執行檔內建預設值可直接使用。若要自訂規則（NDA 關鍵字、私有網域、自訂正則），將 `config/guard.config.yaml` 放在以下任一位置：
+
+| 位置 | 範圍 |
+|------|------|
+| `./config/guard.config.yaml` | 當前工作目錄 |
+| `~/.sensitive-guard/guard.config.yaml` | 所有位置（家目錄） |
+
+```bash
+# 快速開始：把設定放到家目錄
+mkdir -p ~/.sensitive-guard
+cp config/guard.config.yaml ~/.sensitive-guard/
+
+# 或依專案放置
+mkdir -p ./config
+# 編輯 ./config/guard.config.yaml
+```
+
+詳見[設定](#設定)章節。
+
 ---
 
 ## 使用方式

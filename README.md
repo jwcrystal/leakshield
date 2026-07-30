@@ -131,6 +131,27 @@ bun build --compile --target=bun-windows-x64 ./src/index.ts --outfile=sensitive-
 
 The output is a single executable — hand it to anyone, no dependencies required.
 
+### Configuration for binary users
+
+The binary works out of the box with built-in defaults. To customize rules (NDA keywords, private domains, custom regex patterns), place `config/guard.config.yaml` in one of these locations:
+
+| Location | Scope |
+|----------|-------|
+| `./config/guard.config.yaml` | Current working directory |
+| `~/.sensitive-guard/guard.config.yaml` | All sessions (user home) |
+
+```bash
+# Quick start with custom config
+mkdir -p ~/.sensitive-guard
+cp config/guard.config.yaml ~/.sensitive-guard/
+
+# Or per-project
+mkdir -p ./config
+# Create/edit ./config/guard.config.yaml as needed
+```
+
+See [Configuration](#configuration) section for available options.
+
 ---
 
 ## Usage

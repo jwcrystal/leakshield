@@ -1,12 +1,16 @@
 /*
 !src/
 src/*
+!src/transports/
+src/transports/*
+!src/transports/web-ui.ts
 !src/scanner/
 src/scanner/*
 !src/scanner/exact-values.ts
 !src/scanner/redaction-verifier.ts
 !tests/
 tests/*
+!tests/web.test.ts
 !tests/exact-values.test.ts
 !tests/redaction-verifier.test.ts
 !vitest.config.ts

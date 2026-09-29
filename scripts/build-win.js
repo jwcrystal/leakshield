@@ -5,7 +5,7 @@ const outfile = "sensitive-guard.exe";
 
 console.log("Building Windows exe...");
 execSync(
-  `bun build --compile --target=bun-windows-x64 ./src/index.ts --outfile=${outfile}`,
+  `bun build --compile --target=bun-windows-x64 ./src/cli.ts --outfile=${outfile}`,
   { stdio: "inherit" }
 );
 

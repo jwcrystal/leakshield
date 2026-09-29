@@ -1,8 +1,13 @@
-import type { Plugin } from "@opencode-ai/plugin";
+import type { Plugin as PluginNamespace } from "@opencode/plugin";
+import type { PluginModule } from "@opencode-ai/plugin";
 import { z } from "zod";
 import { loadConfig } from "./config/loader.js";
 import { createFailClosedHooks, createHooks } from "./opencode-hooks.js";
+import { createFailClosedV2Setup, createV2Setup } from "./opencode-v2.js";
 import type { GuardConfig } from "./types.js";
+
+type V2Plugin = PluginNamespace.Plugin;
+type V2PluginContext = PluginNamespace.Context;
 
 const PluginOptionsSchema = z.object({
   mode: z.enum(["block", "redact"]).default("block"),
@@ -29,7 +34,20 @@ function getWorkspaceRoot(input: unknown): string {
   return process.cwd();
 }
 
-const sensitiveGuardPlugin = (async (input, rawOptions) => {
+const v2Setup = async (ctx: V2PluginContext): Promise<void> => {
+  try {
+    const options: PluginOptions = PluginOptionsSchema.parse(ctx.options);
+    const config = withEncodingDetection(loadConfig(options.configPath, ctx.location.directory));
+    await createV2Setup(config, options.mode)(ctx);
+  } catch {
+    await createFailClosedV2Setup()(ctx);
+  }
+};
+
+const v1Server = async (
+  input: Parameters<NonNullable<PluginModule["server"]>>[0],
+  rawOptions?: unknown,
+) => {
   try {
     const options: PluginOptions = PluginOptionsSchema.parse(rawOptions);
     const config = withEncodingDetection(loadConfig(options.configPath, getWorkspaceRoot(input)));
@@ -37,6 +55,16 @@ const sensitiveGuardPlugin = (async (input, rawOptions) => {
   } catch {
     return createFailClosedHooks();
   }
-}) satisfies Plugin;
+};
+
+/**
+ * Dual-version OpenCode plugin entry. OpenCode v2 reads `id` and `setup(ctx)`;
+ * OpenCode v1 (1.18.29+) calls `server(input, options)` and uses the returned hooks.
+ */
+const sensitiveGuardPlugin = {
+  id: "sensitive-guard",
+  setup: v2Setup,
+  server: v1Server,
+} satisfies PluginModule & V2Plugin;
 
 export default sensitiveGuardPlugin;

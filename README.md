@@ -18,7 +18,7 @@ MCP server mode has been removed. It depended on the model voluntarily calling a
 
 | Mode | Start it with | Use it for |
 |------|---------------|------------|
-| OpenCode Plugin | Add `dist/opencode.js` to `opencode.json` | Automatic, fail-closed protection for OpenCode model inputs and tool outputs |
+| OpenCode Plugin | Add the `dist` directory (v2) or `dist/opencode.js` (v1) to `opencode.json` | Automatic, fail-closed protection for OpenCode model inputs and tool outputs |
 | CLI | `npx sensitive-guard --file ./path` | Explicit local or CI scans; it never sends content to a model |
 | Web UI | `npm run web` | Manual browser scans at `http://localhost:3000` |
 
@@ -126,7 +126,7 @@ npm run binary:all     # All platforms
 Or directly with Bun:
 
 ```bash
-bun build --compile --target=bun-windows-x64 ./src/index.ts --outfile=sensitive-guard.exe
+bun build --compile --target=bun-windows-x64 ./src/cli.ts --outfile=sensitive-guard.exe
 ```
 
 The output is a single executable — hand it to anyone, no dependencies required.
@@ -232,13 +232,13 @@ Start a local web server and use it in your browser:
 
 ```bash
 # Default port 3000
-npx tsx src/index.ts --web
+npx tsx src/cli.ts --web
 
 # Custom port
-npx tsx src/index.ts --web --port 3001
+npx tsx src/cli.ts --web --port 3001
 
 # Built version
-node dist/index.js --web --port 3001
+node dist/cli.js --web --port 3001
 ```
 
 Open `http://localhost:3001` in your browser, paste content, and press **Scan** or `Ctrl+Enter`.
@@ -276,7 +276,25 @@ curl -s -X POST http://localhost:3001/scan \
 
 When loaded successfully, the OpenCode plugin is the enforced integration. It scans and blocks user text before OpenCode persists or sends it to a model, sanitizes system prompts and tool definitions, protects tool output before the next model turn, and re-scans history before replay. It always enables encoded-content detection. Invalid plugin options or scanner configuration make every protected hook fail closed and abort the model request. A bounded SHA-256 decision cache avoids repeatedly scanning unchanged history without retaining original or redacted content.
 
-Build the project, then add the compiled plugin to `opencode.json`:
+The same compiled plugin supports both OpenCode major versions: v2 hosts load the package `id` + `setup(ctx)` definition, while v1 hosts (1.18.29+) call the legacy `server()` factory.
+
+**OpenCode v2** — build the project, then point `plugins` at the `dist` directory (or use the package name after publishing to npm):
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    {
+      "package": "/absolute/path/to/sensitive-guard/dist",
+      "options": { "mode": "block" }
+    }
+  ]
+}
+```
+
+Note that v2 only accepts plugin *directories* (it resolves `dist/index.js`) or package names; a `file://` URL to a single `.js` file is rejected with `configured plugin path must be a directory`.
+
+**OpenCode v1 (1.18.29+)** — use the legacy `plugin` array with the compiled plugin file:
 
 ```json
 {
@@ -295,9 +313,9 @@ Attachments are blocked because the text scanner cannot safely inspect arbitrary
 
 OpenCode currently logs and skips modules that fail before their plugin factory can run, such as a missing package or JavaScript syntax error. After installation or upgrade, run a smoke test with a synthetic key matching `sk-` followed by at least 20 letters or digits and verify that Sensitive Guard replaces the message before using real sensitive data.
 
-#### Isolated smoke test
+#### Isolated smoke test (OpenCode v2)
 
-Run this from the project root. It uses a temporary OpenCode configuration directory and a synthetic value, not a real credential:
+Run this from the project root. It uses a temporary working directory and a synthetic value, not a real credential:
 
 ```bash
 npm run build
@@ -305,19 +323,20 @@ SMOKE_DIR="$(mktemp -d)"
 PROJECT_DIR="$(pwd)"
 cat > "$SMOKE_DIR/opencode.json" <<EOF
 {
-  "plugin": [
-    ["file://$PROJECT_DIR/dist/opencode.js", { "mode": "block" }]
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    { "package": "$PROJECT_DIR/dist", "options": { "mode": "block" } }
   ]
 }
 EOF
-OPENCODE_CONFIG_DIR="$SMOKE_DIR" opencode --prompt \
-  "Smoke test only. Do not reveal or use this token: sk-AAAAAAAAAAAAAAAAAAAA"
+(cd "$SMOKE_DIR" && opencode run --standalone \
+  "Smoke test only. Do not reveal or use this token: sk-AAAAAAAAAAAAAAAAAAAA")
 rm -rf "$SMOKE_DIR"
 ```
 
 The model-facing message must contain the Sensitive Guard block notice and must not contain the synthetic token. Do not use a real credential for this test.
 
-After publishing to npm, the same plugin can be configured as `"sensitive-guard"` instead of the `file:` URL.
+After publishing to npm, the same plugin can be configured as `"sensitive-guard"` instead of the local `dist` path.
 
 <!-- Legacy transport row intentionally hidden.
 | `scan_dir` | Scan an entire directory (recursive, skips node_modules / .git). Returns per-file results |
@@ -396,7 +415,7 @@ npm run cli -- --dir ./my-project
 
 ```bash
 # Add to your CI script
-node dist/index.js --cli --dir ./prompts
+node dist/cli.js --cli --dir ./prompts
 if [ $? -ne 0 ]; then
   echo "❌ Sensitive content detected — stopping pipeline"
   exit 1

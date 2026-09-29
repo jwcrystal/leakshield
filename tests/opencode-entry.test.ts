@@ -26,12 +26,15 @@ afterEach(() => {
 });
 
 describe("OpenCode plugin entry", () => {
-  it("exports only one plugin factory for the OpenCode legacy loader", () => {
+  it("exports one default entry that serves both OpenCode v1 and v2 loaders", () => {
     expect(Object.keys(pluginModule)).toEqual(["default"]);
+    expect(sensitiveGuardPlugin.id).toBe("sensitive-guard");
+    expect(typeof sensitiveGuardPlugin.setup).toBe("function");
+    expect(typeof sensitiveGuardPlugin.server).toBe("function");
   });
 
-  it("removes sensitive content before constructing a provider payload", async () => {
-    const hooks = await sensitiveGuardPlugin({} as never, { mode: "block" });
+  it("removes sensitive content before constructing a provider payload (v1 server)", async () => {
+    const hooks = await sensitiveGuardPlugin.server({} as never, { mode: "block" });
     const parts = [textPart(`token=${secret}`)];
 
     await hooks["chat.message"]!({ sessionID: "session-1" }, { message: {} as never, parts });
@@ -41,13 +44,13 @@ describe("OpenCode plugin entry", () => {
     expect(providerPayload).toContain("Sensitive Guard blocked message text");
   });
 
-  it("blocks model requests when configuration loading fails", async () => {
+  it("blocks model requests when configuration loading fails (v1 server)", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-"));
     temporaryDirectories.push(directory);
     const configPath = path.join(directory, "invalid.yaml");
     fs.writeFileSync(configPath, "settings:\n  max_chars: invalid\n", "utf8");
 
-    const hooks = await sensitiveGuardPlugin({} as never, { configPath });
+    const hooks = await sensitiveGuardPlugin.server({} as never, { configPath });
     const invokeHook = hooks["chat.message"]!({ sessionID: "session-1" }, {
       message: {} as never,
       parts: [textPart("safe text")],
@@ -56,14 +59,14 @@ describe("OpenCode plugin entry", () => {
     await expect(invokeHook).rejects.toThrow("Sensitive Guard initialization failed");
   });
 
-  it("loads configured env_files relative to the OpenCode workspace", async () => {
+  it("loads configured env_files relative to the OpenCode workspace (v1 server)", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-"));
     temporaryDirectories.push(directory);
     const configPath = path.join(directory, "guard.config.yaml");
     fs.writeFileSync(path.join(directory, ".env"), `TOKEN=${exactSecret}\n`, "utf8");
     fs.writeFileSync(configPath, "settings:\n  env_files:\n    - .env\n", "utf8");
 
-    const hooks = await sensitiveGuardPlugin({ worktree: directory } as never, { configPath });
+    const hooks = await sensitiveGuardPlugin.server({ worktree: directory } as never, { configPath });
     const parts = [textPart(`token=${exactSecret}`)];
     await hooks["chat.message"]!({ sessionID: "session-1" }, { message: {} as never, parts });
 
@@ -71,10 +74,76 @@ describe("OpenCode plugin entry", () => {
     expect(JSON.stringify(parts)).toContain("Sensitive Guard blocked message text");
   });
 
-  it("blocks model requests when plugin options are invalid", async () => {
-    const hooks = await sensitiveGuardPlugin({} as never, { mode: "unsupported" });
+  it("blocks model requests when plugin options are invalid (v1 server)", async () => {
+    const hooks = await sensitiveGuardPlugin.server({} as never, { mode: "unsupported" });
 
     await expect(hooks["experimental.chat.messages.transform"]!({}, { messages: [] }))
       .rejects.toThrow("Sensitive Guard initialization failed");
+  });
+
+  it("registers protecting hooks on the OpenCode v2 context (v2 setup)", async () => {
+    const registered: Array<{ domain: string; name: string; callback: unknown }> = [];
+    const ctx = {
+      options: { mode: "block" },
+      location: { directory: process.cwd() },
+      session: {
+        hook: async (name: string, callback: unknown) => {
+          registered.push({ domain: "session", name, callback });
+          return { dispose: async () => {} };
+        },
+      },
+      tool: {
+        hook: async (name: string, callback: unknown) => {
+          registered.push({ domain: "tool", name, callback });
+          return { dispose: async () => {} };
+        },
+      },
+    };
+
+    await sensitiveGuardPlugin.setup(ctx as never);
+
+    expect(registered.map((r) => `${r.domain}:${r.name}`)).toEqual([
+      "session:prompt",
+      "session:context",
+      "session:compaction",
+      "session:generate",
+      "session:title",
+      "tool:execute.after",
+    ]);
+
+    const promptHook = registered[0].callback as (event: unknown) => Promise<void>;
+    const event = { prompt: { text: `token=${secret}`, files: [] } };
+    await promptHook(event);
+
+    expect((event.prompt as { text: string }).text).not.toContain(secret);
+    expect((event.prompt as { text: string }).text).toContain("Sensitive Guard blocked message text");
+  });
+
+  it("registers fail-closed hooks when plugin options are invalid (v2 setup)", async () => {
+    const registered: Array<{ name: string; callback: unknown }> = [];
+    const ctx = {
+      options: { mode: "unsupported" },
+      location: { directory: process.cwd() },
+      session: {
+        hook: async (name: string, callback: unknown) => {
+          registered.push({ name, callback });
+          return { dispose: async () => {} };
+        },
+      },
+      tool: {
+        hook: async (name: string, callback: unknown) => {
+          registered.push({ name: `tool:${name}`, callback });
+          return { dispose: async () => {} };
+        },
+      },
+    };
+
+    await sensitiveGuardPlugin.setup(ctx as never);
+
+    expect(registered.length).toBe(6);
+    const promptHook = registered[0].callback as (event: unknown) => Promise<void>;
+    await expect(promptHook({ prompt: { text: "safe text" } })).rejects.toThrow(
+      "Sensitive Guard initialization failed",
+    );
   });
 });

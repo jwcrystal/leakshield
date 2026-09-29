@@ -18,7 +18,7 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 
 | 模式 | 啟動方式 | 適用情境 |
 |------|----------|----------|
-| OpenCode Plugin | 在 `opencode.json` 加入 `dist/opencode.js` | 自動且 fail-closed 地保護 OpenCode 模型輸入與工具輸出 |
+| OpenCode Plugin | 在 `opencode.json` 加入 `dist` 目錄（v2）或 `dist/opencode.js`（v1） | 自動且 fail-closed 地保護 OpenCode 模型輸入與工具輸出 |
 | CLI | `npx sensitive-guard --file ./path` | 明確的本機或 CI 掃描；不會把內容送到模型 |
 | Web UI | `npm run web` | 在 `http://localhost:3000` 手動以瀏覽器掃描 |
 
@@ -94,7 +94,7 @@ npm run binary:all     # 全平台
 或直接用 Bun：
 
 ```bash
-bun build --compile --target=bun-windows-x64 ./src/index.ts --outfile=sensitive-guard.exe
+bun build --compile --target=bun-windows-x64 ./src/cli.ts --outfile=sensitive-guard.exe
 ```
 
 產出單一執行檔，直接交給任何人，無任何相依套件。
@@ -251,13 +251,13 @@ npx sensitive-guard --file ../shared.env --allow-outside
 
 ```bash
 # 預設 port 3000
-npx tsx src/index.ts --web
+npx tsx src/cli.ts --web
 
 # 指定 port
-npx tsx src/index.ts --web --port 3001
+npx tsx src/cli.ts --web --port 3001
 
 # Build 後的版本
-node dist/index.js --web --port 3001
+node dist/cli.js --web --port 3001
 ```
 
 開啟瀏覽器 `http://localhost:3001`，貼上內容後按「掃描」或 Ctrl+Enter。
@@ -295,7 +295,25 @@ curl -s -X POST http://localhost:3001/scan \
 
 OpenCode plugin 成功載入後會成為強制性整合：它會在 OpenCode 儲存或送出使用者文字給模型前掃描並攔截，清理 system prompt 與 tool definition，並在下一輪模型讀取前清理工具輸出及歷史訊息。它會固定啟用編碼內容偵測。plugin 選項或掃描設定無效時，所有受保護 hook 都會 fail closed 並中止模型請求。受限的 SHA-256 決策快取會避免重複掃描未變動歷史，同時不保留原文或脫敏後內容。
 
-先 build 專案，再將編譯後的 plugin 加到 `opencode.json`：
+同一份編譯產物同時支援兩個 OpenCode 大版本：v2 載入套件的 `id` + `setup(ctx)` 定義，v1（1.18.29+）呼叫舊版 `server()` factory。
+
+**OpenCode v2** — 先 build 專案，再將 `plugins` 指向 `dist` 目錄（發布到 npm 後也可用套件名稱）：
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    {
+      "package": "/絕對路徑/sensitive-guard/dist",
+      "options": { "mode": "block" }
+    }
+  ]
+}
+```
+
+注意 v2 只接受 plugin「目錄」（會解析 `dist/index.js`）或套件名稱；指向單一 `.js` 檔的 `file://` URL 會被拒絕，並出現 `configured plugin path must be a directory`。
+
+**OpenCode v1（1.18.29+）** — 使用舊版 `plugin` 陣列指向編譯後的 plugin 檔案：
 
 ```json
 {
@@ -314,9 +332,9 @@ OpenCode plugin 成功載入後會成為強制性整合：它會在 OpenCode 儲
 
 OpenCode 目前會記錄並跳過在 plugin factory 執行前就載入失敗的模組，例如套件缺失或 JavaScript 語法錯誤。安裝或升級後，請先用 `sk-` 加至少 20 個英數字元的合成測試 key 執行 smoke test，確認訊息已被 Sensitive Guard 替換，再處理真實機敏資料。
 
-#### 隔離 smoke test
+#### 隔離 smoke test（OpenCode v2）
 
-在專案根目錄執行下列指令。它會使用暫存的 OpenCode 設定目錄與合成值，不會使用真實憑證：
+在專案根目錄執行下列指令。它會使用暫存工作目錄與合成值，不會使用真實憑證：
 
 ```bash
 npm run build
@@ -324,19 +342,20 @@ SMOKE_DIR="$(mktemp -d)"
 PROJECT_DIR="$(pwd)"
 cat > "$SMOKE_DIR/opencode.json" <<EOF
 {
-  "plugin": [
-    ["file://$PROJECT_DIR/dist/opencode.js", { "mode": "block" }]
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    { "package": "$PROJECT_DIR/dist", "options": { "mode": "block" } }
   ]
 }
 EOF
-OPENCODE_CONFIG_DIR="$SMOKE_DIR" opencode --prompt \
-  "Smoke test only. Do not reveal or use this token: sk-AAAAAAAAAAAAAAAAAAAA"
+(cd "$SMOKE_DIR" && opencode run --standalone \
+  "Smoke test only. Do not reveal or use this token: sk-AAAAAAAAAAAAAAAAAAAA")
 rm -rf "$SMOKE_DIR"
 ```
 
 模型可見的訊息必須包含 Sensitive Guard 的攔截通知，且不可包含該合成 token。不要用真實憑證執行此測試。
 
-發布到 npm 後，可用 `"sensitive-guard"` 取代上述 `file:` URL。
+發布到 npm 後，可用 `"sensitive-guard"` 取代上述本機 `dist` 路徑。
 
 ## 設定檔
 
@@ -403,7 +422,7 @@ npx sensitive-guard --dir ./my-project
 
 ```bash
 # 在 CI script 加入
-node dist/index.js --cli --dir ./prompts
+node dist/cli.js --cli --dir ./prompts
 if [ $? -ne 0 ]; then
   echo "❌ 偵測到敏感內容，停止 pipeline"
   exit 1

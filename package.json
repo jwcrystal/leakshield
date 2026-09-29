@@ -3,28 +3,28 @@
   "version": "1.0.0",
   "description": "OpenCode plugin, CLI, and web scanner for sensitive content before sending it to AI",
   "type": "module",
-  "main": "./dist/opencode.js",
+  "main": "./dist/index.js",
   "files": [
     "dist"
   ],
   "bin": {
-    "sensitive-guard": "./dist/index.js"
+    "sensitive-guard": "./dist/cli.js"
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "npm run clean && tsc",
     "prepack": "npm run build",
-    "start": "node dist/index.js --cli",
-    "dev": "tsx src/index.ts --cli",
-    "scan": "tsx src/index.ts --cli",
-    "web": "tsx src/index.ts --web",
+    "start": "node dist/cli.js --cli",
+    "dev": "tsx src/cli.ts --cli",
+    "scan": "tsx src/cli.ts --cli",
+    "web": "tsx src/cli.ts --web",
     "test": "vitest run",
     "test:watch": "vitest",
-    "binary": "bun build --compile --target=bun-darwin-arm64 ./src/index.ts --outfile=sensitive-guard",
-    "binary:win": "bun build --compile --target=bun-windows-x64 ./src/index.ts --outfile=sensitive-guard.exe",
+    "binary": "bun build --compile --target=bun-darwin-arm64 ./src/cli.ts --outfile=sensitive-guard",
+    "binary:win": "bun build --compile --target=bun-windows-x64 ./src/cli.ts --outfile=sensitive-guard.exe",
     "binary:win-icon": "node scripts/build-win.js",
-    "binary:linux": "bun build --compile --target=bun-linux-x64 ./src/index.ts --outfile=sensitive-guard-linux",
-    "binary:mac-intel": "bun build --compile --target=bun-darwin-x64 ./src/index.ts --outfile=sensitive-guard-intel",
+    "binary:linux": "bun build --compile --target=bun-linux-x64 ./src/cli.ts --outfile=sensitive-guard-linux",
+    "binary:mac-intel": "bun build --compile --target=bun-darwin-x64 ./src/cli.ts --outfile=sensitive-guard-intel",
     "binary:all": "npm run binary && npm run binary:win && npm run binary:linux && npm run binary:mac-intel",
     "bundle:mac": "npm run binary && bash scripts/bundle-mac.sh"
   },
@@ -36,6 +36,7 @@
   "devDependencies": {
     "@opencode-ai/plugin": "^1.17.18",
     "@opencode-ai/sdk": "^1.17.18",
+    "@opencode/plugin": "^2.0.19",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
     "rcedit": "^5.0.2",

@@ -73,7 +73,7 @@ npm run scan -- --redact --dry-run --file .env
 ## 3) 30 秒學會 Web UI
 
 ```bash
-npx tsx src/index.ts --web --port 3001
+npx tsx src/cli.ts --web --port 3001
 ```
 
 打開 `http://localhost:3001`，貼上文字後按「掃描」。
@@ -96,7 +96,7 @@ curl -s -X POST http://localhost:3001/scan \
 npm run build
 ```
 
-2. 在 OpenCode/Claude Code 設定 MCP server，指向 `dist/index.js`（請用絕對路徑）。
+2. 在 OpenCode/Claude Code 設定 MCP server，指向 `dist/cli.js`（請用絕對路徑）。
 3. 在 system prompt/CLAUDE.md 寫規則：
    - 讀任何檔案前先 `scan_file` 或 `scan_text`
    - 若 `safe=false`，停止並先回報

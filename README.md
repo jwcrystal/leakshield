@@ -309,6 +309,12 @@ Note that v2 only accepts plugin *directories* (it resolves `dist/index.js`) or 
 
 `block` is the default and replaces unsafe content with a disclosure-free notice. Set `mode` to `redact` only when you explicitly want recognized direct matches replaced with `[REDACTED_TYPE]` placeholders.
 
+**OpenCode v2 only — email de-identification trial:** the opt-in `deidentify` option (valid only together with `mode: "redact"`) additionally replaces repeated MEDIUM email findings with stable, opaque `[SG-EMAIL-…]` placeholders so an agent can correlate records without seeing the addresses. The mapping key is generated once per plugin setup (one OpenCode session), held in memory only, and never persisted — placeholders are stable within a live session but change after a restart, and no reverse mapping exists. Everything else keeps its existing disposition: HIGH credentials are still redacted/blocked, and truncated, encoded, or unverifiable content blocks the whole unit.
+
+```jsonc
+{ "package": "/absolute/path/to/sensitive-guard/dist", "options": { "mode": "redact", "deidentify": true } }
+```
+
 Attachments are blocked because the text scanner cannot safely inspect arbitrary binary or remote attachment content. Existing sessions may already contain raw content; begin a new session after installing the plugin. The plugin protects OpenCode model requests only, not other AI clients or local tools.
 
 OpenCode currently logs and skips modules that fail before their plugin factory can run, such as a missing package or JavaScript syntax error. After installation or upgrade, run a smoke test with a synthetic key matching `sk-` followed by at least 20 letters or digits and verify that Sensitive Guard replaces the message before using real sensitive data.

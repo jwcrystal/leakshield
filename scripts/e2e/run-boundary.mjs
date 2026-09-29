@@ -19,6 +19,12 @@
  *   C5 invalid      sensitive-guard {mode:"bogus"}    + canary prompt (fail-closed)
  *   C6 absent       no plugins                        + canary prompt (expected leak;
  *                  documents the deployment boundary, NOT a product failure)
+ *   C7 deidentify   sensitive-guard {mode:"redact",
+ *                  deidentify:true} + email-twice prompt (issue #20 trial:
+ *                  stable per-session [SG-EMAIL-… placeholders, no canary)
+ *   C8 ignore       sensitive-guard {mode:"redact"} + canary prompt carrying
+ *                  '// sg-ignore' on the same line (in-text ignore directives
+ *                  must not bypass the model boundary)
  *
  * Safety: all canaries are synthetic (example-test.invalid / sk-CANARYTEST…),
  * every case runs in a fresh workdir with XDG_DATA_HOME / XDG_STATE_HOME /
@@ -72,6 +78,7 @@ const CANARIES = [
 const MARKERS = {
   blockedNotice: "[Sensitive Guard blocked",
   redacted: "[REDACTED_",
+  deidentified: "[SG-EMAIL-",
   secondPluginMarker: "SECOND-PLUGIN-MARKER",
 };
 const CANARY_PROMPT =
@@ -180,6 +187,47 @@ const CASES = [
       r.canariesInProviderRequests.length > 0
         ? { verdict: "expected-leak", reason: "canary reached provider — documents that absence of the plugin is unprotected" }
         : { verdict: "unexpected", reason: "canary did NOT reach provider without plugin — harness or host config issue (check for global plugins)" },
+  },
+  {
+    id: "C7-deidentify",
+    description:
+      "deidentify trial (issue #20): {mode:\"redact\",deidentify:true}; alice×2 → one stable [SG-EMAIL-… placeholder, bob → a different one; no canary reaches provider",
+    plugins: [{ package: DIST_DIR, options: { mode: "redact", deidentify: true } }],
+    prompt:
+      "Email alice.canary@example-test.invalid twice: alice.canary@example-test.invalid and bob.canary@example-test.invalid once, plus key sk-CANARYTEST1234567890abcdef.",
+    expectation: (r) => {
+      if (r.canariesInProviderRequests.length > 0)
+        return { verdict: "fail", reason: "canary leaked to provider despite de-identification" };
+      if (r.requests.length === 0)
+        return { verdict: "observe", reason: "no provider request observed; inspect out/logs" };
+      // Aggregate [SG-EMAIL-<16 hex>] placeholder occurrences across requests.
+      const totals = {};
+      for (const q of r.requests)
+        for (const [ph, n] of Object.entries(q.placeholderCounts ?? {}))
+          totals[ph] = (totals[ph] ?? 0) + n;
+      const distinct = Object.keys(totals);
+      if (distinct.length < 2)
+        return { verdict: "fail", reason: `expected ≥2 distinct [SG-EMAIL-… placeholders (alice+bob), saw ${distinct.length}` };
+      const stable = distinct.filter((ph) => totals[ph] >= 2);
+      if (stable.length < 1)
+        return { verdict: "fail", reason: "no placeholder value repeated ≥2 times — alice's two occurrences did not map to one stable per-session placeholder" };
+      return {
+        verdict: "pass",
+        reason: `no canary in any provider request; ${distinct.length} distinct [SG-EMAIL-… placeholders with ≥1 stable across repeats`,
+      };
+    },
+  },
+  {
+    id: "C8-ignore-bypass",
+    description:
+      "in-text ignore directives must not bypass the model boundary: {mode:\"redact\"} + canary prompt carrying '// sg-ignore' on the same line (regression guard for the fail-open fix)",
+    plugins: [{ package: DIST_DIR, options: { mode: "redact" } }],
+    prompt:
+      "bob.canary@example-test.invalid // sg-ignore plus sk-CANARYTEST1234567890abcdef on the same ignored line",
+    expectation: (r) =>
+      r.canariesInProviderRequests.length === 0
+        ? { verdict: "pass", reason: "no canary in any provider request despite the in-text ignore directive" }
+        : { verdict: "fail", reason: "canary leaked to provider via in-text ignore directive (fail-open bypass)" },
   },
 ];
 
@@ -377,6 +425,12 @@ async function runCase(caseDef, port) {
   // channels, so all requests are scanned for canaries.
   const requests = attributed.map((e) => {
     const s = JSON.stringify(e.body);
+    const placeholderCounts = {};
+    let m;
+    const placeholderRe = /\[SG-EMAIL-([0-9a-f]{16})\]/g;
+    while ((m = placeholderRe.exec(s)) !== null) {
+      placeholderCounts[m[1]] = (placeholderCounts[m[1]] ?? 0) + 1;
+    }
     return {
       seq: e.seq,
       hasTools: Array.isArray(e.body?.tools) && e.body.tools.length > 0,
@@ -385,6 +439,7 @@ async function runCase(caseDef, port) {
       markers: Object.entries(MARKERS)
         .filter(([, v]) => s.includes(v))
         .map(([k]) => k),
+      placeholderCounts,
     };
   });
   const canariesInProviderRequests = requests.flatMap((q) =>

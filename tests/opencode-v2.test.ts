@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { createHmac } from "node:crypto";
+import { createSessionKey, placeholderFor } from "../src/decision/deidentify.js";
 import { createFailClosedV2Setup, createV2Setup } from "../src/opencode-v2.js";
 import type { GuardConfig } from "../src/types.js";
 
@@ -186,5 +188,112 @@ describe("OpenCode v2 plugin", () => {
         hook.callback({ prompt: { text: "safe text" }, system: [], messages: [], tools: {} }),
       ).rejects.toThrow("Sensitive Guard initialization failed");
     }
+  });
+});
+
+describe("OpenCode v2 plugin — email de-identification", () => {
+  const emailA = "alice.canary@example-test.invalid";
+  const emailB = "bob.canary@example-test.invalid";
+
+  it("replaces repeated emails with one stable per-session placeholder at prompt admission", async () => {
+    const sessionKey = createSessionKey();
+    const hooks = await loadHooks(createV2Setup(config, "redact", { sessionKey }));
+    const event = {
+      prompt: {
+        text: `Email ${emailA} twice: ${emailA} and ${emailB} once.`,
+        files: [],
+      },
+    };
+
+    await findHook(hooks, "session:prompt")(event);
+
+    const text = event.prompt.text;
+    expect(text).not.toContain(emailA);
+    expect(text).not.toContain(emailB);
+    expect(text.split("[SG-EMAIL-").length - 1).toBe(3);
+    const alicePlaceholder = placeholderFor(emailA, sessionKey);
+    expect(text.split(alicePlaceholder).length - 1).toBe(2);
+    const placeholders = text.match(/\[SG-EMAIL-[0-9a-f]{16}\]/g) ?? [];
+    expect(placeholders.filter((p) => p !== alicePlaceholder)).toHaveLength(1);
+  });
+
+  it("uses the same placeholder for the same email across prompt and tool output hooks", async () => {
+    const sessionKey = createSessionKey();
+    const hooks = await loadHooks(createV2Setup(config, "redact", { sessionKey }));
+    // Both hooks fire within session "session-1": its placeholder key is
+    // HMAC-SHA256(masterKey, `session:session-1`).
+    const sessionOneKey = createHmac("sha256", sessionKey).update("session:session-1").digest();
+
+    const promptEvent = { sessionID: "session-1", prompt: { text: `reach ${emailA} tomorrow`, files: [] } };
+    await findHook(hooks, "session:prompt")(promptEvent);
+    const alicePlaceholder = placeholderFor(emailA, sessionOneKey);
+    expect(promptEvent.prompt.text).toContain(alicePlaceholder);
+    expect(promptEvent.prompt.text).not.toContain(emailA);
+
+    const toolEvent = {
+      tool: "read",
+      sessionID: "session-1",
+      status: "completed",
+      result: { content: [{ type: "text", text: `mailbox owner: ${emailA}` }] },
+    };
+    await findHook(hooks, "tool:execute.after")(toolEvent);
+
+    const serialized = JSON.stringify(toolEvent);
+    expect(serialized).not.toContain(emailA);
+    expect(serialized).toContain(alicePlaceholder);
+  });
+
+  it("keeps HIGH keys out of de-identified output", async () => {
+    const sessionKey = createSessionKey();
+    const hooks = await loadHooks(createV2Setup(config, "redact", { sessionKey }));
+    const event = {
+      prompt: {
+        text: `rotate ${secret} then mail ${emailA}`,
+        files: [],
+      },
+    };
+
+    await findHook(hooks, "session:prompt")(event);
+
+    const text = event.prompt.text;
+    const serialized = JSON.stringify(event);
+    expect(serialized).not.toContain(secret);
+    expect(serialized).not.toContain(emailA);
+    expect(text).toContain("[SG-EMAIL-");
+  });
+
+  it("derives placeholder keys per sessionID: stable within a session, different across sessions", async () => {
+    const sessionKey = createSessionKey();
+    const hooks = await loadHooks(createV2Setup(config, "redact", { sessionKey }));
+    const placeholderRe = /\[SG-EMAIL-[0-9a-f]{16}\]/;
+
+    const runPrompt = async (sessionID: string): Promise<string> => {
+      const event = { sessionID, prompt: { text: `reach ${emailA} tomorrow`, files: [] } };
+      await findHook(hooks, "session:prompt")(event);
+      return event.prompt.text as string;
+    };
+
+    const s1 = await runPrompt("s1");
+    const s2 = await runPrompt("s2");
+    const s1Again = await runPrompt("s1");
+
+    expect(s1).not.toContain(emailA);
+    expect(s2).not.toContain(emailA);
+    const p1 = s1.match(placeholderRe)![0];
+    const p2 = s2.match(placeholderRe)![0];
+    expect(p1).not.toBe(p2);
+    expect(s1Again).toContain(p1);
+    expect(s1Again).not.toContain(p2);
+  });
+
+  it("falls back to the setup master key for events without a sessionID", async () => {
+    const sessionKey = createSessionKey();
+    const hooks = await loadHooks(createV2Setup(config, "redact", { sessionKey }));
+    const event = { prompt: { text: `reach ${emailA} tomorrow`, files: [] } };
+
+    await findHook(hooks, "session:prompt")(event);
+
+    expect(event.prompt.text).not.toContain(emailA);
+    expect(event.prompt.text).toContain(placeholderFor(emailA, sessionKey));
   });
 });

@@ -74,6 +74,17 @@ describe("OpenCode plugin entry", () => {
     expect(JSON.stringify(parts)).toContain("Sensitive Guard blocked message text");
   });
 
+  it("fails closed when deidentify is requested on the v1 server (v1 has no de-identification)", async () => {
+    const hooks = await sensitiveGuardPlugin.server({} as never, { mode: "redact", deidentify: true });
+
+    await expect(
+      hooks["chat.message"]!({ sessionID: "session-1" }, {
+        message: {} as never,
+        parts: [textPart("safe text")],
+      }),
+    ).rejects.toThrow("Sensitive Guard initialization failed");
+  });
+
   it("blocks model requests when plugin options are invalid (v1 server)", async () => {
     const hooks = await sensitiveGuardPlugin.server({} as never, { mode: "unsupported" });
 
@@ -123,6 +134,105 @@ describe("OpenCode plugin entry", () => {
     const registered: Array<{ name: string; callback: unknown }> = [];
     const ctx = {
       options: { mode: "unsupported" },
+      location: { directory: process.cwd() },
+      session: {
+        hook: async (name: string, callback: unknown) => {
+          registered.push({ name, callback });
+          return { dispose: async () => {} };
+        },
+      },
+      tool: {
+        hook: async (name: string, callback: unknown) => {
+          registered.push({ name: `tool:${name}`, callback });
+          return { dispose: async () => {} };
+        },
+      },
+    };
+
+    await sensitiveGuardPlugin.setup(ctx as never);
+
+    expect(registered.length).toBe(6);
+    const promptHook = registered[0].callback as (event: unknown) => Promise<void>;
+    await expect(promptHook({ prompt: { text: "safe text" } })).rejects.toThrow(
+      "Sensitive Guard initialization failed",
+    );
+  });
+
+  it("initializes de-identification when mode is redact (v2 setup)", async () => {
+    const registered: Array<{ domain: string; name: string; callback: unknown }> = [];
+    const ctx = {
+      options: { mode: "redact", deidentify: true },
+      location: { directory: process.cwd() },
+      session: {
+        hook: async (name: string, callback: unknown) => {
+          registered.push({ domain: "session", name, callback });
+          return { dispose: async () => {} };
+        },
+      },
+      tool: {
+        hook: async (name: string, callback: unknown) => {
+          registered.push({ domain: "tool", name, callback });
+          return { dispose: async () => {} };
+        },
+      },
+    };
+
+    await sensitiveGuardPlugin.setup(ctx as never);
+
+    expect(registered.map((r) => `${r.domain}:${r.name}`)).toEqual([
+      "session:prompt",
+      "session:context",
+      "session:compaction",
+      "session:generate",
+      "session:title",
+      "tool:execute.after",
+    ]);
+
+    const promptHook = registered[0].callback as (event: unknown) => Promise<void>;
+    const event = {
+      prompt: { text: "email alice@example.com twice: alice@example.com", files: [] },
+    };
+    await promptHook(event);
+
+    const text = (event.prompt as { text: string }).text;
+    expect(text).not.toContain("alice@example.com");
+    const placeholders = text.match(/\[SG-EMAIL-[0-9a-f]{16}\]/g) ?? [];
+    expect(placeholders).toHaveLength(2);
+    expect(new Set(placeholders).size).toBe(1);
+  });
+
+  it("fails closed when deidentify is set without mode redact (v2 setup)", async () => {
+    const registered: Array<{ name: string; callback: unknown }> = [];
+    const ctx = {
+      options: { mode: "block", deidentify: true },
+      location: { directory: process.cwd() },
+      session: {
+        hook: async (name: string, callback: unknown) => {
+          registered.push({ name, callback });
+          return { dispose: async () => {} };
+        },
+      },
+      tool: {
+        hook: async (name: string, callback: unknown) => {
+          registered.push({ name: `tool:${name}`, callback });
+          return { dispose: async () => {} };
+        },
+      },
+    };
+
+    await sensitiveGuardPlugin.setup(ctx as never);
+
+    expect(registered.length).toBe(6);
+    const promptHook = registered[0].callback as (event: unknown) => Promise<void>;
+    await expect(promptHook({ prompt: { text: "safe text" } })).rejects.toThrow(
+      "Sensitive Guard initialization failed",
+    );
+  });
+
+  it("fails closed when deidentify has the wrong type (v2 setup)", async () => {
+    const registered: Array<{ name: string; callback: unknown }> = [];
+    const ctx = {
+      options: { deidentify: "yes" },
       location: { directory: process.cwd() },
       session: {
         hook: async (name: string, callback: unknown) => {

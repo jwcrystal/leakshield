@@ -83,10 +83,28 @@ function addExactValueFindings(
 }
 
 /**
+ * Options shared by the scanning entry points.
+ */
+export interface ScanOptions {
+  /**
+   * When false, in-text ignore directives (`// sg-ignore` and friends) are NOT
+   * honored and every line is scanned. The model boundary (protectText /
+   * deidentifyText) must always pass false — prompt or tool text could
+   * otherwise carry a directive and sail through raw (fail-open bypass).
+   * The CLI/Web transports keep the default (true), which is their contract.
+   */
+  honorIgnoreDirectives?: boolean;
+}
+
+function honorDirectives(opts?: ScanOptions): boolean {
+  return opts?.honorIgnoreDirectives !== false;
+}
+
+/**
  * Internal scan function without encoding detection.
  * Used by scanTextWithDecoding to avoid infinite recursion.
  */
-function scanTextInternal(text: string, config: GuardConfig): ScanResult {
+function scanTextInternal(text: string, config: GuardConfig, opts?: ScanOptions): ScanResult {
   // Step 1: Check for truncation
   const wasTruncated = text.length > config.settings.max_chars;
   const truncated = text.slice(0, config.settings.max_chars);
@@ -94,7 +112,7 @@ function scanTextInternal(text: string, config: GuardConfig): ScanResult {
   const allRules = getRules(config);
   const findings: Finding[] = [];
   const seen = new Set<string>();
-  const ignoredLines = getIgnoredLines(truncated);
+  const ignoredLines = honorDirectives(opts) ? getIgnoredLines(truncated) : new Set<number>();
 
   // Step 2: Scan for suspicious Unicode patterns ONLY if there's an actual threat
   // This doesn't modify the text, just detects issues
@@ -193,10 +211,10 @@ function scanTextInternal(text: string, config: GuardConfig): ScanResult {
   };
 }
 
-export function scanText(text: string, config: GuardConfig): ScanResult {
+export function scanText(text: string, config: GuardConfig, opts?: ScanOptions): ScanResult {
   // If encoding detection is enabled, use the enhanced scanner
   if (config.settings.encoding_detection) {
-    const result = encoding.scanTextWithDecoding(text, config);
+    const result = encoding.scanTextWithDecoding(text, config, opts);
 
     // Generate proper summary based on merged results
     const safe = result.safe;
@@ -241,16 +259,16 @@ export function scanText(text: string, config: GuardConfig): ScanResult {
   }
 
   // Otherwise, use internal scan without encoding detection
-  return scanTextInternal(text, config);
+  return scanTextInternal(text, config, opts);
 }
 
 // ─── Export scanTextInternal for use by encoding.ts ─────────────────────────────
 export { scanTextInternal };
 
-export function redactText(text: string, config: GuardConfig): RedactResult {
+export function redactText(text: string, config: GuardConfig, opts?: ScanOptions): RedactResult {
   const truncated = text.slice(0, config.settings.max_chars);
   const allRules = getRules(config);
-  const ignoredLines = getIgnoredLines(truncated);
+  const ignoredLines = honorDirectives(opts) ? getIgnoredLines(truncated) : new Set<number>();
 
   const matches: MatchEntry[] = [];
   const seen = new Set<string>();
@@ -283,7 +301,7 @@ export function redactText(text: string, config: GuardConfig): RedactResult {
     redacted = redacted.slice(0, m.index) + `[REDACTED_${m.type}]` + redacted.slice(m.index + m.length);
   }
 
-  const { findings, total_findings } = scanText(text, config);
+  const { findings, total_findings } = scanText(text, config, opts);
   const summary = total_findings === 0
     ? t("redact.safe_summary")
     : t("redact.unsafe_summary", { count: total_findings });

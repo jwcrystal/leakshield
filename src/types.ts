@@ -44,9 +44,9 @@ export interface Finding {
   column?: number;
   preview: string;
   description: string;
-  /** Internal-only: byte offset of match start in the original content. */
+  /** Internal-only: UTF-16 code-unit offset of the match start in the original content (regex `.index`; the scanner slices with String.slice). Not a byte offset. */
   match_start?: number;
-  /** Internal-only: byte offset of match end in the original content. */
+  /** Internal-only: UTF-16 code-unit offset of the match end (match_start + match length). Not a byte offset. */
   match_end?: number;
   /** Internal-only: the raw matched text. Never expose to transport outputs. */
   match_text?: string;

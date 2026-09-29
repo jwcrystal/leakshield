@@ -41,6 +41,8 @@ Env knobs: `OPENCODE_BIN`, `E2E_TIMEOUT_MS` (default 240000), `E2E_PRINT_LOGS=1`
 | C4b-order2 | plugins `[canary-injector, sensitive-guard(redact)]`, same | **observe**: same question with reversed order |
 | C5-invalid-options | `{mode:"bogus"}` + canary prompt | fail-closed: no canary reaches provider (ideally no request at all) |
 | C6-absent | no plugins + canary prompt | **expected leak** — documents the deployment boundary: without the plugin, canaries reach the provider. This is not a product failure. |
+| C7-deidentify | `{mode:"redact",deidentify:true}` + prompt with alice×2 / bob×1 / HIGH key (issue #20 trial) | no canary in any provider request; ≥2 distinct `[SG-EMAIL-…]` placeholders with alice's two occurrences mapping to one stable placeholder |
+| C8-ignore-bypass | `{mode:"redact"}` + canary prompt carrying `// sg-ignore` on the same line | no canary in any provider request — in-text ignore directives must not bypass the model boundary (regression guard for the fail-open fix) |
 
 C6 doubles as a harness sanity check: if the canary does *not* leak there,
 global (user-level) plugins probably contaminated the run — the orchestrator
@@ -97,7 +99,7 @@ boot probes:
 ## Expected output shape
 
 ```
-opencode v2.0.19 @ 5d5e449…  model=capture/capture-1  cases=7
+opencode v2.0.19 @ 5d5e449…  model=capture/capture-1  cases=8
 case                exit  reqs  leaks verdict      finding
 ----------------------------------------------------------------------------------------------------
 C1-block            0     2     0     pass         no canary in any provider request; block notice present

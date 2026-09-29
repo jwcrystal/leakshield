@@ -81,3 +81,35 @@ Conditions carried into #20 (per approved decisions, 2026-09-29):
   exercised in this real-session run.
 - Title-generation coverage relies on the same hooks as the main request;
   observed clean here, but only in `run`-style sessions.
+
+## Addendum (same day, post-implementation): #20 de-identify trial verification
+
+After implementing the email de-identification trial (opt-in `deidentify: true`
+with `mode:"redact"`, MEDIUM `PII_EMAIL` only, per-session HMAC keys derived
+per sessionID), the suite gained **C7-deidentify** and **C8-ignore-bypass** and
+was re-run in full (9 cases):
+
+- C7-deidentify: **PASS** — prompt containing email A twice, email B once, and a
+  mixed HIGH `sk-` key produced **zero** raw canaries in any provider request;
+  A received one stable placeholder (`[SG-EMAIL-…` ×4 across the title + main
+  requests, twice per request), B a different one (×2). Exactly the trial
+  acceptance from the spec.
+- C8-ignore-bypass: **PASS** — an in-text `// sg-ignore` directive (previously a
+  verified fail-open bypass of the whole scanner at the model boundary, in every
+  mode) no longer suppresses scanning on the plugin path; the canary + HIGH key
+  on the directive line were scrubbed. CLI/CI/Web keep honoring directives by
+  contract (their scan calls use the default).
+- C1–C6: unchanged verdicts, zero unexpected leaks — no regression.
+- Lower-level coverage: 307 unit tests green (27 new across de-identify,
+  strict-scan, object-key sanitization, per-session isolation, entry options).
+
+Boundary hardening shipped with the trial (verified by module-level probes and
+the suite): model-boundary scans no longer honor in-text ignore directives;
+object keys in tool-result metadata are scanned; placeholder keys are derived
+per sessionID so sessions in one server process are unlinkable; v1 plugin path
+rejects the `deidentify` option (fail-closed).
+
+Trial verdict: **safe to ship behind the opt-in flag**; default installs are
+unaffected (`block` default, opt-in requires explicit `deidentify: true`).
+
+

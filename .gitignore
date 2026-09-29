@@ -10,6 +10,9 @@ src/scanner/*
 !src/scanner/redaction-verifier.ts
 !src/utils/
 !src/utils/win-encoding.ts
+!src/decision/
+src/decision/*
+!src/decision/deidentify.ts
 !src/opencode.ts
 !src/opencode-v2.ts
 !src/index.ts
@@ -22,6 +25,7 @@ tests/*
 !tests/opencode.test.ts
 !tests/opencode-entry.test.ts
 !tests/opencode-v2.test.ts
+!tests/deidentify.test.ts
 !vitest.config.ts
 !scripts/
 scripts/*

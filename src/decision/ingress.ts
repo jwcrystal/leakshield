@@ -31,7 +31,7 @@ interface CachedDecision {
   blockedText?: string;
 }
 
-function blockedText(context: string, totalFindings: number): string {
+export function blockedText(context: string, totalFindings: number): string {
   const count = totalFindings === 0 ? "unscanned" : `${totalFindings} sensitive item(s)`;
   return `[Sensitive Guard blocked ${context}: ${count}. Original content was not sent to the model.]`;
 }
@@ -46,13 +46,15 @@ export function protectText(
   options: ProtectionOptions,
 ): ProtectedText {
   try {
-    const scan = scanText(text, config);
+    // The model boundary never honors in-text ignore directives: prompt/tool
+    // text could carry `// sg-ignore` and sail through raw (fail-open bypass).
+    const scan = scanText(text, config, { honorIgnoreDirectives: false });
     if (scan.safe && !scan.was_truncated) {
       return { action: "allow", text, totalFindings: 0 };
     }
 
     if (options.mode === "redact" && !scan.was_truncated) {
-      const verified = redactAndVerify(text, config);
+      const verified = redactAndVerify(text, config, { honorIgnoreDirectives: false });
       if (verified.verified && verified.redacted !== text) {
         return {
           action: "redact",
@@ -173,7 +175,11 @@ export function protectUnknownStrings(
   const copy: Record<string, unknown> = {};
   seen.set(value, copy);
   for (const [key, item] of Object.entries(value)) {
-    copy[key] = protectUnknownStrings(item, config, options, protector, seen);
+    // Protect keys too: an email or secret embedded in an object key must not
+    // reach the model raw. NOTE: two distinct keys may redact to the same
+    // placeholder and merge into one entry — safety over metadata fidelity.
+    const protectedKey = typeof key === "string" ? protector(key, config, options).text : key;
+    copy[protectedKey] = protectUnknownStrings(item, config, options, protector, seen);
   }
   return copy;
 }

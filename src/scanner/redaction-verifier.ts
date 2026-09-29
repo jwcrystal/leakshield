@@ -1,4 +1,4 @@
-import { redactText, scanText } from "./engine.js";
+import { redactText, scanText, type ScanOptions } from "./engine.js";
 import type { Finding, GuardConfig, RedactResult, ScanResult } from "../types.js";
 
 export interface RedactVerifiedResult {
@@ -31,10 +31,10 @@ function filterResidualFindings(findings: readonly Finding[], redacted: string):
   });
 }
 
-export function redactAndVerify(text: string, config: GuardConfig): RedactVerifiedResult {
+export function redactAndVerify(text: string, config: GuardConfig, opts?: ScanOptions): RedactVerifiedResult {
   const originalTruncated = text.length > config.settings.max_chars;
-  const redactResult: RedactResult = redactText(text, config);
-  const verification: ScanResult = scanText(redactResult.redacted, config);
+  const redactResult: RedactResult = redactText(text, config, opts);
+  const verification: ScanResult = scanText(redactResult.redacted, config, opts);
   const residualFindings = filterResidualFindings(verification.findings, redactResult.redacted);
   const wasTruncated = originalTruncated || verification.was_truncated === true;
   const verified = !wasTruncated && residualFindings.length === 0;

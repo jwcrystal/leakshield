@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import type { Plugin as PluginNamespace } from "@opencode/plugin";
 import {
   ContentHashCache,
@@ -5,6 +6,7 @@ import {
   type IngressMode,
   type TextProtector,
 } from "./decision/ingress.js";
+import { deidentifyText } from "./decision/deidentify.js";
 import type { GuardConfig } from "./types.js";
 
 type V2Plugin = PluginNamespace.Plugin;
@@ -175,20 +177,20 @@ async function registerProtectionHooks(
   ctx: PluginContext,
   config: GuardConfig,
   mode: IngressMode,
-  protector: TextProtector,
+  protectorForEvent: (event: unknown) => TextProtector,
 ): Promise<void> {
   await ctx.session.hook("prompt", (event) => {
-    protectPromptEvent(event as unknown as RecordLike, config, mode, protector);
+    protectPromptEvent(event as unknown as RecordLike, config, mode, protectorForEvent(event));
   });
   const onRequest = (event: unknown) => {
-    protectRequestEvent(event as RecordLike, config, mode, protector);
+    protectRequestEvent(event as RecordLike, config, mode, protectorForEvent(event));
   };
   await ctx.session.hook("context", onRequest);
   await ctx.session.hook("compaction", onRequest);
   await ctx.session.hook("generate", onRequest);
   await ctx.session.hook("title", onRequest);
   await ctx.tool.hook("execute.after", (event) => {
-    protectToolAfterEvent(event as unknown as RecordLike, config, mode, protector);
+    protectToolAfterEvent(event as unknown as RecordLike, config, mode, protectorForEvent(event));
   });
 }
 
@@ -204,13 +206,74 @@ async function registerFailClosedHooks(ctx: PluginContext): Promise<void> {
   await ctx.tool.hook("execute.after", blockRequest);
 }
 
+export interface DeidentifyOptions {
+  /**
+   * Master key, one per plugin setup (= one OpenCode server process); held in
+   * memory only. Per-session placeholder keys are derived from it via
+   * HMAC-SHA256 so placeholders from different sessions cannot be linked.
+   */
+  sessionKey: Buffer;
+}
+
+/** Bounded FIFO cache for per-session derived keys. */
+const SESSION_KEY_CACHE_LIMIT = 256;
+
 /** Creates the OpenCode v2 `setup(ctx)` implementation for the given configuration. */
-export function createV2Setup(config: GuardConfig, mode: IngressMode): V2Plugin["setup"] {
+export function createV2Setup(
+  config: GuardConfig,
+  mode: IngressMode,
+  deidentify?: DeidentifyOptions,
+): V2Plugin["setup"] {
   const cache = new ContentHashCache();
-  const protectWithCache: TextProtector = (text, currentConfig, options) =>
+  const masterKey = deidentify?.sessionKey;
+
+  // Per-session placeholder keys: every v2 hook event carries a top-level
+  // `sessionID`, so each event's protector is keyed by
+  // HMAC-SHA256(masterKey, `session:${sessionID}`) — the same value maps to
+  // the same placeholder within one session and to different placeholders
+  // across sessions. Events without a usable sessionID fall back to the
+  // master key directly (older event shapes keep working; documented).
+  const sessionKeys = new Map<string, Buffer>();
+  const keyForSession = (event: unknown): Buffer | undefined => {
+    if (!masterKey) return undefined;
+    const eventSessionID =
+      isRecordLike(event) && typeof event.sessionID === "string" ? event.sessionID : "";
+    if (!eventSessionID) return masterKey;
+    let key = sessionKeys.get(eventSessionID);
+    if (!key) {
+      key = createHmac("sha256", masterKey).update(`session:${eventSessionID}`).digest();
+      if (sessionKeys.size >= SESSION_KEY_CACHE_LIMIT) {
+        const oldest = sessionKeys.keys().next().value;
+        if (oldest !== undefined) sessionKeys.delete(oldest);
+      }
+      sessionKeys.set(eventSessionID, key);
+    }
+    return key;
+  };
+
+  // The plain protector: history cache composition — redact results stay
+  // uncached and block decisions are final (fail-closed); only allow decisions
+  // reuse the cache. The cache is shared across sessions, which is safe: it
+  // stores only allow/block decisions, never text or placeholders.
+  const baseProtector: TextProtector = (text, currentConfig, options) =>
     cache.protect(text, currentConfig, options);
+
+  // Per-event protector: when de-identify is enabled, bind the session key
+  // carried by this event into the protector before walking it. deidentifyText
+  // keeps the same cache composition (allow → cache, block/redact → final and
+  // uncached), so the cache's decision always agrees with the direct
+  // computation.
+  const protectorForEvent = (event: unknown): TextProtector => {
+    if (!deidentify) return baseProtector;
+    const sessionKey = keyForSession(event) ?? deidentify.sessionKey;
+    return (text, currentConfig, options) => {
+      const result = deidentifyText(text, currentConfig, sessionKey, options);
+      return result.action === "allow" ? cache.protect(text, currentConfig, options) : result;
+    };
+  };
+
   return async (ctx) => {
-    await registerProtectionHooks(ctx, config, mode, protectWithCache);
+    await registerProtectionHooks(ctx, config, mode, protectorForEvent);
   };
 }
 

@@ -315,6 +315,22 @@ Note that v2 only accepts plugin *directories* (it resolves `dist/index.js`) or 
 { "package": "/absolute/path/to/sensitive-guard/dist", "options": { "mode": "redact", "deidentify": true } }
 ```
 
+**Opt-in readonly env queries (both versions):** the `envQueries` option (default `false`) exposes three read-only tools over the files listed in `settings.env_files`, so an agent can answer configuration questions without ever seeing values:
+
+| Tool | Contract |
+|---|---|
+| `guard_env_list` | Opaque session-local file ids plus key names — never paths, values, lengths, or previews. |
+| `guard_env_inspect(file_id, key)` | `missing` \| `empty` \| `nonempty`; when nonempty, a coarse lexical shape `boolean_like` \| `number_like` \| `multiline_text` \| `text`. A shape is a lexical hint, never a claim the value is a valid boolean or number. |
+| `guard_env_compare(left_file_id, left_key, right_file_id, right_key)` | `equal` \| `different` \| `unavailable` for key-to-key, same- or cross-file equality. Missing keys and unreadable files are `unavailable`. |
+
+```jsonc
+{ "package": "/absolute/path/to/sensitive-guard/dist", "options": { "mode": "block", "envQueries": true } }
+```
+
+Ground rules: only `settings.env_files` entries are queryable (at most 16 files, 1 MiB each). File ids are only valid in the session that listed them. Files are re-read on every call, and a comparison reads both operands in one per-call snapshot. Raw values, value lengths, previews, fingerprints, and reverse mappings never appear in any output. If the guard configuration file changes after setup, the tools return a fixed restart-required error until OpenCode restarts — they never silently fall back to the old or new authorization.
+
+File access is best-effort pathname identity validation, not a sandbox. The workspace root is frozen at setup (resolved path plus device/inode identity); every query re-stats the root and each ancestor directory before opening and again after reading, rejects symlinks on any path component — including ancestor directories that resolve elsewhere, even inside the workspace — requires regular files, opens the fully resolved canonical path with `O_NOFOLLOW` and `O_NONBLOCK`, and binds the opened descriptor to the statted inode with pre- and post-read size and mtime checks. Limitations, stated honestly: malicious concurrent filesystem mutation by the same owner is outside this threat model — a substitution that is reverted between two checks (an ABA race on the root, an ancestor directory, or the file) is not detectable by pathname checks, hardlinks are not distinguished from the original file (provenance is not checked), in-place rewrites that preserve size and mtime are not distinguishable, and the agent can modify env files through other tools — so results describe the current file state, not a trusted baseline. Key names themselves are returned as-is and pass through the normal output/history protection. On OpenCode v1 the tools are registered through the standard v1 tool API (`@opencode-ai/plugin`), which the v1 host provides.
+
 Attachments are blocked because the text scanner cannot safely inspect arbitrary binary or remote attachment content. Existing sessions may already contain raw content; begin a new session after installing the plugin. The plugin protects OpenCode model requests only, not other AI clients or local tools.
 
 OpenCode currently logs and skips modules that fail before their plugin factory can run, such as a missing package or JavaScript syntax error. After installation or upgrade, run a smoke test with a synthetic key matching `sk-` followed by at least 20 letters or digits and verify that Sensitive Guard replaces the message before using real sensitive data.
@@ -365,7 +381,7 @@ settings:
     - .env.local
 ```
 
-Paths are relative to the workspace root and must remain inside it. Sensitive Guard reads non-empty values of at least eight characters, then detects exact occurrences in text sent to the model. It does not automatically read `.env`, process environment variables, or send, log, or serialize the loaded values. Restart OpenCode after changing an enabled env file.
+Paths are relative to the workspace root and must remain inside it. Sensitive Guard reads non-empty values of at least eight characters, then detects exact occurrences in text sent to the model. It does not automatically read `.env`, process environment variables, or send, log, or serialize the loaded values. Restart OpenCode after changing an enabled env file. The opt-in `envQueries` plugin tools (see OpenCode Plugin) query these same files and never return their values.
 
 ```yaml
 # NDA keywords (case-insensitive)

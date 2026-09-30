@@ -15,10 +15,14 @@ src/decision/*
 !src/decision/deidentify.ts
 !src/opencode.ts
 !src/opencode-v2.ts
+!src/opencode-env-tools.ts
+!src/env-queries.ts
 !src/index.ts
 !tests/
 tests/*
 !tests/web.test.ts
+!tests/env-queries.test.ts
+!tests/opencode-env-tools-import.test.ts
 !tests/exact-values.test.ts
 !tests/redaction-verifier.test.ts
 !tests/win-encoding.test.ts

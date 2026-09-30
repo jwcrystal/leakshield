@@ -1,9 +1,11 @@
 import type { Plugin as PluginNamespace } from "@opencode/plugin";
 import type { PluginModule } from "@opencode-ai/plugin";
 import { z } from "zod";
-import { loadConfig } from "./config/loader.js";
+import { findConfigPath, loadConfigWithFingerprint, type LoadedGuardConfig } from "./config/loader.js";
 import { createSessionKey } from "./decision/deidentify.js";
+import { EnvQueryService } from "./env-queries.js";
 import { createFailClosedHooks, createHooks } from "./opencode-hooks.js";
+import { createV1EnvTools } from "./opencode-env-tools.js";
 import { createFailClosedV2Setup, createV2Setup } from "./opencode-v2.js";
 import type { GuardConfig } from "./types.js";
 
@@ -17,6 +19,8 @@ const PluginOptionsSchema = z
     mode: z.enum(["block", "redact"]).default("block"),
     configPath: z.string().min(1).optional(),
     deidentify: z.boolean().default(false),
+    /** Opt-in readonly env query tools over `settings.env_files`. Default off. */
+    envQueries: z.boolean().default(false),
   })
   .refine((options) => !options.deidentify || options.mode === "redact", {
     message: "deidentify requires mode 'redact'",
@@ -35,6 +39,28 @@ function withEncodingDetection(config: GuardConfig): GuardConfig {
   };
 }
 
+/**
+ * Builds the readonly env query service when the `envQueries` option is on.
+ * The env_files allowlist, workspace root, and guard configuration are frozen
+ * at setup from one configuration read (`loadConfigWithFingerprint`), so the
+ * authorization can never be a mix of two different config states. Per-call
+ * config drift disables queries until restart (handled inside the service),
+ * never a silent fallback.
+ */
+function createEnvQueryService(
+  options: PluginOptions,
+  workspaceRoot: string,
+  loaded: LoadedGuardConfig,
+): EnvQueryService | undefined {
+  if (!options.envQueries) return undefined;
+  return new EnvQueryService({
+    envFiles: loaded.config.settings.env_files ?? [],
+    workspaceRoot,
+    resolveConfigPath: () => findConfigPath(options.configPath),
+    configFingerprint: loaded.fingerprint,
+  });
+}
+
 function getWorkspaceRoot(input: unknown): string {
   if (typeof input !== "object" || input === null) return process.cwd();
   const context = input as { worktree?: unknown; directory?: unknown };
@@ -46,9 +72,11 @@ function getWorkspaceRoot(input: unknown): string {
 const v2Setup = async (ctx: V2PluginContext): Promise<void> => {
   try {
     const options: PluginOptions = PluginOptionsSchema.parse(ctx.options);
-    const config = withEncodingDetection(loadConfig(options.configPath, ctx.location.directory));
+    const loaded = loadConfigWithFingerprint(options.configPath, ctx.location.directory);
+    const config = withEncodingDetection(loaded.config);
     const deidentify = options.deidentify ? { sessionKey: createSessionKey() } : undefined;
-    await createV2Setup(config, options.mode, deidentify)(ctx);
+    const envQueries = createEnvQueryService(options, ctx.location.directory, loaded);
+    await createV2Setup(config, options.mode, deidentify, envQueries)(ctx);
   } catch {
     await createFailClosedV2Setup()(ctx);
   }
@@ -66,8 +94,22 @@ const v1Server = async (
       // the catch below → fail-closed hooks.
       throw new Error("deidentify is only supported on OpenCode v2");
     }
-    const config = withEncodingDetection(loadConfig(options.configPath, getWorkspaceRoot(input)));
-    return createHooks(config, options.mode);
+    const workspaceRoot = getWorkspaceRoot(input);
+    const loaded = loadConfigWithFingerprint(options.configPath, workspaceRoot);
+    const config = withEncodingDetection(loaded.config);
+    const hooks = createHooks(config, options.mode);
+    const envQueries = createEnvQueryService(options, workspaceRoot, loaded);
+    if (!envQueries) return hooks;
+    try {
+      return { ...hooks, tool: await createV1EnvTools(envQueries) };
+    } catch {
+      // The opt-in env query tools failed to load on their own (e.g. a
+      // missing v1 SDK module on an incomplete install). Only the feature
+      // fails: the full protection hooks above stay exactly as armed as
+      // they would be with envQueries off — no fail-closed downgrade, no
+      // protection gap, no env tools.
+      return hooks;
+    }
   } catch {
     return createFailClosedHooks();
   }

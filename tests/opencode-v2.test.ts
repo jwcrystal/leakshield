@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { createSessionKey, placeholderFor } from "../src/decision/deidentify.js";
 import { createFailClosedV2Setup, createV2Setup } from "../src/opencode-v2.js";
+import { EnvQueryService } from "../src/env-queries.js";
 import type { GuardConfig } from "../src/types.js";
 
 const secret = "sk-12345678901234567890";
@@ -20,9 +24,11 @@ const config: GuardConfig = {
 
 type HookCallback = (event: unknown) => Promise<void> | void;
 type RecordedHook = { domain: "session" | "tool"; name: string; callback: HookCallback };
+type RecordedTool = { name: string; tool: Record<string, unknown> };
 
 function createFakeContext() {
   const hooks: RecordedHook[] = [];
+  const transforms: Array<(editor: unknown) => void> = [];
   const register =
     (domain: "session" | "tool") =>
     async (name: string, callback: HookCallback) => {
@@ -31,13 +37,29 @@ function createFakeContext() {
     };
   return {
     hooks,
+    transforms,
     ctx: {
       options: {},
       location: { directory: process.cwd() },
       session: { hook: register("session") },
-      tool: { hook: register("tool") },
+      tool: {
+        hook: register("tool"),
+        transform: async (callback: (editor: unknown) => void) => {
+          transforms.push(callback);
+          return { dispose: async () => {} };
+        },
+      },
     } as never,
   };
+}
+
+function runTransforms(transforms: Array<(editor: unknown) => void>): RecordedTool[] {
+  const added: RecordedTool[] = [];
+  const editor = {
+    add: (tool: Record<string, unknown>) => added.push({ name: tool.name as string, tool }),
+  };
+  for (const transform of transforms) transform(editor);
+  return added;
 }
 
 async function loadHooks(setup: (ctx: never) => Promise<void>) {
@@ -295,5 +317,112 @@ describe("OpenCode v2 plugin — email de-identification", () => {
 
     expect(event.prompt.text).not.toContain(emailA);
     expect(event.prompt.text).toContain(placeholderFor(emailA, sessionKey));
+  });
+});
+
+describe("OpenCode v2 plugin — readonly env query tools", () => {
+  const temporaryDirectories: string[] = [];
+  const secretValue = "unclassified-opaque-value-987654321";
+
+  function makeEnvWorkspace(): { root: string; configPath: string } {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-v2env-"));
+    temporaryDirectories.push(root);
+    const configPath = path.join(root, "guard.config.yaml");
+    fs.writeFileSync(path.join(root, ".env"), `API_TOKEN=${secretValue}\nFLAG=true\n`, "utf8");
+    fs.writeFileSync(configPath, "settings:\n  env_files:\n    - .env\n", "utf8");
+    return { root, configPath };
+  }
+
+  function makeService(root: string, configPath: string): EnvQueryService {
+    return new EnvQueryService({
+      envFiles: [".env"],
+      workspaceRoot: root,
+      resolveConfigPath: () => configPath,
+      configFingerprint: createHash("sha256")
+        .update(fs.readFileSync(configPath, "utf8"))
+        .digest("hex"),
+    });
+  }
+
+  it("registers the three tools alongside the protection hooks", async () => {
+    const { root, configPath } = makeEnvWorkspace();
+    const fake = createFakeContext();
+    await createV2Setup(config, "block", undefined, makeService(root, configPath))(fake.ctx);
+
+    // Protection hooks unchanged.
+    expect(fake.hooks.map((h) => `${h.domain}:${h.name}`)).toContain("session:prompt");
+    const added = runTransforms(fake.transforms);
+    expect(added.map((t) => t.name).sort()).toEqual([
+      "guard_env_compare",
+      "guard_env_inspect",
+      "guard_env_list",
+    ]);
+    for (const directory of temporaryDirectories.splice(0)) {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("registers no tools without a service (default off)", async () => {
+    const fake = createFakeContext();
+    await createV2Setup(config, "block")(fake.ctx);
+    expect(fake.transforms).toHaveLength(0);
+  });
+
+  it("executes list, inspect, and compare without exposing values", async () => {
+    const { root, configPath } = makeEnvWorkspace();
+    const fake = createFakeContext();
+    await createV2Setup(config, "block", undefined, makeService(root, configPath))(fake.ctx);
+    const added = runTransforms(fake.transforms);
+    const byName = new Map(added.map((t) => [t.name, t.tool]));
+    type Execute = (
+      input: unknown,
+      context: { sessionID: string },
+    ) => Promise<{ output: Record<string, unknown>; content: string }>;
+    const execute = (name: string) => byName.get(name)!.execute as Execute;
+
+    const list = await execute("guard_env_list")({}, { sessionID: "session-1" });
+    const files = (list.output as { files: Array<{ file_id: string; keys: string[] }> }).files;
+    expect(files[0].keys).toEqual(["API_TOKEN", "FLAG"]);
+    const fileId = files[0].file_id;
+
+    const inspect = await execute("guard_env_inspect")({ file_id: fileId, key: "FLAG" }, { sessionID: "session-1" });
+    expect(inspect.output).toEqual({ status: "nonempty", shape: "boolean_like" });
+
+    const compare = await execute("guard_env_compare")(
+      { left_file_id: fileId, left_key: "API_TOKEN", right_file_id: fileId, right_key: "FLAG" },
+      { sessionID: "session-1" },
+    );
+    expect(compare.output).toEqual({ result: "different" });
+
+    const serialized = JSON.stringify([list, inspect, compare]);
+    expect(serialized).not.toContain(secretValue);
+    expect(serialized).not.toContain(".env");
+    expect(serialized).not.toContain(root);
+    for (const directory of temporaryDirectories.splice(0)) {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("maps config drift to the fixed disabled error", async () => {
+    const { root, configPath } = makeEnvWorkspace();
+    const service = makeService(root, configPath);
+    const fake = createFakeContext();
+    await createV2Setup(config, "block", undefined, service)(fake.ctx);
+    const added = runTransforms(fake.transforms);
+    const listTool = added.find((t) => t.name === "guard_env_list")!.tool;
+    const execute = listTool.execute as (
+      input: unknown,
+      context: { sessionID: string },
+    ) => Promise<{ output: Record<string, unknown> }>;
+
+    expect((await execute({}, { sessionID: "session-1" })).output).toHaveProperty("files");
+
+    fs.writeFileSync(configPath, "settings:\n  env_files: []\n", "utf8");
+    expect((await execute({}, { sessionID: "session-1" })).output).toEqual({
+      error: "Env queries are disabled because the guard configuration changed. Restart OpenCode.",
+    });
+    for (const directory of temporaryDirectories.splice(0)) {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

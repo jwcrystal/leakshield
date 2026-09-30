@@ -7,6 +7,8 @@ import {
   type TextProtector,
 } from "./decision/ingress.js";
 import { deidentifyText } from "./decision/deidentify.js";
+import type { EnvQueryService } from "./env-queries.js";
+import { registerV2EnvTools } from "./opencode-env-tools.js";
 import type { GuardConfig } from "./types.js";
 
 type V2Plugin = PluginNamespace.Plugin;
@@ -223,6 +225,8 @@ export function createV2Setup(
   config: GuardConfig,
   mode: IngressMode,
   deidentify?: DeidentifyOptions,
+  /** When set, the readonly env query tools are registered (opt-in `envQueries`). */
+  envQueries?: EnvQueryService,
 ): V2Plugin["setup"] {
   const cache = new ContentHashCache();
   const masterKey = deidentify?.sessionKey;
@@ -274,6 +278,9 @@ export function createV2Setup(
 
   return async (ctx) => {
     await registerProtectionHooks(ctx, config, mode, protectorForEvent);
+    if (envQueries) {
+      await registerV2EnvTools(ctx, envQueries);
+    }
   };
 }
 

@@ -43,6 +43,7 @@ Env knobs: `OPENCODE_BIN`, `E2E_TIMEOUT_MS` (default 240000), `E2E_PRINT_LOGS=1`
 | C6-absent | no plugins + canary prompt | **expected leak** — documents the deployment boundary: without the plugin, canaries reach the provider. This is not a product failure. |
 | C7-deidentify | `{mode:"redact",deidentify:true}` + prompt with alice×2 / bob×1 / HIGH key (issue #20 trial) | no canary in any provider request; ≥2 distinct `[SG-EMAIL-…]` placeholders with alice's two occurrences mapping to one stable placeholder |
 | C8-ignore-bypass | `{mode:"redact"}` + canary prompt carrying `// sg-ignore` on the same line | no canary in any provider request — in-text ignore directives must not bypass the model boundary (regression guard for the fail-open fix) |
+| C9-resume | `{mode:"redact",deidentify:true}`; run 2 = second `opencode run --standalone … --continue` in the same workdir (same XDG dirs → same session storage, NEW server process) | no canary in ANY provider request across both runs; ≥1 `[SG-EMAIL-…]` placeholder present (replayed history carries protected text). Run 2's placeholder for the re-mentioned alice address is expected to DIFFER from run 1's — each `--standalone` invocation is a new server process with a new master key, so placeholders from a previous process are not reproduced (stability scope = one live session/server). Rotation is noted in the reason string, not failed on. |
 
 C6 doubles as a harness sanity check: if the canary does *not* leak there,
 global (user-level) plugins probably contaminated the run — the orchestrator
@@ -55,6 +56,11 @@ every request with `receivedAt` (ms) and a sequence number (`raw-<ts>-<seq>.json
 The orchestrator records each case's start/end wall-clock window (process exit +
 2.5 s settle for trailing requests) and renames matching envelopes to
 `<case>-<seq>.json`, embedding the case name into the envelope.
+
+C9-resume spans two invocations inside one case window: the window runs from
+run 1's spawn to run 2's exit + settle (with a 2.5 s settle between runs), and
+every attributed request is tagged with the invocation it belongs to
+(`run: 1|2`, split at run 2's spawn timestamp).
 
 Note that OpenCode fires **two kinds** of provider requests per `run`: a
 title-generation request (no `tools` array in the body) and the main agent
@@ -99,7 +105,7 @@ boot probes:
 ## Expected output shape
 
 ```
-opencode v2.0.19 @ 5d5e449…  model=capture/capture-1  cases=8
+opencode v2.0.19 @ 5d5e449…  model=capture/capture-1  cases=9
 case                exit  reqs  leaks verdict      finding
 ----------------------------------------------------------------------------------------------------
 C1-block            0     2     0     pass         no canary in any provider request; block notice present

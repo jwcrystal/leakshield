@@ -25,6 +25,12 @@
  *   C8 ignore       sensitive-guard {mode:"redact"} + canary prompt carrying
  *                  '// sg-ignore' on the same line (in-text ignore directives
  *                  must not bypass the model boundary)
+ *   C9 resume       sensitive-guard {mode:"redact",deidentify:true}, TWO
+ *                  standalone invocations (run 2 uses --continue in the same
+ *                  workdir): replayed history + new prompt stay canary-free;
+ *                  documents placeholder rotation across server restarts
+ *                  (new process = new master key; placeholder stability is
+ *                  scoped to one live session/server)
  *
  * Safety: all canaries are synthetic (example-test.invalid / sk-CANARYTEST…),
  * every case runs in a fresh workdir with XDG_DATA_HOME / XDG_STATE_HOME /
@@ -229,6 +235,56 @@ const CASES = [
         ? { verdict: "pass", reason: "no canary in any provider request despite the in-text ignore directive" }
         : { verdict: "fail", reason: "canary leaked to provider via in-text ignore directive (fail-open bypass)" },
   },
+  {
+    id: "C9-resume",
+    description:
+      "session resume: run 2 (`--continue`, same workdir/XDG dirs → same session storage, NEW server process) replays history + adds a new canary prompt; neither run may leak canaries; documents placeholder rotation across server restarts (per-process master key — stability scope is one live session/server)",
+    plugins: [{ package: DIST_DIR, options: { mode: "redact", deidentify: true } }],
+    prompt:
+      "Team contacts: alice.canary@example-test.invalid and bob.canary@example-test.invalid. Reach alice.canary@example-test.invalid first.",
+    followUp: {
+      args: [
+        "run",
+        "--standalone",
+        "--format",
+        "json",
+        "--model",
+        "capture/capture-1",
+        "--continue",
+        "Follow up with alice.canary@example-test.invalid again please.",
+      ],
+    },
+    expectation: (r) => {
+      if (r.canariesInProviderRequests.length > 0)
+        return { verdict: "fail", reason: "canary leaked to provider across session resume (replayed history or new prompt unscrubbed)" };
+      if (r.requests.length === 0)
+        return { verdict: "observe", reason: "no provider request observed; inspect out/logs" };
+      // Distinct [SG-EMAIL-<16 hex>] placeholders per invocation (requests
+      // already carry placeholderCounts keyed by the 16-hex digest).
+      const run1Ph = new Set();
+      const run2Ph = new Set();
+      for (const q of r.requests)
+        for (const ph of Object.keys(q.placeholderCounts ?? {})) (q.run === 2 ? run2Ph : run1Ph).add(ph);
+      const distinct = new Set([...run1Ph, ...run2Ph]);
+      if (distinct.size === 0)
+        return {
+          verdict: "observe",
+          reason: "no canary but also no [SG-EMAIL-… placeholder in any provider request — replayed history did not carry protected text; inspect out/logs",
+        };
+      // alice.canary appears in BOTH prompts: a run-2 placeholder absent from
+      // run 1 means the same address mapped to a different digest after the
+      // server restart (expected per-process behavior, NOT a failure).
+      const rotated = [...run2Ph].some((ph) => !run1Ph.has(ph));
+      return {
+        verdict: "pass",
+        reason:
+          `no canary in any provider request across both runs; ${distinct.size} distinct [SG-EMAIL-… placeholder(s) present` +
+          (rotated
+            ? "; placeholder rotation across server restarts observed (expected)"
+            : "; no placeholder rotation observed (run 2 reproduced run 1 placeholders)"),
+      };
+    },
+  },
 ];
 
 // ------------------------------------------------------------- utilities --
@@ -271,6 +327,30 @@ async function postControl(port, payload) {
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`control endpoint ${res.status}`);
+}
+
+/**
+ * Spawn ONE `opencode` invocation and resolve when it exits (or is killed on
+ * timeout). stdin is 'ignore': a piped-open stdin makes `opencode run` wait
+ * for EOF and hang.
+ */
+function runOpencodeOnce(args, cwd, env) {
+  return new Promise((resolve) => {
+    let timedOut = false;
+    let stdout = "";
+    let stderr = "";
+    const child = spawn(opencodeBin(), args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    child.stdout.on("data", (d) => (stdout += d.toString()));
+    child.stderr.on("data", (d) => (stderr += d.toString()));
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, RUN_TIMEOUT_MS);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ exitCode: code, timedOut, stdout, stderr });
+    });
+  });
 }
 
 /** Scan dir recursively for canary values. Returns [{canary, file}]. */
@@ -373,29 +453,41 @@ async function runCase(caseDef, port) {
   args.push(caseDef.prompt);
 
   const startedAt = Date.now();
-  let timedOut = false;
-  // stdin 'ignore': a piped-open stdin makes `opencode run` wait for EOF and hang.
-  const child = spawn(opencodeBin(), args, { cwd: workdir, env, stdio: ["ignore", "pipe", "pipe"] });
-  let stdout = "";
-  let stderr = "";
-  child.stdout.on("data", (d) => (stdout += d.toString()));
-  child.stderr.on("data", (d) => (stderr += d.toString()));
-  const exitCode = await new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, RUN_TIMEOUT_MS);
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve(code);
-    });
-  });
+  const run1 = await runOpencodeOnce(args, workdir, env);
+  // Optional second invocation in the SAME workdir with the SAME env (same XDG
+  // dirs → same session storage): `--continue` resumes run 1's session. Each
+  // `--standalone` call is a NEW server process (new master key), so run 2
+  // exercises session-resume replay, not in-process state reuse.
+  let run2 = null;
+  let run2StartedAt = 0;
+  if (caseDef.followUp) {
+    await sleep(SETTLE_MS); // let run 1's trailing requests land before run 2
+    const followArgs = [...caseDef.followUp.args];
+    if (process.env.E2E_PRINT_LOGS === "1" && !followArgs.includes("--print-logs"))
+      followArgs.splice(1, 0, "--print-logs");
+    run2StartedAt = Date.now();
+    run2 = await runOpencodeOnce(followArgs, workdir, env);
+  }
   await sleep(SETTLE_MS); // let trailing requests land inside the window
+  // Attribution window covers BOTH runs when a followUp is set.
   const windowEnd = Date.now();
+  const exitCode = run2 ? run2.exitCode : run1.exitCode;
+  const timedOut = run1.timedOut || (run2?.timedOut ?? false);
+  const stdout = run2 ? `${run1.stdout}\n${run2.stdout}` : run1.stdout;
 
   mkdirSync(LOGS_DIR, { recursive: true });
-  writeFileSync(path.join(LOGS_DIR, `${caseDef.id}.stdout.txt`), stdout);
-  writeFileSync(path.join(LOGS_DIR, `${caseDef.id}.stderr.txt`), stderr);
+  if (run2) {
+    for (const [label, run] of [
+      ["run1", run1],
+      ["run2", run2],
+    ]) {
+      writeFileSync(path.join(LOGS_DIR, `${caseDef.id}.${label}.stdout.txt`), run.stdout);
+      writeFileSync(path.join(LOGS_DIR, `${caseDef.id}.${label}.stderr.txt`), run.stderr);
+    }
+  } else {
+    writeFileSync(path.join(LOGS_DIR, `${caseDef.id}.stdout.txt`), run1.stdout);
+    writeFileSync(path.join(LOGS_DIR, `${caseDef.id}.stderr.txt`), run1.stderr);
+  }
 
   // ---- attribute raw captures to this case by time window, rename in place --
   const attributed = [];
@@ -433,6 +525,9 @@ async function runCase(caseDef, port) {
     }
     return {
       seq: e.seq,
+      // With a followUp invocation, tag which run captured this request
+      // (split at run 2's spawn timestamp) — needed for rotation analysis.
+      ...(run2 ? { run: e.receivedAt >= run2StartedAt ? 2 : 1 } : {}),
       hasTools: Array.isArray(e.body?.tools) && e.body.tools.length > 0,
       file: path.basename(CAPTURED_DIR) + "/" + `${caseDef.id}-${e.seq}.json`,
       canaries: CANARIES.filter((c) => s.includes(c.value)).map((c) => c.key),
@@ -466,6 +561,15 @@ async function runCase(caseDef, port) {
     description: caseDef.description,
     exitCode,
     timedOut,
+    // Per-invocation exit records when a followUp run happened (C9-resume).
+    ...(run2
+      ? {
+          runs: [
+            { invocation: 1, exitCode: run1.exitCode, timedOut: run1.timedOut },
+            { invocation: 2, exitCode: run2.exitCode, timedOut: run2.timedOut },
+          ],
+        }
+      : {}),
     requestCount: requests.length,
     requests,
     canariesInProviderRequests,
@@ -481,8 +585,17 @@ async function runCase(caseDef, port) {
   result.verdict = verdict;
   result.expectation = reason;
   result.notes = [
-    timedOut ? "run timed out and was killed" : null,
-    exitCode !== 0 ? `opencode exited ${exitCode}; see out/logs/${caseDef.id}.stderr.txt` : null,
+    ...(run2
+      ? [
+          run1.timedOut ? "run 1 timed out and was killed" : null,
+          run1.exitCode !== 0 ? `run 1 exited ${run1.exitCode}; see out/logs/${caseDef.id}.run1.stderr.txt` : null,
+          run2.timedOut ? "run 2 timed out and was killed" : null,
+          run2.exitCode !== 0 ? `run 2 exited ${run2.exitCode}; see out/logs/${caseDef.id}.run2.stderr.txt` : null,
+        ]
+      : [
+          timedOut ? "run timed out and was killed" : null,
+          exitCode !== 0 ? `opencode exited ${exitCode}; see out/logs/${caseDef.id}.stderr.txt` : null,
+        ]),
   ].filter(Boolean);
   return result;
 }

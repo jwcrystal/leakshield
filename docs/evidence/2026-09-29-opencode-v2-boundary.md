@@ -99,6 +99,12 @@ was re-run in full (9 cases):
   mode) no longer suppresses scanning on the plugin path; the canary + HIGH key
   on the directive line were scrubbed. CLI/CI/Web keep honoring directives by
   contract (their scan calls use the default).
+- C9-resume: **PASS** — a second `opencode run --continue` invocation replaying
+  the session history through the resume path produced **zero** raw canaries in
+  all three requests across both runs; replayed history carries protected text,
+  and placeholder rotation across server restarts was observed and documented
+  (each `--standalone` process mints a new master key — expected per-process
+  semantics; same-server resume keeps placeholders stable).
 - C1–C6: unchanged verdicts, zero unexpected leaks — no regression.
 - Lower-level coverage: 307 unit tests green (27 new across de-identify,
   strict-scan, object-key sanitization, per-session isolation, entry options).
@@ -108,6 +114,8 @@ the suite): model-boundary scans no longer honor in-text ignore directives;
 object keys in tool-result metadata are scanned; placeholder keys are derived
 per sessionID so sessions in one server process are unlinkable; v1 plugin path
 rejects the `deidentify` option (fail-closed).
+
+Suite is now 10 cases (C1–C9); all green except C6's intentional leak.
 
 Trial verdict: **safe to ship behind the opt-in flag**; default installs are
 unaffected (`block` default, opt-in requires explicit `deidentify: true`).

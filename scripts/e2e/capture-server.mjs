@@ -11,7 +11,7 @@
  *                                  (streaming SSE or plain JSON)
  *   GET  /health               -> readiness probe used by the orchestrator
  *   POST /control              -> orchestrator-only: set response label and
- *                                  arm a one-shot tool_call reply (case C3)
+ *                                  arm a one-shot tool_call reply (cases C3/C13)
  *
  * Every /v1/chat/completions request is written to CAPTURE_DIR as a JSON
  * envelope: { receivedAt, seq, method, url, body }. Files are named
@@ -45,6 +45,11 @@ const state = {
   toolName: "read",
   // Verified against OpenCode v2.0.19: the built-in `read` tool takes `path`.
   toolArgs: { path: "notes.txt" },
+  // One-shot: on the next tools-bearing request, echo the first [SGP1:…] token
+  // found in the body back as a tool_call so the plugin's restoration can be
+  // observed (case C13).
+  echoTokenNext: false,
+  restorePathPrefix: "",
 };
 
 function record(req, bodyRaw) {
@@ -87,6 +92,37 @@ function completionId() {
  */
 function nextAssistantMessage(parsed) {
   const mainAgentRequest = Array.isArray(parsed?.tools) && parsed.tools.length > 0;
+  if (state.echoTokenNext && mainAgentRequest) {
+    state.echoTokenNext = false; // one-shot
+    // Prefer the token from the user's own message (the canary we control),
+    // not the first token in the body (which may be a system-prompt finding).
+    const userMessages = (parsed.messages || []).filter((m) => m.role === "user");
+    const userText = JSON.stringify(userMessages[userMessages.length - 1] ?? {});
+    const token =
+      userText.match(/\[SGP1:[0-9a-f]{32}-\d{8,12}\]/)?.[0] ??
+      JSON.stringify(parsed).match(/\[SGP1:[0-9a-f]{32}-\d{8,12}\]/)?.[0];
+    const toolNames = new Set(
+      (parsed.tools || []).map((tool) => tool?.function?.name).filter(Boolean),
+    );
+    const call = (name, args) => ({
+      message: {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: `call-${completionId()}`,
+            type: "function",
+            function: { name, arguments: JSON.stringify(args) },
+          },
+        ],
+      },
+      finish: "tool_calls",
+    });
+    if (token && toolNames.has("read")) {
+      return call("read", { path: `${state.restorePathPrefix}${token}` });
+    }
+    // No token or no usable tool: fall through to a plain reply.
+  }
   if (state.toolCallNext && mainAgentRequest) {
     state.toolCallNext = false; // one-shot on the first tools-bearing request
     return {
@@ -138,17 +174,16 @@ function writeSseCompletion(res, parsed) {
     connection: "keep-alive",
   });
   res.write(chunk({ role: "assistant", content: null }));
-  if (finish === "tool_calls") {
+  if (finish === "tool_calls" && Array.isArray(message.tool_calls)) {
+    // Emit the tool calls produced by nextAssistantMessage (id/index filled in).
     res.write(
       chunk({
-        tool_calls: [
-          {
-            index: 0,
-            id: `call-${id}`,
-            type: "function",
-            function: { name: state.toolName, arguments: JSON.stringify(state.toolArgs) },
-          },
-        ],
+        tool_calls: message.tool_calls.map((call, index) => ({
+          index,
+          id: call.id ?? `call-${id}-${index}`,
+          type: call.type ?? "function",
+          function: call.function,
+        })),
       }),
     );
   } else {
@@ -220,6 +255,9 @@ const server = http.createServer(async (req, res) => {
       if (parsed.toolArgs && typeof parsed.toolArgs === "object") state.toolArgs = parsed.toolArgs;
       if (parsed.toolCallNext === true) state.toolCallNext = true;
       if (parsed.toolCallNext === false) state.toolCallNext = false;
+      if (parsed.echoTokenNext === true) state.echoTokenNext = true;
+      if (parsed.echoTokenNext === false) state.echoTokenNext = false;
+      if (typeof parsed.restorePathPrefix === "string") state.restorePathPrefix = parsed.restorePathPrefix;
       return writeJson(res, 200, { ok: true, state: { ...state, toolArgs: state.toolArgs } });
     }
     if (req.method === "POST" && url === "/v1/chat/completions") {

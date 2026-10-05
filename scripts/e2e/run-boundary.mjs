@@ -31,6 +31,22 @@
  *                  documents placeholder rotation across server restarts
  *                  (new process = new master key; placeholder stability is
  *                  scoped to one live session/server)
+ *   C10 transparent sensitive-guard {mode:"transparent"} + canary prompt
+ *                  (issue #22): canaries replaced by [SGP1:… tokens at the
+ *                  provider boundary; none reach it raw
+ *   C11 transparent-tool
+ *                  {mode:"transparent"} + notes.txt canaries (capture server
+ *                  forces a read tool_call): tool result re-masked before the
+ *                  follow-up provider request
+ *   C12 transparent-resume
+ *                  {mode:"transparent"}, TWO standalone invocations (run 2 uses
+ *                  --continue): locally stored originals replayed from history
+ *                  must be re-masked; no canary may cross the provider boundary
+ *   C13 transparent-restore
+ *                  {mode:"transparent"} + single-secret prompt; the capture
+ *                  server echoes the [SGP1:…] token back as a tool_call so the
+ *                  plugin's pre-execution restoration is proved by the file the
+ *                  tool writes (provider never sees the plaintext)
  *
  * Safety: all canaries are synthetic (example-test.invalid / sk-CANARYTEST…),
  * every case runs in a fresh workdir with XDG_DATA_HOME / XDG_STATE_HOME /
@@ -85,10 +101,15 @@ const MARKERS = {
   blockedNotice: "[Sensitive Guard blocked",
   redacted: "[REDACTED_",
   deidentified: "[SG-EMAIL-",
+  transparentToken: "[SGP1:",
   secondPluginMarker: "SECOND-PLUGIN-MARKER",
 };
 const CANARY_PROMPT =
   "Contact alice.canary@example-test.invalid and bob.canary@example-test.invalid about sk-CANARYTEST1234567890abcdef rotation.";
+const LITERAL_MARKER_FIXTURES = [
+  { id: "foreign-valid", value: `[SGP1:${"deadbeef".repeat(4)}-00000001]` },
+  { id: "malformed-example", value: "[SGP1:…]" },
+];
 
 // ------------------------------------------------------------------ cases --
 const CASES = [
@@ -254,6 +275,7 @@ const CASES = [
         "Follow up with alice.canary@example-test.invalid again please.",
       ],
     },
+
     expectation: (r) => {
       if (r.canariesInProviderRequests.length > 0)
         return { verdict: "fail", reason: "canary leaked to provider across session resume (replayed history or new prompt unscrubbed)" };
@@ -282,6 +304,149 @@ const CASES = [
           (rotated
             ? "; placeholder rotation across server restarts observed (expected)"
             : "; no placeholder rotation observed (run 2 reproduced run 1 placeholders)"),
+      };
+    },
+  },
+  {
+    id: "C10-transparent",
+    description:
+      "transparent pseudonymization (issue #22): {mode:\"transparent\"}; canaries must be replaced with [SGP1:… tokens at the provider boundary, none reach it raw",
+    plugins: [{ package: DIST_DIR, options: { mode: "transparent" } }],
+    prompt: CANARY_PROMPT,
+    expectation: (r) => {
+      if (r.canariesInProviderRequests.length > 0)
+        return { verdict: "fail", reason: "canary leaked to provider despite transparent pseudonymization" };
+      if (r.requests.length === 0)
+        return {
+          verdict: "observe",
+          reason:
+            "no provider request observed — transparent mode may have refused the route/hook, or the run failed; inspect out/logs",
+        };
+      const tokenRequests = r.requests.filter((q) => q.markers.includes("transparentToken")).length;
+      if (tokenRequests === 0)
+        return {
+          verdict: "fail",
+          reason: "no [SGP1:… token in any provider request — content was neither blocked nor pseudonymized (check mode/options)",
+        };
+      if (r.timedOut || r.exitCode !== 0)
+        return {
+          verdict: "observe",
+          reason: `no canary and [SGP1:… tokens present, but the run did not exit cleanly (exit=${r.exitCode}, timedOut=${r.timedOut}); inspect out/logs`,
+        };
+      return {
+        verdict: "pass",
+        reason: `no canary in any provider request; [SGP1:… tokens present in ${tokenRequests} request(s)`,
+      };
+    },
+  },
+  {
+    id: "C11-transparent-tool",
+    description:
+      "transparent + tool replay: forced read of notes.txt (canaries); the tool result must be re-masked before the follow-up provider request, no canary escapes",
+    plugins: [{ package: DIST_DIR, options: { mode: "transparent" } }],
+    prompt: "Read the file notes.txt and summarize it.",
+    notesFile: true,
+    control: { label: "C11-transparent-tool", toolCallNext: true, toolName: "read", toolArgs: { path: "notes.txt" } },
+    expectation: (r) => {
+      if (r.canariesInProviderRequests.length > 0)
+        return { verdict: "fail", reason: "canary leaked to provider in the transparent tool round-trip" };
+      const mainReqs = r.requests.filter((q) => q.hasTools);
+      if (mainReqs.length === 0)
+        return { verdict: "observe", reason: "no tools-bearing request observed; inspect out/logs" };
+      if (mainReqs.length < 2)
+        return {
+          verdict: "observe",
+          reason: "tool round-trip did not complete (no follow-up tools-bearing request); inspect tool name/args in out/logs",
+        };
+      const tokenRequests = r.requests.filter((q) => q.markers.includes("transparentToken")).length;
+      if (tokenRequests === 0)
+        return { verdict: "fail", reason: "no [SGP1:… token in any provider request — tool output was neither blocked nor pseudonymized" };
+      return {
+        verdict: "pass",
+        reason: `no canary across the tool round-trip; [SGP1:… tokens present in ${tokenRequests} request(s)`,
+      };
+    },
+  },
+  {
+    id: "C12-transparent-resume",
+    description:
+      "transparent + session resume: run 2 (`--continue`, same workdir/XDG dirs, NEW server process) replays locally stored originals and must re-mask them; no canary may reach the provider across either run",
+    plugins: [{ package: DIST_DIR, options: { mode: "transparent" } }],
+    prompt:
+      `Team contacts: alice.canary@example-test.invalid and bob.canary@example-test.invalid. Reach alice.canary@example-test.invalid first. Explain these literal strings: ${LITERAL_MARKER_FIXTURES.map((marker) => marker.value).join(" and ")}.`,
+    literalMarkers: LITERAL_MARKER_FIXTURES,
+    followUp: {
+      args: [
+        "run",
+        "--standalone",
+        "--format",
+        "json",
+        "--model",
+        "capture/capture-1",
+        "--continue",
+        "Continue using the contacts from prior context; do not ask me to repeat them.",
+      ],
+    },
+    expectation: (r) => {
+      if (r.canariesInProviderRequests.length > 0)
+        return { verdict: "fail", reason: "canary leaked to provider across transparent session resume" };
+      if (r.followUpCanaries.length > 0)
+        return { verdict: "fail", reason: "C12 follow-up prompt must be canary-free to attribute run-2 tokens to replay" };
+      const run1Requests = r.requests.filter((q) => q.run === 1);
+      const run2Requests = r.requests.filter((q) => q.run === 2);
+      if (run1Requests.length === 0 || run2Requests.length === 0 || r.runs?.some((run) => run.exitCode !== 0 || run.timedOut))
+        return {
+          verdict: "observe",
+          reason: "both runs must complete cleanly and reach the provider; inspect out/logs",
+        };
+      const run1TokenRequests = run1Requests.filter((q) => q.markers.includes("transparentToken")).length;
+      const run2TokenRequests = run2Requests.filter((q) => q.markers.includes("transparentToken")).length;
+      if (run1TokenRequests === 0 || run2TokenRequests === 0)
+        return {
+          verdict: "observe",
+          reason: "run 2 must carry a protected replay token; run 1 alone does not prove replay protection",
+        };
+      const expectedLiteralIds = LITERAL_MARKER_FIXTURES.map((marker) => marker.id);
+      const markersSurvived = (requests) =>
+        requests.some((request) => expectedLiteralIds.every((id) => request.literalMarkerIds.includes(id)));
+      if (!markersSurvived(run1Requests) || !markersSurvived(run2Requests))
+        return {
+          verdict: "fail",
+          reason: "unknown and malformed marker examples must remain literal in both the original and replayed history",
+        };
+      return {
+        verdict: "pass",
+        reason: `no canary in any provider request; protected tokens and both literal marker examples observed in run 1 and run 2 after a canary-free follow-up prompt`,
+      };
+    },
+  },
+  {
+    id: "C13-transparent-restore",
+    description:
+      "transparent + tool restoration (issue #22): the provider returns a [SGP1:…] token as a read path; the tool must read a local fixture whose filename is the original key, while the provider never sees the plaintext",
+    plugins: [{ package: DIST_DIR, options: { mode: "transparent" } }],
+    prompt: "Read the deployment key file sk-CANARYTEST1234567890abcdef.",
+    control: { label: "C13-transparent-restore", echoTokenNext: true },
+    restoreSource: "high-key",
+    expectation: (r) => {
+      if (r.canariesInProviderRequests.length > 0)
+        return { verdict: "fail", reason: "canary leaked to provider in the transparent restore case" };
+      const tokenRequests = r.requests.filter((q) => q.markers.includes("transparentToken")).length;
+      if (tokenRequests === 0)
+        return { verdict: "fail", reason: "no [SGP1:… token in any provider request — content was not pseudonymized" };
+      if (r.timedOut || r.exitCode !== 0)
+        return {
+          verdict: "observe",
+          reason: `run did not exit cleanly (exit=${r.exitCode}, timedOut=${r.timedOut}); inspect out/logs`,
+        };
+      if (r.restoredExactPathRead)
+        return {
+          verdict: "pass",
+          reason: "provider never saw the plaintext; the local read tool successfully opened the exact ORIGINAL key path after token restoration",
+        };
+      return {
+        verdict: "observe",
+        reason: "the read tool did not successfully open the original-key path; inspect out/logs",
       };
     },
   },
@@ -350,6 +515,24 @@ function runOpencodeOnce(args, cwd, env) {
       clearTimeout(timer);
       resolve({ exitCode: code, timedOut, stdout, stderr });
     });
+  });
+}
+
+function readToolOpenedExactPath(stdout, expectedPath) {
+  return stdout.split(/\r?\n/).some((line) => {
+    try {
+      const event = JSON.parse(line);
+      const state = event?.part?.state;
+      return (
+        event?.type === "tool_use" &&
+        event.part.tool === "read" &&
+        state?.status === "completed" &&
+        typeof state.output === "string" &&
+        state.output.startsWith(`Read file ${expectedPath}, lines `)
+      );
+    } catch {
+      return false;
+    }
   });
 }
 
@@ -428,7 +611,25 @@ async function runCase(caseDef, port) {
       `Contact list (synthetic test data):\n- alice.canary@example-test.invalid\n- bob.canary@example-test.invalid\nRotation key: sk-CANARYTEST1234567890abcdef\n`,
     );
   }
-  if (caseDef.control) await postControl(port, caseDef.control);
+  let restoreFixturePath;
+  let restoreExpectedPath;
+  if (caseDef.restoreSource) {
+    const source = CANARIES.find((canary) => canary.key === caseDef.restoreSource);
+    if (!source) throw new Error(`unknown restoration source ${caseDef.restoreSource}`);
+    restoreFixturePath = path.join(OUT_DIR, "c13-fixtures", source.value);
+    mkdirSync(path.dirname(restoreFixturePath), { recursive: true });
+    writeFileSync(restoreFixturePath, "C13 path restoration fixture\n");
+    restoreExpectedPath = path.relative(REPO_ROOT, restoreFixturePath).split(path.sep).join("/");
+  }
+  if (caseDef.control) {
+    const control = restoreFixturePath
+      ? {
+          ...caseDef.control,
+          restorePathPrefix: `${path.relative(REPO_ROOT, path.dirname(restoreFixturePath)).split(path.sep).join("/")}/`,
+        }
+      : caseDef.control;
+    await postControl(port, control);
+  }
 
   // Scrub host-session contamination: OPENCODE_* / OPENCHAMBER_* vars (notably
   // OPENCODE_CONFIG pointing at a desktop-managed config with global plugins)
@@ -474,6 +675,11 @@ async function runCase(caseDef, port) {
   const exitCode = run2 ? run2.exitCode : run1.exitCode;
   const timedOut = run1.timedOut || (run2?.timedOut ?? false);
   const stdout = run2 ? `${run1.stdout}\n${run2.stdout}` : run1.stdout;
+  const restoreSource = CANARIES.find((canary) => canary.key === caseDef.restoreSource);
+  const restoredExactPathRead =
+    restoreExpectedPath !== undefined && readToolOpenedExactPath(stdout, restoreExpectedPath);
+  const redactRestoredPath = (text) =>
+    restoreSource ? text.replaceAll(restoreSource.value, "[C13-ORIGINAL]") : text;
 
   mkdirSync(LOGS_DIR, { recursive: true });
   if (run2) {
@@ -481,12 +687,12 @@ async function runCase(caseDef, port) {
       ["run1", run1],
       ["run2", run2],
     ]) {
-      writeFileSync(path.join(LOGS_DIR, `${caseDef.id}.${label}.stdout.txt`), run.stdout);
-      writeFileSync(path.join(LOGS_DIR, `${caseDef.id}.${label}.stderr.txt`), run.stderr);
+      writeFileSync(path.join(LOGS_DIR, `${caseDef.id}.${label}.stdout.txt`), redactRestoredPath(run.stdout));
+      writeFileSync(path.join(LOGS_DIR, `${caseDef.id}.${label}.stderr.txt`), redactRestoredPath(run.stderr));
     }
   } else {
-    writeFileSync(path.join(LOGS_DIR, `${caseDef.id}.stdout.txt`), run1.stdout);
-    writeFileSync(path.join(LOGS_DIR, `${caseDef.id}.stderr.txt`), run1.stderr);
+    writeFileSync(path.join(LOGS_DIR, `${caseDef.id}.stdout.txt`), redactRestoredPath(run1.stdout));
+    writeFileSync(path.join(LOGS_DIR, `${caseDef.id}.stderr.txt`), redactRestoredPath(run1.stderr));
   }
 
   // ---- attribute raw captures to this case by time window, rename in place --
@@ -534,6 +740,9 @@ async function runCase(caseDef, port) {
       markers: Object.entries(MARKERS)
         .filter(([, v]) => s.includes(v))
         .map(([k]) => k),
+      literalMarkerIds: (caseDef.literalMarkers ?? [])
+        .filter((marker) => s.includes(marker.value))
+        .map((marker) => marker.id),
       placeholderCounts,
     };
   });
@@ -556,8 +765,14 @@ async function runCase(caseDef, port) {
   ];
   const cacheHits = scanDirForCanaries(path.join(workdir, "cache"));
 
-  const stdoutCanaries = CANARIES.filter((c) => stdout.includes(c.value)).map((c) => c.key);  const result = {
+  const stdoutCanaries = CANARIES.filter((c) => stdout.includes(c.value)).map((c) => c.key);
+
+  const followUpCanaries = caseDef.followUp
+    ? CANARIES.filter((canary) => caseDef.followUp.args.some((argument) => argument.includes(canary.value))).map((canary) => canary.key)
+    : [];
+  const result = {
     case: caseDef.id,
+    followUpCanaries,
     description: caseDef.description,
     exitCode,
     timedOut,
@@ -579,6 +794,7 @@ async function runCase(caseDef, port) {
     logHits,
     cacheHits,
     stdoutCanaries,
+    restoredExactPathRead,
     workdir,
   };
   const { verdict, reason } = caseDef.expectation(result);

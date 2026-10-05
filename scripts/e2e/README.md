@@ -44,6 +44,10 @@ Env knobs: `OPENCODE_BIN`, `E2E_TIMEOUT_MS` (default 240000), `E2E_PRINT_LOGS=1`
 | C7-deidentify | `{mode:"redact",deidentify:true}` + prompt with alice×2 / bob×1 / HIGH key (issue #20 trial) | no canary in any provider request; ≥2 distinct `[SG-EMAIL-…]` placeholders with alice's two occurrences mapping to one stable placeholder |
 | C8-ignore-bypass | `{mode:"redact"}` + canary prompt carrying `// sg-ignore` on the same line | no canary in any provider request — in-text ignore directives must not bypass the model boundary (regression guard for the fail-open fix) |
 | C9-resume | `{mode:"redact",deidentify:true}`; run 2 = second `opencode run --standalone … --continue` in the same workdir (same XDG dirs → same session storage, NEW server process) | no canary in ANY provider request across both runs; ≥1 `[SG-EMAIL-…]` placeholder present (replayed history carries protected text). Run 2's placeholder for the re-mentioned alice address is expected to DIFFER from run 1's — each `--standalone` invocation is a new server process with a new master key, so placeholders from a previous process are not reproduced (stability scope = one live session/server). Rotation is noted in the reason string, not failed on. |
+| C10-transparent | `{mode:"transparent"}` + canary prompt (issue #22) | no canary in any provider request; ≥1 `[SGP1:…` token present in a captured request body (content pseudonymized, not blocked). Run must exit cleanly for `pass`; otherwise `observe` for log inspection. |
+| C11-transparent-tool | `{mode:"transparent"}` + `notes.txt` canaries; server forces a `read {path:"notes.txt"}` tool_call on the first main-agent reply | no canary across the tool round-trip; tool result re-masked before the follow-up provider request; ≥1 `[SGP1:…` token present. |
+| C12-transparent-resume | `{mode:"transparent"}`; run 1 history contains synthetic sensitive values plus valid foreign/malformed `[SGP1:…]` literals; run 2 is `--continue` with a canary-free follow-up | both runs must exit cleanly and reach the provider; no canary in either run; tokens and both literal marker examples must appear in provider requests from both runs. The harness fails if the follow-up prompt itself contains a canary. |
+| C13-transparent-restore | `{mode:"transparent"}` + single secret prompt; the capture server returns the first `[SGP1:…]` token within a `read {path:…}` tool_call; an isolated fixture's filename equals the original key | no canary in provider requests; the OpenCode `read` tool must complete on the expected repository-relative fixture path (with the original key as basename), and the run must exit cleanly — otherwise `observe`. The captured stdout log redacts this synthetic original. |
 
 C6 doubles as a harness sanity check: if the canary does *not* leak there,
 global (user-level) plugins probably contaminated the run — the orchestrator
@@ -85,7 +89,7 @@ boot probes:
 - Plugins: `"plugins": [{"package": "<abs dir>", "options": {…}}]` — v2 accepts
   plugin **directories** (resolves `index.js`) or package names only; `file://`
   URLs to single `.js` files are rejected.
-- The built-in `read` tool takes `{"path": "notes.txt"}` (not `filePath`/`relative`).
+- The built-in `read` and `write` tools take `{"path": "…"}` (not `filePath`/`relative`); `write` also takes `content`.
 - Requests stream (`"stream": true`, SSE) by default; a title-generation request
   fires alongside the main agent request.
 
@@ -98,14 +102,12 @@ boot probes:
   re-spawns `opencode serve --stdio` via PATH.
 - **Spawn with `stdio: ["ignore", …]`** — a piped-open stdin makes `opencode run`
   wait for EOF and hang forever with zero output.
-- **Case workdirs live outside the repo** (`$(TMPDIR)/sensitive-guard-e2e-work`)
-  — OpenCode's config discovery walks up from cwd and would otherwise load this
-  repo's own `.opencode/` directory (plugins, worktree state).
+- **Case data lives under temporary workdirs** (`$(TMPDIR)/sensitive-guard-e2e-work`) with isolated XDG dirs. OpenCode still resolves this repository as the project root; C13 places its synthetic fixture under generated `scripts/e2e/out/` and addresses it relative to that root.
 
 ## Expected output shape
 
 ```
-opencode v2.0.19 @ 5d5e449…  model=capture/capture-1  cases=9
+opencode v2.0.19 @ 5d5e449…  model=capture/capture-1  cases=14
 case                exit  reqs  leaks verdict      finding
 ----------------------------------------------------------------------------------------------------
 C1-block            0     2     0     pass         no canary in any provider request; block notice present
@@ -117,6 +119,22 @@ Per-case record in `evidence.json`: exit code, per-request canary/marker
 findings, canaries found in session storage / logs / cache under the isolated
 XDG dirs, and the verdict (`pass` / `fail` / `observe` / `expected-leak` /
 `unexpected` / `error`).
+
+## Manual TUI plugin-order test
+
+Build the plugin, then launch either isolated C4 order from a terminal:
+
+```bash
+npm run build
+node scripts/e2e/manual-tui.mjs guard-first
+node scripts/e2e/manual-tui.mjs injector-first
+```
+
+Each launch starts a loopback-only capture provider and an interactive OpenCode TUI. It uses a fresh XDG config/data/state/cache profile, the local capture provider, the local Sensitive Guard build in `redact` mode, and the synthetic second-plugin canary injector. It strips inherited OpenCode config/plugin variables and credential-like environment variables; the fake capture API key is local-only. No global OpenCode config or credentials are changed/read.
+
+Use synthetic input only. After exiting the TUI, the launcher reports whether the injector ran and whether its synthetic canary reached the provider; capture files are retained under `scripts/e2e/out/manual-tui/`. Running `run-boundary.mjs` clears the generated `out/` directory, including these manual profiles and captures.
+
+This tests interactive TUI hook ordering against the capture provider, not a real external provider.
 
 ## Safety notes
 

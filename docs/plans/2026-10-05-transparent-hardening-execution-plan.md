@@ -100,7 +100,9 @@
 
 ## Phase 3：協定擴充，不綁模型名稱（優先項 3）
 
-> **2026-10-05 補註**：OpenCode v2.0.23 自訂 provider 的「API protocol」欄位**只有三個選項**：OpenAI Chat Completions（今天已支援）、OpenAI Responses、Anthropic Messages——Phase 3 完成後自訂 provider 協定即 100% 覆蓋。另：host 內建數十個 `@opencode/ai/providers/*` 套件（google、bedrock、cohere…）各有原生協定、走 `aisdk` 路由——transparent 模式目前在 `aisdk:sdk/language` hook **明確拒絕**（清晰報錯，非靜默放行），未來按需求評估加 adapter；這些 provider 多半也可經 openai-compatible 閘道接入（今天即可用）。
+> **2026-10-05 狀態：完成**。三條 wire 路由全支援（`/chat/completions`、`/messages`、`/responses`），一律以 URL 路徑形狀判別、非模型名。Anthropic Messages（`9d65388`）與 OpenAI Responses adapter 各含：拒絕先行方言驗證、單一原子遮罩交易、結構識別碼保存、JSON＋SSE 回應還原（跨 delta 分裂 token 重組、終止事件要求通道清空）。E2E：C18（Anthropic 原生 provider）、C19（Responses 原生 provider）實證「wire 上 token、顯示還原原文」。C1–C19 全綠；單元 558 全綠。混形 body、reasoning item、未知形狀仍明確拒絕。
+
+> 背景註記：OpenCode v2.0.23 自訂 provider 的「API protocol」恰有三個選項（Chat Completions／Responses／Anthropic Messages），Phase 3 完成即自訂 provider 協定 100% 覆蓋。host 內建 `@opencode/ai/providers/*` 套件（google、bedrock…）走 `aisdk` 路由，transparent 模式對其**明確拒絕**（非靜默放行），可經 openai-compatible 閘道繞道使用。
 
 **原則**：以 **body 形狀**判斷協定，非模型/provider 白名單。形狀無法辨識 → 顯式 refuse（維持現有 fail-closed）。
 

@@ -605,6 +605,32 @@ const CASES = [
       return { verdict: "observe", reason: "wire masking proven; display-restore signal missing (reply arming may have missed); inspect out/logs" };
     },
   },
+  {
+    id: "C19-responses-transparent",
+    description:
+      "Phase 3 / OpenAI Responses native protocol: {mode:'transparent'} over the OpenAI Responses provider — canaries must arrive as [SGP1:… tokens on /v1/responses, and the token-bearing reply must display restored originals",
+    plugins: [{ package: DIST_DIR, options: { mode: "transparent" } }],
+    prompt: CANARY_PROMPT,
+    responsesProvider: true,
+    control: { label: "C19-responses-transparent", echoTokenInTextNext: true },
+    expectation: (r) => {
+      if (r.requests.length === 0)
+        return { verdict: "observe", reason: "no provider request captured; inspect out/logs" };
+      if (r.canariesInProviderRequests.length > 0)
+        return { verdict: "fail", reason: "canary leaked to the Responses-native provider" };
+      const tokenRequests = r.requests.filter((q) => q.markers.includes("transparentToken")).length;
+      if (tokenRequests === 0)
+        return { verdict: "fail", reason: "no [SGP1:… token in any /v1/responses request — body was not pseudonymized" };
+      const parts = r.assistantParts ?? [];
+      const assistantRole = parts.filter((p) => p.role === "assistant");
+      const scoped = assistantRole.length > 0 ? assistantRole.map((p) => p.text).join("\n") : (r.assistantText ?? "");
+      if (/\[SGP1:[0-9a-f]{32}-\d{8,12}\]/.test(scoped))
+        return { verdict: "fail", reason: "user-facing output shows a raw [SGP1:… token over the Responses route" };
+      if (scoped.includes("alice.canary@example-test.invalid"))
+        return { verdict: "pass", reason: "Responses-native round-trip: tokens on the wire, originals in display" };
+      return { verdict: "observe", reason: "wire masking proven; display-restore signal missing; inspect out/logs" };
+    },
+  },
 ];
 
 // ------------------------------------------------------------- utilities --
@@ -754,6 +780,20 @@ function buildConfig(caseDef, port) {
       models: { "capture-anthropic-1": { name: "Capture Anthropic 1" } },
     };
   }
+  // Phase 3 (C19): an OpenAI Responses-native provider pointed at the same
+  // capture server; the OpenAI SDK posts to {baseURL}/responses.
+  if (caseDef.responsesProvider) {
+    providers["capture-responses"] = {
+      name: "Capture Responses",
+      env: ["CAPTURE_API_KEY"],
+      package: "@opencode/ai/providers/openai",
+      settings: {
+        baseURL: `http://127.0.0.1:${port}/v1`,
+        apiKey: "sg-e2e-capture",
+      },
+      models: { "capture-responses-1": { name: "Capture Responses 1" } },
+    };
+  }
   return {
     $schema: "https://opencode.ai/config.json",
     providers,
@@ -840,7 +880,11 @@ async function runCase(caseDef, port) {
     "--format",
     "json",
     "--model",
-    caseDef.anthropicProvider ? "capture-anthropic/capture-anthropic-1" : "capture/capture-1",
+    caseDef.anthropicProvider
+      ? "capture-anthropic/capture-anthropic-1"
+      : caseDef.responsesProvider
+        ? "capture-responses/capture-responses-1"
+        : "capture/capture-1",
   ];
   if (process.env.E2E_PRINT_LOGS === "1") args.push("--print-logs");
   args.push(caseDef.prompt);

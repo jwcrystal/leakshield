@@ -118,16 +118,26 @@ function isAnthropicMessagesUrl(url: string): boolean {
   }
 }
 
+/** The OpenAI Responses endpoint for this request, if any. */
+function isResponsesUrl(url: string): boolean {
+  try {
+    return /\/responses\/?$/.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
+}
+
 /** Wire routes this module can protect, detected by URL PATH SHAPE — never by
  * provider or model name, so any endpoint speaking a supported dialect
  * (OpenAI-compatible gateways, Anthropic-native, …) is covered uniformly. */
-export type ModelWireRoute = "chat-completions" | "anthropic-messages";
+export type ModelWireRoute = "chat-completions" | "anthropic-messages" | "openai-responses";
 
 export function classifyModelRoute(url: string): ModelWireRoute | null {
   try {
     const pathname = new URL(url).pathname;
     if (/\/chat\/completions\/?$/.test(pathname)) return "chat-completions";
     if (/\/messages\/?$/.test(pathname)) return "anthropic-messages";
+    if (/\/responses\/?$/.test(pathname)) return "openai-responses";
     return null;
   } catch {
     return null;
@@ -736,6 +746,191 @@ export async function remaskAnthropicMessagesRequest(
   return new Request(request, { body: serialized, headers });
 }
 
+// ─── OpenAI Responses request (wire dialect) ────────────────────────────────
+
+/**
+ * Validates an OpenAI Responses request body: `instructions` string, `input`
+ * (string or item array: message | function_call | function_call_output),
+ * flat `tools` ({type:"function", name, parameters}). Reasoning items,
+ * item references, and unknown types refuse.
+ */
+function validateResponsesContentParts(content: unknown): void {
+  if (content === undefined || content === null || typeof content === "string") return;
+  if (!Array.isArray(content)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  for (const part of content) {
+    if (
+      !isRecord(part) ||
+      (part.type !== "input_text" && part.type !== "output_text") ||
+      typeof part.text !== "string"
+    ) {
+      throw new Error(UNSUPPORTED_REQUEST_BODY);
+    }
+  }
+}
+
+function validateResponsesInputItem(item: unknown): void {
+  if (typeof item === "string") return;
+  if (!isRecord(item)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  switch (item.type) {
+    case "message":
+      if (typeof item.role !== "string") throw new Error(UNSUPPORTED_REQUEST_BODY);
+      validateResponsesContentParts(item.content);
+      return;
+    case "function_call":
+      if (typeof item.name !== "string" || typeof item.arguments !== "string") {
+        throw new Error(UNSUPPORTED_REQUEST_BODY);
+      }
+      return;
+    case "function_call_output":
+      if (typeof item.output !== "string") throw new Error(UNSUPPORTED_REQUEST_BODY);
+      return;
+    default:
+      // reasoning / item_reference / unknown: cannot verify or place.
+      throw new Error(UNSUPPORTED_REQUEST_BODY);
+  }
+}
+
+function validateResponsesDialect(body: Record<string, unknown>): void {
+  // A chat-completions/anthropic-shaped body on a /responses route is a
+  // mixed dialect this masker cannot place; refuse it explicitly.
+  if (body.messages !== undefined || body.system !== undefined) {
+    throw new Error(UNSUPPORTED_REQUEST_BODY);
+  }
+  if (body.instructions !== undefined && typeof body.instructions !== "string") {
+    throw new Error(UNSUPPORTED_REQUEST_BODY);
+  }
+  if (body.tools !== undefined) {
+    if (!Array.isArray(body.tools)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+    for (const tool of body.tools) {
+      if (!isRecord(tool) || typeof tool.name !== "string") throw new Error(UNSUPPORTED_REQUEST_BODY);
+      if (tool.parameters !== undefined && !isRecord(tool.parameters)) {
+        throw new Error(UNSUPPORTED_REQUEST_BODY);
+      }
+    }
+  }
+  if (body.input !== undefined) {
+    if (typeof body.input !== "string") {
+      if (!Array.isArray(body.input)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+      for (const item of body.input) validateResponsesInputItem(item);
+    }
+  }
+}
+
+/** Structural identifiers that must survive masking verbatim (Responses shape). */
+function collectResponsesStructuralStrings(body: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  pushString(out, body.model);
+  if (Array.isArray(body.input)) {
+    for (const item of body.input) {
+      if (!isRecord(item)) continue;
+      pushString(out, item.type);
+      pushString(out, item.role);
+      pushString(out, item.call_id);
+      if (item.type === "function_call") pushString(out, item.name);
+    }
+  }
+  if (Array.isArray(body.tools)) {
+    for (const tool of body.tools) {
+      if (isRecord(tool)) pushString(out, tool.name);
+    }
+  }
+  return out;
+}
+
+/**
+ * Remasks an OpenAI Responses JSON request body. Same contract as the other
+ * dialects: reject-first validation, ONE atomic transaction, structural
+ * identifiers preserved. function_call.arguments is a JSON-encoded string and
+ * is parsed before masking and re-encoded after (same rule as chat
+ * completions tool arguments).
+ */
+export async function remaskResponsesRequest(
+  service: TransportMaskingService,
+  sessionID: string,
+  request: Request,
+): Promise<Request> {
+  if (!isResponsesUrl(request.url)) throw new Error(UNSUPPORTED_TRANSPORT);
+  if (urlCarriesToken(request.url)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  inspectTransportMetadata(service, request);
+  if (request.body === null) throw new Error(UNSUPPORTED_REQUEST_BODY);
+
+  const raw = await readCappedText(request, MAX_BODY_BYTES, UNSUPPORTED_REQUEST_BODY);
+  if (raw.length === 0) throw new Error(UNSUPPORTED_REQUEST_BODY);
+
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    throw new Error(UNSUPPORTED_REQUEST_BODY);
+  }
+  if (!isRecord(body)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+
+  validateResponsesDialect(body);
+
+  const originalSerialized = JSON.stringify(body);
+
+  // function_call.arguments strings are parsed so masking cannot invalidate
+  // the JSON; re-encoded after the atomic protect (chat-completions rule).
+  const transformedArguments: number[] = [];
+  if (Array.isArray(body.input)) {
+    for (let index = 0; index < body.input.length; index++) {
+      const item = body.input[index];
+      if (isRecord(item) && item.type === "function_call" && isRecordArgumentsString(item)) {
+        try {
+          item.arguments = JSON.parse(item.arguments as string);
+        } catch {
+          throw new Error(UNSUPPORTED_REQUEST_BODY);
+        }
+        transformedArguments.push(index);
+      }
+    }
+  }
+
+  const structuralBefore = collectResponsesStructuralStrings(body);
+  for (const identifier of structuralBefore) {
+    if (identifier.includes(PSEUDONYM_TOKEN_PREFIX) || service.detectSensitive(identifier)) {
+      throw new Error(UNSUPPORTED_REQUEST_BODY);
+    }
+  }
+  let unsafeNumber = false;
+  walkNumbers(body, (value) => {
+    if (service.detectSensitive(String(value))) unsafeNumber = true;
+  });
+  if (unsafeNumber) throw new Error(UNSUPPORTED_REQUEST_BODY);
+
+  const masked = service.protectJsonForModel(sessionID, body);
+  if (!masked.ok) throw new Error(MASK_FAILURE);
+  const next = masked.value;
+  if (!isRecord(next)) throw new Error(MASK_FAILURE);
+
+  const structuralAfter = collectResponsesStructuralStrings(next);
+  if (
+    structuralAfter.length !== structuralBefore.length ||
+    structuralAfter.some((identifier, index) => identifier !== structuralBefore[index])
+  ) {
+    throw new Error(UNSUPPORTED_REQUEST_BODY);
+  }
+
+  if (Array.isArray(next.input)) {
+    for (const index of transformedArguments) {
+      const item = next.input[index];
+      if (!isRecord(item) || typeof item.name !== "string") throw new Error(MASK_FAILURE);
+      item.arguments = JSON.stringify(item.arguments);
+    }
+  }
+
+  const serialized = JSON.stringify(next);
+  if (serialized === originalSerialized) return request;
+  const headers = new Headers(request.headers);
+  headers.delete("content-encoding");
+  headers.set("content-length", String(byteLength(serialized)));
+  return new Request(request, { body: serialized, headers });
+}
+
+function isRecordArgumentsString(item: Record<string, unknown>): boolean {
+  return typeof item.arguments === "string";
+}
+
 /** Protocol dispatcher: masks any supported wire route by URL shape. */
 export async function remaskModelRequest(
   service: TransportMaskingService,
@@ -744,9 +939,13 @@ export async function remaskModelRequest(
 ): Promise<Request> {
   const route = classifyModelRoute(request.url);
   if (route === null) throw new Error(UNSUPPORTED_TRANSPORT);
-  return route === "anthropic-messages"
-    ? remaskAnthropicMessagesRequest(service, sessionID, request)
-    : remaskChatCompletionsRequest(service, sessionID, request);
+  if (route === "anthropic-messages") {
+    return remaskAnthropicMessagesRequest(service, sessionID, request);
+  }
+  if (route === "openai-responses") {
+    return remaskResponsesRequest(service, sessionID, request);
+  }
+  return remaskChatCompletionsRequest(service, sessionID, request);
 }
 
 // ─── Response restore (assistant display text only) ─────────────────────────
@@ -1515,7 +1714,309 @@ export async function restoreModelResponse(
 ): Promise<Response> {
   const route = classifyModelRoute(request.url);
   if (route === null) throw new Error(UNSUPPORTED_TRANSPORT);
-  return route === "anthropic-messages"
-    ? restoreAnthropicMessagesResponse(service, sessionID, response)
-    : restoreChatCompletionsResponse(service, sessionID, response);
+  if (route === "anthropic-messages") {
+    return restoreAnthropicMessagesResponse(service, sessionID, response);
+  }
+  if (route === "openai-responses") {
+    return restoreResponsesResponse(service, sessionID, response);
+  }
+  return restoreChatCompletionsResponse(service, sessionID, response);
+}
+
+// ─── OpenAI Responses response restore ──────────────────────────────────────
+
+/** Restores output_text parts inside one Responses output item (in place). */
+function restoreResponsesItemText(
+  service: TransportMaskingService,
+  sessionID: string,
+  item: Record<string, unknown>,
+): boolean {
+  let changed = false;
+  const content = item.content;
+  if (Array.isArray(content)) {
+    for (const part of content) {
+      if (
+        isRecord(part) &&
+        (part.type === "output_text" || part.type === "input_text") &&
+        typeof part.text === "string" &&
+        part.text.length > 0
+      ) {
+        part.text = restoreDisplayText(service, sessionID, part.text);
+        changed = true;
+      }
+    }
+  }
+  if (typeof item.text === "string" && item.type === "output_text" && item.text.length > 0) {
+    item.text = restoreDisplayText(service, sessionID, item.text);
+    changed = true;
+  }
+  return changed;
+}
+
+/** Token in a Responses payload may appear only in output/input text (in
+ * place before this check) and function_call arguments/output (tool gate). */
+function responsesStrayTokenIn(value: unknown): boolean {
+  if (typeof value === "string") {
+    return value.includes(PSEUDONYM_TOKEN_PREFIX);
+  }
+  if (value === null || typeof value !== "object") return false;
+  if (Array.isArray(value)) {
+    return value.some((item) => responsesStrayTokenIn(item));
+  }
+  const record = value as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (key.includes(PSEUDONYM_TOKEN_PREFIX)) return true;
+    // Tool-gate payloads: function_call arguments/output, and SSE delta
+    // payloads (output_text deltas are restored in place before this check,
+    // so a surviving token under "delta" is a function_call_arguments delta,
+    // which stays tokenized by design).
+    if (key === "arguments" || key === "output" || key === "delta") continue;
+    if (responsesStrayTokenIn(record[key])) return true;
+  }
+  return false;
+}
+
+async function restoreResponsesJsonResponse(
+  service: TransportMaskingService,
+  sessionID: string,
+  response: Response,
+): Promise<Response> {
+  const raw = await readCappedText(response, MAX_BODY_BYTES, UNSUPPORTED_RESPONSE);
+  if (raw.length === 0) return response;
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) throw new Error(UNSUPPORTED_RESPONSE);
+    return response;
+  }
+  if (!isRecord(body)) {
+    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) throw new Error(UNSUPPORTED_RESPONSE);
+    return response;
+  }
+  if (body.output_text !== undefined && typeof body.output_text === "string") {
+    body.output_text = restoreDisplayText(service, sessionID, body.output_text);
+  }
+  if (Array.isArray(body.output)) {
+    for (const item of body.output) {
+      if (!isRecord(item)) throw new Error(UNSUPPORTED_RESPONSE);
+      restoreResponsesItemText(service, sessionID, item);
+      // function_call items stay tokenized for the typed tool gate.
+    }
+  }
+  if (responsesStrayTokenIn(body)) throw new Error(UNSUPPORTED_RESPONSE);
+  const next = JSON.stringify(body);
+  const headers = new Headers(response.headers);
+  headers.delete("content-encoding");
+  headers.set("content-length", String(byteLength(next)));
+  return new Response(next, { status: response.status, statusText: response.statusText, headers });
+}
+
+/**
+ * Restores an OpenAI Responses SSE stream. Channels are keyed by item id (or
+ * output index) for response.output_text.delta events; function_call_arguments
+ * deltas are untouched (tool gate); the terminal response.completed/failed/
+ * incomplete event requires drained channels, and no event may follow it.
+ */
+export function createResponsesSseRestoreStream(
+  service: TransportMaskingService,
+  sessionID: string,
+  body: ReadableStream<Uint8Array>,
+): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  const encoder = new TextEncoder();
+  const channels = new Map<string, string>();
+  let totalChannelBytes = 0;
+  let pending = "";
+  let pendingBytes = 0;
+  let eventLines: string[] = [];
+  let eventBytes = 0;
+  let finished = false;
+  const terminal = { value: false };
+
+  const setChannel = (channel: string, hold: string): void => {
+    const previous = channels.get(channel) ?? "";
+    totalChannelBytes += byteLength(hold) - byteLength(previous);
+    if (totalChannelBytes > MAX_TOTAL_CHANNEL_BYTES) throw new Error(STREAM_BUFFER_LIMIT);
+    channels.set(channel, hold);
+  };
+  const deleteChannel = (channel: string): void => {
+    const previous = channels.get(channel);
+    if (previous !== undefined) totalChannelBytes -= byteLength(previous);
+    channels.delete(channel);
+  };
+
+  const processEvent = (terminated: boolean): string => {
+    const lines = eventLines;
+    eventLines = [];
+    eventBytes = 0;
+    const framing: string[] = [];
+    const dataPayloads: string[] = [];
+    for (const rawLine of lines) {
+      const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+      if (line.startsWith("data:")) {
+        let payload = line.slice("data:".length);
+        if (payload.startsWith(" ")) payload = payload.slice(1);
+        dataPayloads.push(payload);
+      } else {
+        framing.push(line);
+      }
+    }
+    const emitPayload = (payload: string): string[] =>
+      framing.concat(payload.split("\n").map((line) => `data: ${line}`));
+
+    let outputLines: string[];
+    if (dataPayloads.length === 0) {
+      outputLines = framing;
+    } else {
+      const joined = dataPayloads.join("\n");
+      let chunk: unknown;
+      try {
+        chunk = JSON.parse(joined);
+      } catch {
+        throw new Error(MALFORMED_STREAM);
+      }
+      if (!isRecord(chunk) || typeof chunk.type !== "string") throw new Error(MALFORMED_STREAM);
+      if (terminal.value) throw new Error(MALFORMED_STREAM);
+
+      const channelKey = (): string => {
+        const item = chunk.item_id ?? chunk.id ?? chunk.output_index;
+        return typeof item === "string" || typeof item === "number" ? String(item) : "0";
+      };
+
+      if (chunk.type === "response.output_text.delta") {
+        if (typeof chunk.delta !== "string") throw new Error(MALFORMED_STREAM);
+        const key = channelKey();
+        if (!channels.has(key) && channels.size >= MAX_CHANNELS) throw new Error(STREAM_BUFFER_LIMIT);
+        const held = channels.get(key) ?? "";
+        if (byteLength(held) + byteLength(chunk.delta) > MAX_CHANNEL_BYTES) {
+          throw new Error(STREAM_BUFFER_LIMIT);
+        }
+        const buffered = held + chunk.delta;
+        const { emit, hold } = splitRestorable(buffered);
+        chunk.delta = emit.length === 0 ? "" : restoreDisplayText(service, sessionID, emit);
+        if (hold === "") deleteChannel(key);
+        else setChannel(key, hold);
+      } else if (chunk.type === "response.output_item.added" || chunk.type === "response.output_item.done") {
+        const item = chunk.item;
+        if (isRecord(item)) restoreResponsesItemText(service, sessionID, item);
+      } else if (
+        chunk.type === "response.completed" ||
+        chunk.type === "response.failed" ||
+        chunk.type === "response.incomplete"
+      ) {
+        if (channels.size !== 0) throw new Error(MALFORMED_STREAM);
+        terminal.value = true;
+        const response = chunk.response;
+        if (isRecord(response) && Array.isArray(response.output)) {
+          for (const item of response.output) {
+            if (isRecord(item)) restoreResponsesItemText(service, sessionID, item);
+          }
+        }
+      }
+      // function_call_arguments deltas, reasoning events, others: untouched.
+
+      if (responsesStrayTokenIn(chunk)) throw new Error(UNSUPPORTED_RESPONSE);
+      outputLines = emitPayload(JSON.stringify(chunk));
+    }
+    const text = outputLines.join("\n");
+    if (text.length === 0) return terminated ? "\n" : "";
+    return terminated ? `${text}\n\n` : text;
+  };
+
+  const pushLine = (line: string): void => {
+    eventBytes += byteLength(line) + 1;
+    if (eventBytes > MAX_EVENT_BYTES) throw new Error(STREAM_BUFFER_LIMIT);
+    eventLines.push(line);
+  };
+
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (finished) return;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) {
+            const tail = decoder.decode();
+            pendingBytes += byteLength(tail);
+            if (pendingBytes > MAX_PENDING_BYTES) throw new Error(STREAM_BUFFER_LIMIT);
+            pending += tail;
+            if (pending.length > 0) {
+              for (const line of pending.split("\n")) pushLine(line);
+              pending = "";
+              pendingBytes = 0;
+            }
+            let out = "";
+            if (eventLines.length > 0) out += processEvent(false);
+            if (channels.size !== 0) throw new Error(MALFORMED_STREAM);
+            finished = true;
+            if (out.length > 0) controller.enqueue(encoder.encode(out));
+            controller.close();
+            return;
+          }
+          const decoded = decoder.decode(value, { stream: true });
+          const decodedBytes = byteLength(decoded);
+          if (pendingBytes + decodedBytes > MAX_PENDING_BYTES) {
+            throw new Error(STREAM_BUFFER_LIMIT);
+          }
+          pendingBytes += decodedBytes;
+          pending += decoded;
+          let out = "";
+          let newline = pending.indexOf("\n");
+          while (newline !== -1) {
+            const line = pending.slice(0, newline);
+            pending = pending.slice(newline + 1);
+            pendingBytes -= byteLength(line) + 1;
+            if (line === "" || line === "\r") out += processEvent(true);
+            else pushLine(line);
+            newline = pending.indexOf("\n");
+          }
+          if (out.length > 0) {
+            controller.enqueue(encoder.encode(out));
+            return;
+          }
+        }
+      } catch (error) {
+        if (finished) return;
+        finished = true;
+        controller.error(error);
+        try {
+          await reader.cancel();
+        } catch {
+          // Underlying stream is already gone; the error above is the outcome.
+        }
+      }
+    },
+    cancel(reason) {
+      finished = true;
+      return reader.cancel(reason);
+    },
+  });
+}
+
+/**
+ * Restores assistant display text in an OpenAI Responses response; error
+ * bodies and unsupported content types pass through only when provably free
+ * of reserved tokens.
+ */
+export async function restoreResponsesResponse(
+  service: TransportMaskingService,
+  sessionID: string,
+  response: Response,
+): Promise<Response> {
+  const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
+  const restorable = response.status >= 200 && response.status < 300;
+  if (restorable && contentType.includes("application/json")) {
+    return restoreResponsesJsonResponse(service, sessionID, response);
+  }
+  if (restorable && contentType.includes("text/event-stream")) {
+    if (response.body === null) return response;
+    const headers = new Headers(response.headers);
+    headers.delete("content-encoding");
+    headers.delete("content-length");
+    const stream = createResponsesSseRestoreStream(service, sessionID, response.body);
+    return new Response(stream, { status: response.status, statusText: response.statusText, headers });
+  }
+  return refuseIfTokenBearing(response);
 }

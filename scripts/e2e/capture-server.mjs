@@ -332,6 +332,48 @@ function writeAnthropicSse(res, parsed) {
   res.end();
 }
 
+/** OpenAI Responses SSE reply (Phase 3, C19). The reply text embeds an armed
+ * [SGP1:…] token (echoTokenInTextNext) so display restoration is provable. */
+function writeResponsesSse(res, parsed) {
+  const mainAgentRequest = Array.isArray(parsed?.tools) && parsed.tools.length > 0;
+  let text = `ok ${state.label}`;
+  if (state.echoTokenInTextNext && mainAgentRequest) {
+    state.echoTokenInTextNext = false; // one-shot
+    const serialized = JSON.stringify(parsed);
+    const token = serialized.match(/\[SGP1:[0-9a-f]{32}-\d{8,12}\]/)?.[0];
+    if (token) text = `Noted. I will contact ${token} about the rotation.`;
+  }
+  const event = (name, data) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+  res.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+  });
+  res.write(event("response.created", { type: "response.created", response: { id: `resp-${seq}` } }));
+  res.write(event("response.output_item.added", {
+    type: "response.output_item.added",
+    output_index: 0,
+    item: { type: "message", id: `msg-${seq}`, role: "assistant", content: [] },
+  }));
+  res.write(event("response.output_text.delta", {
+    type: "response.output_text.delta",
+    item_id: `msg-${seq}`,
+    output_index: 0,
+    content_index: 0,
+    delta: text,
+  }));
+  res.write(event("response.output_item.done", {
+    type: "response.output_item.done",
+    output_index: 0,
+    item: { type: "message", id: `msg-${seq}`, role: "assistant", content: [] },
+  }));
+  res.write(event("response.completed", {
+    type: "response.completed",
+    response: { id: `resp-${seq}`, output: [] },
+  }));
+  res.end();
+}
+
 function readBody(req, limitBytes = 20 * 1024 * 1024) {  return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
@@ -410,6 +452,20 @@ const server = http.createServer(async (req, res) => {
         writeAnthropicJson(res, parsed);
       }
       console.log(`[capture] seq=${rec.seq} anthropic stream=${parsed?.stream === true} -> ${rec.file}`);
+      return;
+    }
+    // OpenAI Responses dialect (Phase 3, C19): {baseURL}/responses.
+    if (req.method === "POST" && url === "/v1/responses") {
+      const raw = await readBody(req);
+      const rec = record(req, raw);
+      let parsed = null;
+      try {
+        parsed = raw ? JSON.parse(raw) : null;
+      } catch {
+        parsed = null;
+      }
+      writeResponsesSse(res, parsed);
+      console.log(`[capture] seq=${rec.seq} responses stream -> ${rec.file}`);
       return;
     }
     return writeJson(res, 404, { error: { message: `no route ${req.method} ${url}` } });

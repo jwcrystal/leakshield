@@ -50,9 +50,10 @@
 3. **重跑真實 provider E2E**：至少一個真實 OpenAI-compatible endpoint，確認本地 capture 結論可外推。
 
 驗收（DoD）：
-- [ ] working tree 乾淨（或僅剩明確排除項）
-- [ ] 每個 commit 可獨立通過 `npm test`
-- [ ] C1–C13 全綠 + 一份真實 provider 執行證據存 `docs/evidence/`
+- [x] working tree 乾淨（僅剩 7 項明確排除：`.commandcode/`、`CLAUDE.md`、`ENCODING_*`×3、`SECURITY_*`、`bun.lock`）
+- [x] 每個 commit 可獨立通過測試（worktree 實測 352→422→503→518→531 全綠，見 `docs/evidence/2026-10-05-phase0-baseline-acceptance.md`）
+- [x] C1–C13 全綠（2026-10-05，56s，canary leaks 全 0；C6 expected-leak 為對照組）
+- [ ] 真實 provider E2E — **未執行**（無 API key），保留為 open item；完成前不得宣稱 runtime GO
 
 ## Phase 1：安裝流程 + 啟用狀態顯示（優先項 1）
 

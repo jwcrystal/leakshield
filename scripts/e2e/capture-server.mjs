@@ -259,8 +259,80 @@ function writeCompletion(res, parsed) {
   });
 }
 
-function readBody(req, limitBytes = 20 * 1024 * 1024) {
-  return new Promise((resolve, reject) => {
+/** Anthropic Messages helpers (Phase 3, C18). Title requests carry no
+ * `tools` array; main agent requests do — same rule as chat completions. */
+function anthropicMainAgent(parsed) {
+  return Array.isArray(parsed?.tools) && parsed.tools.length > 0;
+}
+
+function anthropicReplyText(parsed) {
+  const mainAgentRequest = anthropicMainAgent(parsed);
+  if (state.echoTokenInTextNext && mainAgentRequest) {
+    state.echoTokenInTextNext = false; // one-shot
+    const userMessages = (parsed.messages || []).filter((m) => m.role === "user");
+    const userText = JSON.stringify(
+      userMessages[userMessages.length - 1]?.content ?? userMessages[userMessages.length - 1] ?? {},
+    );
+    const token =
+      userText.match(/\[SGP1:[0-9a-f]{32}-\d{8,12}\]/)?.[0] ??
+      JSON.stringify(parsed).match(/\[SGP1:[0-9a-f]{32}-\d{8,12}\]/)?.[0];
+    if (token) return `Noted. I will contact ${token} about the rotation.`;
+  }
+  return `ok ${state.label}`;
+}
+
+function anthropicContentBlocks(parsed) {
+  const text = anthropicReplyText(parsed);
+  const blocks = [{ type: "text", text }];
+  if (state.toolCallNext && anthropicMainAgent(parsed)) {
+    state.toolCallNext = false;
+    blocks.push({ type: "tool_use", id: `toolu-capture-${seq}`, name: state.toolName, input: state.toolArgs });
+  }
+  return blocks;
+}
+
+function writeAnthropicJson(res, parsed) {
+  const blocks = anthropicContentBlocks(parsed);
+  writeJson(res, 200, {
+    id: `msg-capture-${seq}`,
+    type: "message",
+    role: "assistant",
+    model: "capture-anthropic-1",
+    content: blocks,
+    stop_reason: blocks.some((block) => block.type === "tool_use") ? "tool_use" : "end_turn",
+    usage: { input_tokens: 0, output_tokens: 0 },
+  });
+}
+
+function writeAnthropicSse(res, parsed) {
+  const blocks = anthropicContentBlocks(parsed);
+  const event = (name, data) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+  res.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+  });
+  res.write(event("message_start", {
+    type: "message_start",
+    message: { id: `msg-capture-${seq}`, type: "message", role: "assistant", content: [], usage: { input_tokens: 0, output_tokens: 0 } },
+  }));
+  blocks.forEach((block, index) => {
+    if (block.type === "text") {
+      res.write(event("content_block_start", { type: "content_block_start", index, content_block: { type: "text", text: "" } }));
+      res.write(event("content_block_delta", { type: "content_block_delta", index, delta: { type: "text_delta", text: block.text } }));
+      res.write(event("content_block_stop", { type: "content_block_stop", index }));
+    } else {
+      res.write(event("content_block_start", { type: "content_block_start", index, content_block: { type: "tool_use", id: block.id, name: block.name, input: {} } }));
+      res.write(event("content_block_delta", { type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: JSON.stringify(block.input) } }));
+      res.write(event("content_block_stop", { type: "content_block_stop", index }));
+    }
+  });
+  res.write(event("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 0 } }));
+  res.write(event("message_stop", { type: "message_stop" }));
+  res.end();
+}
+
+function readBody(req, limitBytes = 20 * 1024 * 1024) {  return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
     req.on("data", (c) => {
@@ -320,6 +392,24 @@ const server = http.createServer(async (req, res) => {
         writeCompletion(res, parsed);
       }
       console.log(`[capture] seq=${rec.seq} stream=${parsed?.stream === true} -> ${rec.file}`);
+      return;
+    }
+    // Anthropic Messages dialect (Phase 3, C18): {baseURL}/messages.
+    if (req.method === "POST" && url === "/v1/messages") {
+      const raw = await readBody(req);
+      const rec = record(req, raw);
+      let parsed = null;
+      try {
+        parsed = raw ? JSON.parse(raw) : null;
+      } catch {
+        parsed = null;
+      }
+      if (parsed && parsed.stream === true) {
+        writeAnthropicSse(res, parsed);
+      } else {
+        writeAnthropicJson(res, parsed);
+      }
+      console.log(`[capture] seq=${rec.seq} anthropic stream=${parsed?.stream === true} -> ${rec.file}`);
       return;
     }
     return writeJson(res, 404, { error: { message: `no route ${req.method} ${url}` } });

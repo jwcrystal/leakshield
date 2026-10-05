@@ -574,6 +574,37 @@ const CASES = [
       return { verdict: "observe", reason: "assistant text observed but neither token nor restored original found — arming may have missed; inspect out/logs dump" };
     },
   },
+  {
+    id: "C18-anthropic-transparent",
+    description:
+      "Phase 3 / Anthropic Messages native protocol: {mode:'transparent'} over an Anthropic-native provider — canaries must arrive as [SGP1:… tokens on /v1/messages, and the token-bearing reply must display restored originals",
+    plugins: [{ package: DIST_DIR, options: { mode: "transparent" } }],
+    prompt: CANARY_PROMPT,
+    anthropicProvider: true,
+    control: { label: "C18-anthropic-transparent", echoTokenInTextNext: true },
+    expectation: (r) => {
+      const requests = r.requests;
+      const onMessages = requests; // captured bodies from /v1/messages (canary scan is path-agnostic)
+      if (onMessages.length === 0)
+        return { verdict: "observe", reason: "no provider request captured; inspect out/logs (anthropic provider may have failed to load)" };
+      if (r.canariesInProviderRequests.length > 0)
+        return { verdict: "fail", reason: "canary leaked to the Anthropic-native provider" };
+      const tokenRequests = requests.filter((q) => q.markers.includes("transparentToken")).length;
+      if (tokenRequests === 0)
+        return { verdict: "fail", reason: "no [SGP1:… token in any /v1/messages request — body was not pseudonymized" };
+      // Display restore: the reply embeds a token; user-facing output shows originals
+      const parts = r.assistantParts ?? [];
+      const assistantRole = parts.filter((p) => p.role === "assistant");
+      const scoped = assistantRole.length > 0 ? assistantRole.map((p) => p.text).join("\n") : (r.assistantText ?? "");
+      const rawTokenVisible = /\[SGP1:[0-9a-f]{32}-\d{8,12}\]/.test(scoped);
+      const restoredVisible = scoped.includes("alice.canary@example-test.invalid");
+      if (rawTokenVisible)
+        return { verdict: "fail", reason: "user-facing output shows a raw [SGP1:… token over the Anthropic route" };
+      if (restoredVisible)
+        return { verdict: "pass", reason: "Anthropic-native round-trip: tokens on the wire, originals in display" };
+      return { verdict: "observe", reason: "wire masking proven; display-restore signal missing (reply arming may have missed); inspect out/logs" };
+    },
+  },
 ];
 
 // ------------------------------------------------------------- utilities --
@@ -697,20 +728,35 @@ function scanDirForCanaries(dir, { exclude = () => false } = {}) {
 function buildConfig(caseDef, port) {
   // OpenCode v2.0.19 schema: `providers` (plural) with `package` + `settings`.
   // Verified against packages/schema/src/config/provider.ts @ v2.0.19.
+  const providers = {
+    capture: {
+      name: "Capture",
+      env: ["CAPTURE_API_KEY"],
+      package: "@opencode/ai/providers/openai-compatible",
+      settings: {
+        baseURL: `http://127.0.0.1:${port}/v1`,
+        apiKey: "sg-e2e-capture",
+      },
+      models: { "capture-1": { name: "Capture 1" } },
+    },
+  };
+  // Phase 3 (C18): an Anthropic-native provider pointed at the same capture
+  // server; the Anthropic SDK posts to {baseURL}/messages.
+  if (caseDef.anthropicProvider) {
+    providers["capture-anthropic"] = {
+      name: "Capture Anthropic",
+      env: ["CAPTURE_API_KEY"],
+      package: "@opencode/ai/providers/anthropic",
+      settings: {
+        baseURL: `http://127.0.0.1:${port}/v1`,
+        apiKey: "sg-e2e-capture",
+      },
+      models: { "capture-anthropic-1": { name: "Capture Anthropic 1" } },
+    };
+  }
   return {
     $schema: "https://opencode.ai/config.json",
-    providers: {
-      capture: {
-        name: "Capture",
-        env: ["CAPTURE_API_KEY"],
-        package: "@opencode/ai/providers/openai-compatible",
-        settings: {
-          baseURL: `http://127.0.0.1:${port}/v1`,
-          apiKey: "sg-e2e-capture",
-        },
-        models: { "capture-1": { name: "Capture 1" } },
-      },
-    },
+    providers,
     plugins: caseDef.plugins,
   };
 }
@@ -788,7 +834,14 @@ async function runCase(caseDef, port) {
   env.XDG_CACHE_HOME = path.join(workdir, "cache");
   env.XDG_CONFIG_HOME = path.join(workdir, "config");
 
-  const args = ["run", "--standalone", "--format", "json", "--model", "capture/capture-1"];
+  const args = [
+    "run",
+    "--standalone",
+    "--format",
+    "json",
+    "--model",
+    caseDef.anthropicProvider ? "capture-anthropic/capture-anthropic-1" : "capture/capture-1",
+  ];
   if (process.env.E2E_PRINT_LOGS === "1") args.push("--print-logs");
   args.push(caseDef.prompt);
 

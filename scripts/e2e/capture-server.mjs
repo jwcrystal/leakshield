@@ -53,6 +53,9 @@ const state = {
   // One-shot (case C15): on the next tools-bearing request, stream a partial
   // reply and destroy the connection — no finish chunk, no [DONE].
   cutStreamNext: false,
+  // One-shot (case C17): the reply TEXT embeds a [SGP1:…] token seen in the
+  // request, so the orchestrator can verify display restoration end-to-end.
+  echoTokenInTextNext: false,
 };
 
 function record(req, bodyRaw) {
@@ -95,6 +98,23 @@ function completionId() {
  */
 function nextAssistantMessage(parsed) {
   const mainAgentRequest = Array.isArray(parsed?.tools) && parsed.tools.length > 0;
+  if (state.echoTokenInTextNext && mainAgentRequest) {
+    state.echoTokenInTextNext = false; // one-shot
+    // Same token-selection rule as echoTokenNext: prefer the user's own
+    // message, fall back to any token in the body.
+    const userMessages = (parsed.messages || []).filter((m) => m.role === "user");
+    const userText = JSON.stringify(userMessages[userMessages.length - 1] ?? {});
+    const token =
+      userText.match(/\[SGP1:[0-9a-f]{32}-\d{8,12}\]/)?.[0] ??
+      JSON.stringify(parsed).match(/\[SGP1:[0-9a-f]{32}-\d{8,12}\]/)?.[0];
+    if (token) {
+      return {
+        message: { role: "assistant", content: `Noted. I will contact ${token} about the rotation.` },
+        finish: "stop",
+      };
+    }
+    // No token to echo: fall through to the plain reply.
+  }
   if (state.echoTokenNext && mainAgentRequest) {
     state.echoTokenNext = false; // one-shot
     // Prefer the token from the user's own message (the canary we control),
@@ -280,6 +300,8 @@ const server = http.createServer(async (req, res) => {
       if (parsed.echoTokenNext === false) state.echoTokenNext = false;
       if (parsed.cutStreamNext === true) state.cutStreamNext = true;
       if (parsed.cutStreamNext === false) state.cutStreamNext = false;
+      if (parsed.echoTokenInTextNext === true) state.echoTokenInTextNext = true;
+      if (parsed.echoTokenInTextNext === false) state.echoTokenInTextNext = false;
       if (typeof parsed.restorePathPrefix === "string") state.restorePathPrefix = parsed.restorePathPrefix;
       return writeJson(res, 200, { ok: true, state: { ...state, toolArgs: state.toolArgs } });
     }

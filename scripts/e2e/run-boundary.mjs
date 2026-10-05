@@ -59,6 +59,10 @@
  *                  {mode:"transparent"}; forced read of a canary-named MISSING
  *                  file embeds the canary in the tool error text; the
  *                  follow-up request must carry the masked error, not the raw one
+ *   C17 reply-restore
+ *                  {mode:"transparent"}; the provider's text reply references
+ *                  the [SGP1:…] token; the user-facing assistant output must
+ *                  show the RESTORED original, never a raw token
  *
  * Safety: all canaries are synthetic (example-test.invalid / sk-CANARYTEST…),
  * every case runs in a fresh workdir with XDG_DATA_HOME / XDG_STATE_HOME /
@@ -538,6 +542,38 @@ const CASES = [
       return { verdict: "observe", reason: "follow-up clean but no token evidence; inspect out/captured" };
     },
   },
+  {
+    id: "C17-reply-restore",
+    description:
+      "transparent + normal conversation: the provider's text reply references the [SGP1:…] token; the user-facing assistant output must show the RESTORED original, never a raw token",
+    plugins: [{ package: DIST_DIR, options: { mode: "transparent" } }],
+    prompt: CANARY_PROMPT,
+    control: { label: "C17-reply-restore", echoTokenInTextNext: true },
+    expectation: (r) => {
+      if (r.canariesInProviderRequests.length > 0)
+        return { verdict: "fail", reason: "canary leaked to provider" };
+      // Scope to assistant-role parts when role info exists, so the user's
+      // own prompt echo cannot fake a "restored" signal.
+      const parts = r.assistantParts ?? [];
+      const assistantRole = parts.filter((p) => p.role === "assistant");
+      const scoped =
+        assistantRole.length > 0 ? assistantRole.map((p) => p.text).join("\n") : (r.assistantText ?? "");
+      if (scoped.trim().length === 0)
+        return {
+          verdict: "observe",
+          reason: "no assistant text observed; rerun with E2E_DUMP_STDOUT=1 and inspect out/logs/C17-reply-restore.stdout.txt",
+        };
+      const rawTokenVisible = /\[SGP1:[0-9a-f]{32}-\d{8,12}\]/.test(scoped);
+      const restoredVisible = scoped.includes("alice.canary@example-test.invalid");
+      if (rawTokenVisible && !restoredVisible)
+        return { verdict: "fail", reason: "user-facing assistant output shows a raw [SGP1:… token — display restoration missing" };
+      if (rawTokenVisible && restoredVisible)
+        return { verdict: "fail", reason: "restored original AND raw token both visible in user-facing output" };
+      if (restoredVisible)
+        return { verdict: "pass", reason: "provider replied with a token; user-facing output shows the restored original (normal-conversation UX)" };
+      return { verdict: "observe", reason: "assistant text observed but neither token nor restored original found — arming may have missed; inspect out/logs dump" };
+    },
+  },
 ];
 
 // ------------------------------------------------------------- utilities --
@@ -711,16 +747,19 @@ async function runCase(caseDef, port) {
   if (caseDef.restoreSource) {
     const source = CANARIES.find((canary) => canary.key === caseDef.restoreSource);
     if (!source) throw new Error(`unknown restoration source ${caseDef.restoreSource}`);
-    restoreFixturePath = path.join(OUT_DIR, "c13-fixtures", source.value);
+    // The fixture lives inside the case workdir and the armed tool path is
+    // workdir-relative; the spawn env pins PWD to the workdir (see env setup)
+    // so relative tool paths resolve there deterministically.
+    restoreFixturePath = path.join(workdir, "c13-fixtures", source.value);
     mkdirSync(path.dirname(restoreFixturePath), { recursive: true });
     writeFileSync(restoreFixturePath, "C13 path restoration fixture\n");
-    restoreExpectedPath = path.relative(REPO_ROOT, restoreFixturePath).split(path.sep).join("/");
+    restoreExpectedPath = `c13-fixtures/${source.value}`;
   }
   if (caseDef.control) {
     const control = restoreFixturePath
       ? {
           ...caseDef.control,
-          restorePathPrefix: `${path.relative(REPO_ROOT, path.dirname(restoreFixturePath)).split(path.sep).join("/")}/`,
+          restorePathPrefix: "c13-fixtures/",
         }
       : caseDef.control;
     await postControl(port, control);
@@ -739,6 +778,11 @@ async function runCase(caseDef, port) {
   // session's PATH may not contain the opencode bin dir, so prepend it.
   const binDir = path.dirname(path.resolve(opencodeBin()));
   env.PATH = `${binDir}${path.delimiter}${env.PATH ?? ""}`;
+  // Anchor relative tool paths at the workdir: the host's read tool resolves
+  // relative paths against the inherited PWD (not the spawn cwd), so without
+  // this the resolution base is whatever directory launched the harness.
+  // Deterministic regardless of how the harness itself was started.
+  env.PWD = workdir;
   env.XDG_DATA_HOME = path.join(workdir, "data");
   env.XDG_STATE_HOME = path.join(workdir, "state");
   env.XDG_CACHE_HOME = path.join(workdir, "cache");
@@ -862,6 +906,31 @@ async function runCase(caseDef, port) {
 
   const stdoutCanaries = CANARIES.filter((c) => stdout.includes(c.value)).map((c) => c.key);
 
+  // Assistant-facing text (C17): `opencode run` prints JSON events; collect
+  // the text of assistant message parts so display restoration can be
+  // verified without the user's own prompt echo polluting the signal.
+  const assistantParts = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const part = event?.part;
+    if (event?.type === "message" && part && typeof part.text === "string") {
+      assistantParts.push({ role: part.role ?? null, text: part.text });
+    } else if (event?.type === "text" && part && typeof part.text === "string") {
+      // `opencode run` emits assistant output as type:"text" events
+      assistantParts.push({ role: "assistant", text: part.text });
+    }
+  }
+  const assistantText = assistantParts.map((p) => p.text).join("\n");
+  if (process.env.E2E_DUMP_STDOUT) {
+    mkdirSync(path.join(OUT_DIR, "logs"), { recursive: true });
+    writeFileSync(path.join(OUT_DIR, "logs", `${caseDef.id}.stdout.txt`), stdout);
+  }
+
   const followUpCanaries = caseDef.followUp
     ? CANARIES.filter((canary) => caseDef.followUp.args.some((argument) => argument.includes(canary.value))).map((canary) => canary.key)
     : [];
@@ -889,6 +958,8 @@ async function runCase(caseDef, port) {
     logHits,
     cacheHits,
     stdoutCanaries,
+    assistantParts,
+    assistantText,
     restoredExactPathRead,
     workdir,
   };

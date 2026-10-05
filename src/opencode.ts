@@ -1,6 +1,5 @@
 import type { Plugin as PluginNamespace } from "@opencode/plugin";
 import type { PluginModule } from "@opencode-ai/plugin";
-import { z } from "zod";
 import { findConfigPath, loadConfigWithFingerprint, type LoadedGuardConfig } from "./config/loader.js";
 import { createSessionKey } from "./decision/deidentify.js";
 import { EnvQueryService } from "./env-queries.js";
@@ -8,34 +7,11 @@ import { createFailClosedHooks, createHooks } from "./opencode-hooks.js";
 import { createV1EnvTools } from "./opencode-env-tools.js";
 import { createFailClosedV2Setup, createV2Setup } from "./opencode-v2.js";
 import { createFailClosedTransparentGuard, createTransparentSessionGuard } from "./opencode-transparent.js";
+import { PluginOptionsSchema, type PluginOptions } from "./plugin-options.js";
 import type { GuardConfig } from "./types.js";
 
 type V2Plugin = PluginNamespace.Plugin;
 type V2PluginContext = PluginNamespace.Context;
-
-// deidentify is v2-only and valid only in redact mode; an invalid combination
-// makes the parse throw, and every entry path already fails closed on that.
-// transparent is the v2-only reversible pseudonymization mode (issue #22):
-// it owns its own bounded session service and transport hooks, so combining
-// it with the second (deidentify) protection pipeline or the v1/v2 env query
-// tools is rejected here — every entry path fails closed on the parse error.
-const PluginOptionsSchema = z
-  .object({
-    mode: z.enum(["block", "redact", "transparent"]).default("block"),
-    configPath: z.string().min(1).optional(),
-    deidentify: z.boolean().default(false),
-    /** Opt-in readonly env query tools over `settings.env_files`. Default off. */
-    envQueries: z.boolean().default(false),
-  })
-  .refine((options) => !options.deidentify || options.mode === "redact", {
-    message: "deidentify requires mode 'redact'",
-  })
-  .refine((options) => options.mode !== "transparent" || !options.envQueries, {
-    message: "envQueries is not supported in mode 'transparent'",
-  })
-  .default({});
-
-type PluginOptions = z.infer<typeof PluginOptionsSchema>;
 
 function withEncodingDetection(config: GuardConfig): GuardConfig {
   return {

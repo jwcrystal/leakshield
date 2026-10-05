@@ -43,8 +43,14 @@ initWindowsEncoding();
 const args = process.argv;
 const isCliMode = args.includes("--cli");
 const isWebMode = args.includes("--web");
+const isDoctorMode = args.includes("--doctor");
 
-if (isWebMode) {
+if (isDoctorMode) {
+  const { runDoctor, createDoctorDeps, formatDoctorReport } = await import("./doctor.js");
+  const report = await runDoctor(createDoctorDeps());
+  console.log(formatDoctorReport(report));
+  process.exitCode = report.status === "PROTECTED" || report.status === "PARTIAL" ? 0 : 1;
+} else if (isWebMode) {
   const portIdx = args.indexOf("--port");
   const port = portIdx !== -1 ? parseInt(args[portIdx + 1], 10) || 3000 : 3000;
   await runWeb(port);

@@ -360,6 +360,20 @@ The model-facing message must contain the Sensitive Guard block notice and must 
 
 After publishing to npm, the same plugin can be configured as `"sensitive-guard"` instead of the local `dist` path.
 
+#### Automated install check: `--doctor`
+
+```bash
+npx sensitive-guard --doctor     # or: sensitive-guard --doctor after global install
+```
+
+The doctor verifies the install without sending anything anywhere: it checks the OpenCode host version, finds `opencode.json` (workspace then global), confirms Sensitive Guard is registered with options that the plugin itself would accept, verifies a local `dist` entry point actually exists (a missing one makes OpenCode silently log-and-skip the plugin — sessions look normal but are unprotected), loads the guard config, and runs the synthetic-canary smoke scan locally. Exit code 0 means `PROTECTED` (v2) or `PARTIAL` (v1: session hooks only); any other status prints the failing check with a concrete fix, including a copy-paste registration snippet when the plugin is missing.
+
+Doctor is an install-level check that runs outside the host — it cannot see inside a live session. Runtime proof comes from the smoke test above or `scripts/e2e/run-boundary.mjs`.
+
+### What this protects — and what it does not
+
+Sensitive Guard protects model-conversation content: prompts, replayed history, tool outputs, and (in transparent mode) provider-bound request bodies whose shape it can parse. It is **not** a tool-egress firewall: a permitted local tool can still transmit originals over the network via `curl`, a remote MCP server, or any other channel. Controlling tool destinations requires a separate permission layer outside this plugin.
+
 <!-- Legacy transport row intentionally hidden.
 | `scan_dir` | Scan an entire directory (recursive, skips node_modules / .git). Returns per-file results |
 -->

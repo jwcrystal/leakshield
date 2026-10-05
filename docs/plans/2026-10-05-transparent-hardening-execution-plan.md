@@ -78,6 +78,8 @@
 
 ## Phase 2：雙層涵蓋稽核（優先項 2 — 補洞，非新建）
 
+> **2026-10-05 狀態**：完成。矩陣 8 格中 7 格有 payload 級證據（新增 C14 context／C15 retry／C16 tool-error 三案例；C6 對照組證明 title 是真實洩漏路徑且已防護）；僅 compaction 以結構論證降級（standalone 無法觸發，找到觸發方式後補案例）。未發現繞過路徑。見 `docs/evidence/2026-10-05-phase2-coverage-matrix.md`。
+
 **現況**：兩層皆已存在。缺口是「每種 request kind × 每層」的涵蓋證明。
 
 研究文件 §7 已證 V1（v1.2.10）title/compaction 可繞過；**§7.2 明列 V2 未驗證**。本 Phase 產出涵蓋矩陣並補洞：

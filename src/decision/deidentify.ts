@@ -23,8 +23,20 @@ import {
 
 export const DEIDENTIFY_MARKER_PREFIX = "[SG-EMAIL-";
 
+/** A fully formed issued-placeholder shape. */
+const DEIDENTIFY_MARKER_SHAPE = /\[SG-EMAIL-[0-9a-f]{16}\]/g;
+
 /** Placeholder body length: 16 hex chars (64 bits). See placeholderFor(). */
 const PLACEHOLDER_HEX_CHARS = 16;
+
+/**
+ * Bound on the placeholders a session retains for replay protection. The
+ * registry is bounded so a long session cannot grow it without limit; a unit
+ * that would exceed it fails closed (blocks) before issuing anything, and
+ * placeholders are retained only after the unit has fully succeeded — so a
+ * refused unit consumes no quota.
+ */
+export const ISSUED_PLACEHOLDER_LIMIT = 4096;
 
 /** One random key per plugin setup (= one OpenCode session); never persisted. */
 export function createSessionKey(): Buffer {
@@ -108,12 +120,19 @@ export function applyDeidentify(
  * the session key are replaced by stable placeholders before the standard
  * redaction/verification pipeline. Any doubt (truncation, encoded findings,
  * bad spans, verification failure, residual originals) blocks the whole unit.
+ *
+ * `issuedPlaceholders` is the session-owned set of placeholders issued so far.
+ * Placeholders already present in `text` are protected exactly like newly
+ * issued ones, so a prompt→context replay cannot corrupt a placeholder whose
+ * hex body happens to contain a phone-shaped run. Only placeholders actually
+ * in this set are exempt — an arbitrary marker-shaped lookalike is not.
  */
 export function deidentifyText(
   text: string,
   config: GuardConfig,
   sessionKey: Buffer,
   options: ProtectionOptions,
+  issuedPlaceholders?: Set<string>,
 ): ProtectedText {
   if (options.mode !== "redact") {
     // Defense in depth: de-identification is a redact-mode-only trial, so this
@@ -135,27 +154,75 @@ export function deidentifyText(
     const scan = scanText(text, config, noDirectives);
     if (scan.was_truncated) return block(scan.total_findings);
 
-    if (!scan.findings.some(isDeidentifiableEmail)) {
+    const emails = scan.findings.filter(isDeidentifiableEmail);
+    const owned = issuedPlaceholders
+      ? [...issuedPlaceholders].filter((placeholder) => text.includes(placeholder))
+      : [];
+
+    // Any reserved marker this session does not own is refused: it is an
+    // evicted/foreign/never-issued marker whose hex body must not be partially
+    // rewritten (a phone-shaped run inside it would corrupt the grammar), and a
+    // marker-shaped lookalike must never be exempted.
+    DEIDENTIFY_MARKER_SHAPE.lastIndex = 0;
+    for (let match = DEIDENTIFY_MARKER_SHAPE.exec(text); match !== null; match = DEIDENTIFY_MARKER_SHAPE.exec(text)) {
+      if (!issuedPlaceholders?.has(match[0])) return block(scan.total_findings);
+    }
+
+    // Nothing trial-related in this unit: keep the standard pipeline.
+    if (emails.length === 0 && owned.length === 0) {
       return protectText(text, config, options);
     }
 
-    const applied = applyDeidentify(text, scan.findings, sessionKey);
-    if (!applied.ok) return block(scan.total_findings);
+    const protectedStrings = [...owned];
+    const newPlaceholders: string[] = [];
+    let subject = text;
+    if (emails.length > 0) {
+      const applied = applyDeidentify(text, scan.findings, sessionKey);
+      if (!applied.ok) return block(scan.total_findings);
+      subject = applied.text;
+      const alreadyQueued = new Set<string>();
+      for (const f of emails) {
+        const placeholder = placeholderFor(f.match_text as string, sessionKey);
+        protectedStrings.push(placeholder);
+        if (!issuedPlaceholders?.has(placeholder) && !alreadyQueued.has(placeholder)) {
+          alreadyQueued.add(placeholder);
+          newPlaceholders.push(placeholder);
+        }
+      }
+      // Capacity is decided BEFORE anything is issued/retained: a unit that
+      // cannot retain ownership of every new marker fails closed and consumes
+      // no quota, so a refused unit never leaves a half-registered state.
+      if (
+        issuedPlaceholders &&
+        issuedPlaceholders.size + newPlaceholders.length > ISSUED_PLACEHOLDER_LIMIT
+      ) {
+        return block(scan.total_findings);
+      }
+    }
+    const uniqueProtected = [...new Set(protectedStrings)];
 
-    const verified = redactAndVerify(applied.text, config, noDirectives);
+    const verified = redactAndVerify(subject, config, noDirectives, uniqueProtected);
     if (!verified.verified) return block(scan.total_findings);
 
-    // Independent safety check: the verifier exempts findings inside its own
-    // [REDACTED_*] marker shape, so it alone is not proof for our placeholders.
+    // Independent safety check: every detected email original must be absent
+    // from the final output (the placeholders are exempted above, so a leaked
+    // original outside a placeholder still fails here).
     const finalText = verified.redacted;
-    const rescan = scanText(finalText, config, noDirectives);
-    if (!rescan.safe) return block(scan.total_findings);
-    for (const f of scan.findings) {
-      if (isDeidentifiableEmail(f) && f.match_text && finalText.includes(f.match_text)) {
+    for (const f of emails) {
+      if (f.match_text && finalText.includes(f.match_text)) {
         return block(scan.total_findings);
       }
     }
 
+    // Commit ownership only after the whole unit succeeded, so a blocked unit
+    // never consumes registry capacity.
+    if (issuedPlaceholders) {
+      for (const placeholder of newPlaceholders) issuedPlaceholders.add(placeholder);
+    }
+
+    // Nothing changed: the unit was already safe once owned placeholders are
+    // exempted (e.g. an untouched replay). Otherwise it was redacted.
+    if (finalText === text) return { action: "allow", text, totalFindings: 0 };
     return { action: "redact", text: finalText, totalFindings: scan.total_findings };
   } catch {
     // A scanner failure must never result in the original content reaching a model.

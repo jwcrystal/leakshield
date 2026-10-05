@@ -459,4 +459,186 @@ describe("OpenCode plugin entry", () => {
     const badArgs = await (inspectTool.execute as typeof execute)({ file_id: fileId }, { sessionID: "session-1" });
     expect(badArgs.output).toEqual({ error: "Invalid arguments." });
   });
+
+  it("registers the transparent-mode hook set on the OpenCode v2 context (v2 setup)", async () => {
+    const registered: Array<{ domain: string; name: string; callback: unknown }> = [];
+    const hookFor = (domain: string) => {
+      return async (name: string, callback: unknown) => {
+        registered.push({ domain, name, callback });
+        return { dispose: async () => {} };
+      };
+    };
+    const ctx = {
+      options: { mode: "transparent" },
+      location: { directory: process.cwd() },
+      session: { hook: hookFor("session") },
+      tool: { hook: hookFor("tool") },
+      aisdk: { hook: hookFor("aisdk") },
+    };
+
+    await sensitiveGuardPlugin.setup(ctx as never);
+
+    expect(registered.map((r) => `${r.domain}:${r.name}`)).toEqual([
+      "session:context",
+      "session:compaction",
+      "session:generate",
+      "session:title",
+      "session:http.request",
+      "session:http.response",
+      "session:experimental.ws.handshake",
+      "session:experimental.ws.send",
+      "session:experimental.ws.receive",
+      "aisdk:sdk",
+      "aisdk:language",
+      "tool:execute.before",
+    ]);
+
+    // Transparent mode tokenizes the outbound snapshot instead of blocking.
+    const transparentSecret = "sk-QwertyuiopAsdfghjklZx";
+    const contextHook = registered[0].callback as (event: unknown) => Promise<void> | void;
+    const event = {
+      sessionID: "session-1",
+      system: [{ type: "text", text: `use ${transparentSecret}` }],
+      messages: [],
+      options: {},
+    };
+    await contextHook(event);
+    expect((event.system as Array<{ text: string }>)[0].text).not.toContain(transparentSecret);
+    expect((event.system as Array<{ text: string }>)[0].text).toMatch(/\[SGP1:[0-9a-f]{32}-\d{8,12}\]/);
+  });
+
+  it("fails closed on every route when transparent is combined with deidentify (v2 setup)", async () => {
+    const registered: Array<{ domain: string; name: string; callback: unknown }> = [];
+    const hookFor = (domain: string) => {
+      return async (name: string, callback: unknown) => {
+        registered.push({ domain, name, callback });
+        return { dispose: async () => {} };
+      };
+    };
+    const ctx = {
+      options: { mode: "transparent", deidentify: true },
+      location: { directory: process.cwd() },
+      session: { hook: hookFor("session") },
+      tool: { hook: hookFor("tool") },
+      aisdk: { hook: hookFor("aisdk") },
+    };
+
+    const cleanup = await sensitiveGuardPlugin.setup(ctx as never);
+
+    // Transparent fallback must cover the transport routes (http/ws/aisdk),
+    // not only the redact-mode hooks — a partial fallback leaves them open.
+    expect(registered.map((r) => `${r.domain}:${r.name}`)).toEqual([
+      "session:context",
+      "session:compaction",
+      "session:generate",
+      "session:title",
+      "session:http.request",
+      "session:http.response",
+      "session:experimental.ws.handshake",
+      "session:experimental.ws.send",
+      "session:experimental.ws.receive",
+      "aisdk:sdk",
+      "aisdk:language",
+      "tool:execute.before",
+    ]);
+    for (const record of registered) {
+      await expect((async () => record.callback({ sessionID: "s" }))()).rejects.toThrow(
+        "Sensitive Guard initialization failed",
+      );
+    }
+    expect(typeof cleanup).toBe("function");
+  });
+
+  it("fails closed on every route when transparent is combined with envQueries (v2 setup)", async () => {
+    const registered: Array<{ domain: string; name: string; callback: unknown }> = [];
+    const hookFor = (domain: string) => {
+      return async (name: string, callback: unknown) => {
+        registered.push({ domain, name, callback });
+        return { dispose: async () => {} };
+      };
+    };
+    const ctx = {
+      options: { mode: "transparent", envQueries: true },
+      location: { directory: process.cwd() },
+      session: { hook: hookFor("session") },
+      tool: { hook: hookFor("tool") },
+      aisdk: { hook: hookFor("aisdk") },
+    };
+
+    const cleanup = await sensitiveGuardPlugin.setup(ctx as never);
+
+    expect(registered).toHaveLength(12);
+    for (const record of registered) {
+      await expect((async () => record.callback({ sessionID: "s" }))()).rejects.toThrow(
+        "Sensitive Guard initialization failed",
+      );
+    }
+    expect(typeof cleanup).toBe("function");
+  });
+
+  it("fails closed across all routes when transparent config loading fails (v2 setup)", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-"));
+    temporaryDirectories.push(directory);
+    const configPath = path.join(directory, "invalid.yaml");
+    fs.writeFileSync(configPath, "settings:\n  max_chars: invalid\n", "utf8");
+
+    const registered: Array<{ domain: string; name: string; callback: unknown }> = [];
+    const hookFor = (domain: string) => {
+      return async (name: string, callback: unknown) => {
+        registered.push({ domain, name, callback });
+        return { dispose: async () => {} };
+      };
+    };
+    const ctx = {
+      options: { mode: "transparent", configPath },
+      location: { directory },
+      session: { hook: hookFor("session") },
+      tool: { hook: hookFor("tool") },
+      aisdk: { hook: hookFor("aisdk") },
+    };
+
+    const cleanup = await sensitiveGuardPlugin.setup(ctx as never);
+
+    expect(registered).toHaveLength(12);
+    const httpHook = registered.find((r) => r.name === "http.request")!.callback as (
+      event: unknown,
+    ) => Promise<void>;
+    await expect((async () => httpHook({ sessionID: "s" }))()).rejects.toThrow(
+      "Sensitive Guard initialization failed",
+    );
+    expect(typeof cleanup).toBe("function");
+  });
+
+  it("returns a disposal that releases the transparent guard registrations (v2 setup)", async () => {
+    const disposed: string[] = [];
+    const hookFor = (domain: string) => {
+      return async (name: string) => ({ dispose: async () => void disposed.push(`${domain}:${name}`) });
+    };
+    const ctx = {
+      options: { mode: "transparent" },
+      location: { directory: process.cwd() },
+      session: { hook: hookFor("session") },
+      tool: { hook: hookFor("tool") },
+      aisdk: { hook: hookFor("aisdk") },
+    };
+
+    const cleanup = await sensitiveGuardPlugin.setup(ctx as never);
+    expect(typeof cleanup).toBe("function");
+
+    await (cleanup as () => Promise<void>)();
+    expect(disposed).toHaveLength(12);
+    expect(disposed[0]).toBe("tool:execute.before");
+    expect(disposed[disposed.length - 1]).toBe("session:context");
+  });
+
+  it("fails closed when transparent is requested on the v1 server (v1 has no transport hooks)", async () => {
+    const hooks = await sensitiveGuardPlugin.server({} as never, { mode: "transparent" });
+
+    await expect(
+      hooks["chat.message"]!({ sessionID: "session-1" }, {
+        message: {} as never,
+        parts: [textPart("safe text")],
+      }),
+    ).rejects.toThrow("Sensitive Guard initialization failed");
+  });
 });

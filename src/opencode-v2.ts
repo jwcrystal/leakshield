@@ -217,8 +217,11 @@ export interface DeidentifyOptions {
   sessionKey: Buffer;
 }
 
-/** Bounded FIFO cache for per-session derived keys. */
-const SESSION_KEY_CACHE_LIMIT = 256;
+const PLACEHOLDER_SESSION_LIMIT = 256;
+const PLACEHOLDER_CAPACITY_ERROR =
+  "Sensitive Guard de-identification session capacity reached; existing placeholders remain valid. Continue in an active session.";
+
+type PlaceholderSessionState = { key: Buffer; placeholders: Set<string> };
 
 /** Creates the OpenCode v2 `setup(ctx)` implementation for the given configuration. */
 export function createV2Setup(
@@ -231,28 +234,31 @@ export function createV2Setup(
   const cache = new ContentHashCache();
   const masterKey = deidentify?.sessionKey;
 
-  // Per-session placeholder keys: every v2 hook event carries a top-level
-  // `sessionID`, so each event's protector is keyed by
-  // HMAC-SHA256(masterKey, `session:${sessionID}`) — the same value maps to
-  // the same placeholder within one session and to different placeholders
-  // across sessions. Events without a usable sessionID fall back to the
-  // master key directly (older event shapes keep working; documented).
-  const sessionKeys = new Map<string, Buffer>();
-  const keyForSession = (event: unknown): Buffer | undefined => {
+  const placeholderSessions = new Map<string, PlaceholderSessionState>();
+  const placeholderStateFor = (
+    event: unknown,
+  ): { sessionID: string; state: PlaceholderSessionState; retained: boolean } | undefined => {
     if (!masterKey) return undefined;
-    const eventSessionID =
+    const sessionID =
       isRecordLike(event) && typeof event.sessionID === "string" ? event.sessionID : "";
-    if (!eventSessionID) return masterKey;
-    let key = sessionKeys.get(eventSessionID);
-    if (!key) {
-      key = createHmac("sha256", masterKey).update(`session:${eventSessionID}`).digest();
-      if (sessionKeys.size >= SESSION_KEY_CACHE_LIMIT) {
-        const oldest = sessionKeys.keys().next().value;
-        if (oldest !== undefined) sessionKeys.delete(oldest);
-      }
-      sessionKeys.set(eventSessionID, key);
+    const retained = placeholderSessions.get(sessionID);
+    return {
+      sessionID,
+      state:
+        retained ?? {
+          key: sessionID
+            ? createHmac("sha256", masterKey).update(`session:${sessionID}`).digest()
+            : masterKey,
+          placeholders: new Set(),
+        },
+      retained: retained !== undefined,
+    };
+  };
+  const carriesOwnedPlaceholder = (text: string, placeholders: Set<string>): boolean => {
+    for (const placeholder of placeholders) {
+      if (text.includes(placeholder)) return true;
     }
-    return key;
+    return false;
   };
 
   // The plain protector: history cache composition — redact results stay
@@ -269,10 +275,27 @@ export function createV2Setup(
   // computation.
   const protectorForEvent = (event: unknown): TextProtector => {
     if (!deidentify) return baseProtector;
-    const sessionKey = keyForSession(event) ?? deidentify.sessionKey;
+    const session = placeholderStateFor(event);
+    if (!session) return baseProtector;
     return (text, currentConfig, options) => {
-      const result = deidentifyText(text, currentConfig, sessionKey, options);
-      return result.action === "allow" ? cache.protect(text, currentConfig, options) : result;
+      const result = deidentifyText(
+        text,
+        currentConfig,
+        session.state.key,
+        options,
+        session.state.placeholders,
+      );
+      if (!session.retained && session.state.placeholders.size > 0) {
+        if (placeholderSessions.size >= PLACEHOLDER_SESSION_LIMIT) {
+          throw new Error(PLACEHOLDER_CAPACITY_ERROR);
+        }
+        placeholderSessions.set(session.sessionID, session.state);
+        session.retained = true;
+      }
+      if (result.action !== "allow") return result;
+      return carriesOwnedPlaceholder(text, session.state.placeholders)
+        ? result
+        : cache.protect(text, currentConfig, options);
     };
   };
 

@@ -4,6 +4,7 @@ import {
   createSessionKey,
   deidentifyText,
   DEIDENTIFY_MARKER_PREFIX,
+  ISSUED_PLACEHOLDER_LIMIT,
   placeholderFor,
 } from "../src/decision/deidentify.js";
 import { scanText } from "../src/scanner/engine.js";
@@ -235,6 +236,62 @@ describe("email de-identification (deidentifyText)", () => {
 
     expect(result.action).toBe("block");
     expect(result.text).not.toContain("a@b.co");
+  });
+
+  it("blocks an unowned reserved marker instead of partially rewriting it", () => {
+    const sessionKey = createSessionKey();
+    const registry = new Set<string>();
+    // Never issued by this session; its hex body embeds a phone-shaped run.
+    const lookalike = "[SG-EMAIL-09469432970958a6]";
+
+    const result = deidentifyText(`x ${lookalike} y`, config, sessionKey, redactOptions, registry);
+
+    expect(result.action).toBe("block");
+    expect(result.text).not.toContain(lookalike);
+    expect(result.text).not.toContain("[REDACTED_");
+  });
+
+  it("fails closed instead of issuing a marker beyond the registry capacity", () => {
+    const sessionKey = createSessionKey();
+    const registry = new Set<string>();
+    for (let index = 0; index < ISSUED_PLACEHOLDER_LIMIT; index++) {
+      registry.add(`[SG-EMAIL-${index.toString(16).padStart(16, "0")}]`);
+    }
+
+    const result = deidentifyText("mail alice@example.com now", config, sessionKey, redactOptions, registry);
+
+    expect(result.action).toBe("block");
+    expect(result.text).not.toContain("alice@example.com");
+  });
+
+  it("does not consume registry capacity when the unit is blocked", () => {
+    const sessionKey = createSessionKey();
+    // A custom rule flags the marker shape, so verification fails and the unit
+    // blocks — but ownership must not have been retained.
+    const markerConfig: GuardConfig = {
+      ...config,
+      custom_rules: [{ description: "flags markers", pattern: "\\[SG-EMAIL-", severity: "HIGH" }],
+    };
+    const registry = new Set<string>();
+
+    const result = deidentifyText("mail alice@example.com now", markerConfig, sessionKey, redactOptions, registry);
+
+    expect(result.action).toBe("block");
+    expect(registry.size).toBe(0);
+  });
+
+  it("blocks instead of half-registering when the unit would exceed the registry", () => {
+    const sessionKey = createSessionKey();
+    const registry = new Set<string>();
+    for (let index = 0; index < ISSUED_PLACEHOLDER_LIMIT - 1; index++) {
+      registry.add(`[SG-EMAIL-${index.toString(16).padStart(16, "0")}]`);
+    }
+
+    // Two new addresses cannot both be retained, so nothing is registered.
+    const result = deidentifyText("mail a@b.co and c@d.co now", config, sessionKey, redactOptions, registry);
+
+    expect(result.action).toBe("block");
+    expect(registry.size).toBe(ISSUED_PLACEHOLDER_LIMIT - 1);
   });
 });
 

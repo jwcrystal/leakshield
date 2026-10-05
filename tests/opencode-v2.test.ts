@@ -239,6 +239,112 @@ describe("OpenCode v2 plugin — email de-identification", () => {
     expect(placeholders.filter((p) => p !== alicePlaceholder)).toHaveLength(1);
   });
 
+  it("keeps issued placeholders intact when their hex body contains a phone-shaped run (fixed keys)", async () => {
+    // Deterministic keys whose Bob placeholder body embeds a Taiwan phone run
+    // (…0933589727… / …0946943297…). Before the fix, final redaction replaced
+    // that run inside the placeholder, breaking the [SG-EMAIL-<16hex>] grammar.
+    const fixedKeys = [
+      Buffer.concat([Buffer.alloc(30), Buffer.from([0x02, 0x01])]),
+      createHash("sha256").update("oracle-deidentify-204").digest(),
+    ];
+    for (const sessionKey of fixedKeys) {
+      const hooks = await loadHooks(createV2Setup(config, "redact", { sessionKey }));
+      const event = {
+        prompt: { text: `Email ${emailA} twice: ${emailA} and ${emailB} once.`, files: [] },
+      };
+
+      await findHook(hooks, "session:prompt")(event);
+
+      const text = event.prompt.text;
+      expect(text).not.toContain(emailA);
+      expect(text).not.toContain(emailB);
+      // No residual redaction marker inside the issued placeholder.
+      expect(text).not.toContain("[REDACTED_");
+      const alicePlaceholder = placeholderFor(emailA, sessionKey);
+      const bobPlaceholder = placeholderFor(emailB, sessionKey);
+      expect(bobPlaceholder).toMatch(/^\[SG-EMAIL-[0-9a-f]{16}\]$/);
+      const placeholders = text.match(/\[SG-EMAIL-[0-9a-f]{16}\]/g) ?? [];
+      expect(placeholders).toHaveLength(3);
+      expect(placeholders.filter((p) => p !== alicePlaceholder)).toHaveLength(1);
+      expect(placeholders.filter((p) => p === alicePlaceholder)).toHaveLength(2);
+      expect(text).toContain(bobPlaceholder);
+    }
+  });
+
+  it("preserves issued placeholders across prompt-to-context replay (fixed keys)", async () => {
+    const fixedKeys = [
+      Buffer.concat([Buffer.alloc(30), Buffer.from([0x02, 0x01])]),
+      createHash("sha256").update("oracle-deidentify-204").digest(),
+    ];
+    for (const sessionKey of fixedKeys) {
+      const hooks = await loadHooks(createV2Setup(config, "redact", { sessionKey }));
+
+      // Prompt admission issues the placeholder (no sessionID → master key).
+      const promptEvent = { prompt: { text: `reach ${emailB} now`, files: [] } };
+      await findHook(hooks, "session:prompt")(promptEvent);
+      const issued = placeholderFor(emailB, sessionKey);
+      expect(promptEvent.prompt.text).toContain(issued);
+
+      // The locally restored prompt text is replayed outbound via context.
+      const contextEvent = {
+        system: [{ type: "text", text: "system prompt" }],
+        messages: [
+          { role: "assistant", content: [{ type: "text", text: promptEvent.prompt.text }] },
+        ],
+        options: {},
+      };
+      await findHook(hooks, "session:context")(contextEvent);
+
+      const serialized = JSON.stringify(contextEvent);
+      expect(serialized).toContain(issued);
+      expect(serialized).not.toContain("[REDACTED_");
+      expect(serialized).not.toContain(emailB);
+    }
+  });
+
+  it("rejects unissued marker-shaped lookalikes instead of rewriting them", async () => {
+    const sessionKey = createHash("sha256").update("oracle-deidentify-204").digest();
+    // A marker-shaped string that this session never issued (its hex body
+    // embeds a phone-shaped run) must not be silently rewritten or exempted.
+    const lookalike = "[SG-EMAIL-09469432970958a6]";
+    const hooks = await loadHooks(createV2Setup(config, "redact", { sessionKey }));
+    const contextEvent = {
+      system: [{ type: "text", text: `x ${lookalike} y` }],
+      messages: [],
+      options: {},
+    };
+    await findHook(hooks, "session:context")(contextEvent);
+
+    const serialized = JSON.stringify(contextEvent);
+    expect(serialized).not.toContain(lookalike);
+    expect(serialized).not.toContain("[REDACTED_");
+    expect(serialized).toContain("Sensitive Guard blocked");
+  });
+
+  it("rejects a placeholder issued in another session", async () => {
+    const sessionKey = createHash("sha256").update("oracle-deidentify-204").digest();
+    const hooks = await loadHooks(createV2Setup(config, "redact", { sessionKey }));
+
+    // Issued in the (no-sessionID) master bucket; its hex body embeds a phone run.
+    const promptEvent = { prompt: { text: `reach ${emailB} now`, files: [] } };
+    await findHook(hooks, "session:prompt")(promptEvent);
+    const issued = placeholderFor(emailB, sessionKey);
+    expect(issued).toBe("[SG-EMAIL-09469432970958a6]");
+
+    // Replayed under a different session identity: the master bucket is not owned.
+    const contextEvent = {
+      sessionID: "session-b",
+      system: [{ type: "text", text: `x ${issued} y` }],
+      messages: [],
+      options: {},
+    };
+    await findHook(hooks, "session:context")(contextEvent);
+
+    const serialized = JSON.stringify(contextEvent);
+    expect(serialized).not.toContain(issued);
+    expect(serialized).toContain("Sensitive Guard blocked");
+  });
+
   it("uses the same placeholder for the same email across prompt and tool output hooks", async () => {
     const sessionKey = createSessionKey();
     const hooks = await loadHooks(createV2Setup(config, "redact", { sessionKey }));
@@ -306,6 +412,39 @@ describe("OpenCode v2 plugin — email de-identification", () => {
     expect(p1).not.toBe(p2);
     expect(s1Again).toContain(p1);
     expect(s1Again).not.toContain(p2);
+  });
+
+  it("preserves live placeholder ownership when the session registry is full", async () => {
+    const sessionKey = createSessionKey();
+    const hooks = await loadHooks(createV2Setup(config, "redact", { sessionKey }));
+    const firstSession = "live-session-0";
+    const firstKey = createHmac("sha256", sessionKey).update(`session:${firstSession}`).digest();
+    const firstPlaceholder = placeholderFor(emailA, firstKey);
+
+    for (let index = 0; index < 256; index++) {
+      const event = {
+        sessionID: `live-session-${index}`,
+        prompt: { text: `reach ${emailA} now`, files: [] },
+      };
+      await findHook(hooks, "session:prompt")(event);
+    }
+
+    const rejected = {
+      sessionID: "live-session-over-capacity",
+      prompt: { text: `reach ${emailB} now`, files: [] },
+    };
+    await expect((async () => findHook(hooks, "session:prompt")(rejected))()).rejects.toThrow(
+      "Sensitive Guard de-identification session capacity reached",
+    );
+
+    const replay = {
+      sessionID: firstSession,
+      system: [{ type: "text", text: `known ${firstPlaceholder}` }],
+      messages: [],
+      options: {},
+    };
+    await findHook(hooks, "session:context")(replay);
+    expect(replay.system[0].text).toBe(`known ${firstPlaceholder}`);
   });
 
   it("falls back to the setup master key for events without a sessionID", async () => {

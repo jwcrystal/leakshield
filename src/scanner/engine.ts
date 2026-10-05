@@ -265,7 +265,30 @@ export function scanText(text: string, config: GuardConfig, opts?: ScanOptions):
 // ─── Export scanTextInternal for use by encoding.ts ─────────────────────────────
 export { scanTextInternal };
 
-export function redactText(text: string, config: GuardConfig, opts?: ScanOptions): RedactResult {
+/** A UTF-16 code-unit span, half-open [start, end). */
+export interface Utf16Span {
+  start: number;
+  end: number;
+}
+
+function overlapsSpan(start: number, end: number, spans: readonly Utf16Span[]): boolean {
+  return spans.some((span) => start < span.end && span.start < end);
+}
+
+export function redactText(
+  text: string,
+  config: GuardConfig,
+  opts?: ScanOptions,
+  /**
+   * Spans that must never be rewritten by redaction (validated issued
+   * placeholders). A match that merely OVERLAPS one of these spans is
+   * skipped, not redacted: redacting it would corrupt the protected value,
+   * and leaving it unredacted lets the verification pass report it as a
+   * crossing residual and fail closed. Only fully contained matches are
+   * exempt from residual reporting (see filterResidualFindings).
+   */
+  protectedSpans: readonly Utf16Span[] = [],
+): RedactResult {
   const truncated = text.slice(0, config.settings.max_chars);
   const allRules = getRules(config);
   const ignoredLines = honorDirectives(opts) ? getIgnoredLines(truncated) : new Set<number>();
@@ -277,6 +300,7 @@ export function redactText(text: string, config: GuardConfig, opts?: ScanOptions
     rule.pattern.lastIndex = 0;
     let match: RegExpExecArray | null;
     while ((match = rule.pattern.exec(truncated)) !== null) {
+      if (overlapsSpan(match.index, match.index + match[0].length, protectedSpans)) continue;
       const key = `${match.index}:${match[0].length}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -289,6 +313,7 @@ export function redactText(text: string, config: GuardConfig, opts?: ScanOptions
   const detector = config.exact_value_detector;
   if (detector) {
     for (const match of detector.findAll(truncated)) {
+      if (overlapsSpan(match.index, match.index + match.length, protectedSpans)) continue;
       if (matches.some((entry) => entry.index === match.index && entry.length === match.length)) continue;
       const { line } = getLineCol(truncated, match.index);
       if (ignoredLines.has(line)) continue;

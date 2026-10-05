@@ -47,6 +47,18 @@
  *                  server echoes the [SGP1:…] token back as a tool_call so the
  *                  plugin's pre-execution restoration is proved by the file the
  *                  tool writes (provider never sees the plaintext)
+ *   C14 context-file
+ *                  {mode:"transparent"} + AGENTS.md carrying canaries in the
+ *                  workdir; v2 loads instruction files into model context —
+ *                  no canary may cross the boundary in title or main requests
+ *   C15 retry-cut-stream
+ *                  {mode:"transparent"}; server cuts the SSE stream mid-reply
+ *                  on the first main request — any retry attempt must carry
+ *                  the same masking, no canary may leak on any attempt
+ *   C16 tool-error
+ *                  {mode:"transparent"}; forced read of a canary-named MISSING
+ *                  file embeds the canary in the tool error text; the
+ *                  follow-up request must carry the masked error, not the raw one
  *
  * Safety: all canaries are synthetic (example-test.invalid / sk-CANARYTEST…),
  * every case runs in a fresh workdir with XDG_DATA_HOME / XDG_STATE_HOME /
@@ -450,6 +462,82 @@ const CASES = [
       };
     },
   },
+  {
+    id: "C14-context-file",
+    description:
+      "transparent + instruction context: AGENTS.md in the workdir carries canaries; v2 loads instruction files into model context — neither title nor main requests may leak them",
+    plugins: [{ package: DIST_DIR, options: { mode: "transparent" } }],
+    prompt: "Summarize the workspace policy in one sentence.",
+    agentsFile: true,
+    expectation: (r) => {
+      if (r.canariesInProviderRequests.length > 0)
+        return { verdict: "fail", reason: "canary from AGENTS.md leaked to the provider" };
+      const tokenRequests = r.requests.filter((q) => q.markers.includes("transparentToken")).length;
+      if (tokenRequests === 0)
+        return {
+          verdict: "observe",
+          reason: "no [SGP1:… token in any request — this host version may not load AGENTS.md as context in standalone runs; inspect out/captured",
+        };
+      return {
+        verdict: "pass",
+        reason: "instruction-file canaries replaced by [SGP1:… tokens at the provider boundary",
+      };
+    },
+  },
+  {
+    id: "C15-retry-cut-stream",
+    description:
+      "transparent + transport retry: the capture server cuts the SSE stream mid-reply on the first main request; any retry attempt must carry the same masking — no canary may leak on any attempt",
+    plugins: [{ package: DIST_DIR, options: { mode: "transparent" } }],
+    prompt: CANARY_PROMPT,
+    control: { label: "C15-retry-cut-stream", cutStreamNext: true },
+    expectation: (r) => {
+      const mains = r.requests.filter((q) => q.hasTools);
+      if (r.canariesInProviderRequests.length > 0)
+        return { verdict: "fail", reason: "canary leaked on some request attempt" };
+      if (mains.length >= 2)
+        return {
+          verdict: "pass",
+          reason: `stream cut + retry: ${mains.length} main attempts, all canary-free (each retry re-masked at the wire)`,
+        };
+      if (mains.length === 1)
+        return {
+          verdict: "observe",
+          reason: "host did not retry the cut stream (surfaced the failure instead); the single attempt was canary-free",
+        };
+      return { verdict: "observe", reason: "no main request observed; inspect out/logs" };
+    },
+  },
+  {
+    id: "C16-tool-error",
+    description:
+      "transparent + tool error text: a forced read of a canary-named missing file embeds the canary in the tool error message; the follow-up request must carry a masked error, not the original",
+    plugins: [{ package: DIST_DIR, options: { mode: "transparent" } }],
+    prompt: "Read the deployment notes.",
+    control: {
+      label: "C16-tool-error",
+      toolCallNext: true,
+      toolName: "read",
+      toolArgs: { path: "notes-alice.canary@example-test.invalid.txt" },
+    },
+    expectation: (r) => {
+      const mains = r.requests.filter((q) => q.hasTools);
+      const later = mains.slice(1);
+      if (later.length === 0)
+        return {
+          verdict: "observe",
+          reason: "tool-error round-trip did not complete (no follow-up main request); inspect out/logs",
+        };
+      if (later.some((q) => q.canaries.length > 0))
+        return { verdict: "fail", reason: "canary from the tool error message reached the provider" };
+      if (later.some((q) => q.markers.includes("transparentToken")))
+        return {
+          verdict: "pass",
+          reason: "canary-bearing tool error re-masked ([SGP1:… present) before the follow-up request",
+        };
+      return { verdict: "observe", reason: "follow-up clean but no token evidence; inspect out/captured" };
+    },
+  },
 ];
 
 // ------------------------------------------------------------- utilities --
@@ -609,6 +697,13 @@ async function runCase(caseDef, port) {
     writeFileSync(
       path.join(workdir, "notes.txt"),
       `Contact list (synthetic test data):\n- alice.canary@example-test.invalid\n- bob.canary@example-test.invalid\nRotation key: sk-CANARYTEST1234567890abcdef\n`,
+    );
+  }
+  if (caseDef.agentsFile) {
+    // C14: instruction file loaded by the host as model context
+    writeFileSync(
+      path.join(workdir, "AGENTS.md"),
+      `# Workspace policy (synthetic test data)\n\n- Escalate rotation requests to alice.canary@example-test.invalid\n- Rotation key until Friday: sk-CANARYTEST1234567890abcdef\n`,
     );
   }
   let restoreFixturePath;

@@ -50,6 +50,9 @@ const state = {
   // observed (case C13).
   echoTokenNext: false,
   restorePathPrefix: "",
+  // One-shot (case C15): on the next tools-bearing request, stream a partial
+  // reply and destroy the connection — no finish chunk, no [DONE].
+  cutStreamNext: false,
 };
 
 function record(req, bodyRaw) {
@@ -168,6 +171,24 @@ function writeSseCompletion(res, parsed) {
       choices: [{ index: 0, delta, finish_reason }],
     })}\n\n`;
 
+  // Case C15 (retry): one-shot hard cut on the MAIN agent request (tools
+  // present, so title requests pass through untouched). Partial content, no
+  // finish chunk, no [DONE], socket destroyed — the client must treat it as
+  // a transport failure and retry (or surface an error). Every attempt still
+  // crosses the same wire boundary the plugin masks.
+  if (state.cutStreamNext && Array.isArray(parsed?.tools) && parsed.tools.length > 0) {
+    state.cutStreamNext = false;
+    res.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+    });
+    res.write(chunk({ role: "assistant", content: null }));
+    res.write(chunk({ content: "partial reply before the connection" }));
+    setTimeout(() => res.destroy(), 25);
+    return;
+  }
+
   res.writeHead(200, {
     "content-type": "text/event-stream",
     "cache-control": "no-cache",
@@ -257,6 +278,8 @@ const server = http.createServer(async (req, res) => {
       if (parsed.toolCallNext === false) state.toolCallNext = false;
       if (parsed.echoTokenNext === true) state.echoTokenNext = true;
       if (parsed.echoTokenNext === false) state.echoTokenNext = false;
+      if (parsed.cutStreamNext === true) state.cutStreamNext = true;
+      if (parsed.cutStreamNext === false) state.cutStreamNext = false;
       if (typeof parsed.restorePathPrefix === "string") state.restorePathPrefix = parsed.restorePathPrefix;
       return writeJson(res, 200, { ok: true, state: { ...state, toolArgs: state.toolArgs } });
     }

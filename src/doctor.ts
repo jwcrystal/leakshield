@@ -371,7 +371,8 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     checks.push({
       id: "coverage",
       state: "warn",
-      detail: "transparent mode protects OpenAI Chat-Completions-shaped requests; other protocol shapes are refused (fail-closed), not passed.",
+      detail:
+        "transparent mode protects the three OpenCode API protocols by wire shape (Chat Completions, Anthropic Messages, OpenAI Responses); built-in aisdk provider packages, WebSocket, and unknown shapes are refused (fail-closed), not passed. Attachments are replaced with an omission notice (never sent).",
     });
   }
 

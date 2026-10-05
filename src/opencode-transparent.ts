@@ -290,23 +290,45 @@ function collectStructuralStrings(event: RecordLike): string[] {
 }
 
 /**
- * Refuses media/file attachments anywhere in the snapshot: their binary or
- * base64 content cannot be safely scanned or tokenized, and a notice-style
- * substitution is not acceptable in transparent mode — the request fails.
+ * Replaces media/file attachment PARTS (array slots) with an explanatory text
+ * part: binary or base64 content cannot be scanned, so it never crosses the
+ * boundary — the conversation continues with a notice instead of the whole
+ * session failing. (2026-10-05 product decision, owner-approved; spec
+ * revised.) A media/file record found in a NON-part slot (a bare object
+ * value) is an unexpected shape and still fails closed.
  */
-function refuseUnsupportedAttachments(value: unknown, seen: WeakSet<object>): void {
-  if (value === null || typeof value !== "object") return;
-  if (seen.has(value)) return;
+const ATTACHMENT_PLACEHOLDER_TEXT =
+  "[sensitive-guard: attachment omitted — binary content is never sent to the model]";
+
+function stripUnsupportedAttachments(value: unknown, seen: WeakSet<object>): boolean {
+  if (value === null || typeof value !== "object") return false;
+  if (seen.has(value)) return false;
   seen.add(value);
+  const isAttachment = (item: unknown): boolean =>
+    isRecordLike(item) && (item.type === "media" || item.type === "file");
+  let changed = false;
   if (Array.isArray(value)) {
-    for (const item of value) refuseUnsupportedAttachments(item, seen);
-    return;
+    for (let index = 0; index < value.length; index++) {
+      const item = value[index];
+      if (isAttachment(item)) {
+        value[index] = { type: "text", text: ATTACHMENT_PLACEHOLDER_TEXT };
+        changed = true;
+      } else if (stripUnsupportedAttachments(item, seen)) {
+        changed = true;
+      }
+    }
+    return changed;
   }
   const record = value as RecordLike;
-  if (record.type === "media" || record.type === "file") {
-    throw new Error(PROTECT_FAILED_ERROR);
+  for (const key of Object.keys(record)) {
+    const item = record[key];
+    if (isAttachment(item)) {
+      // Not a parts-array slot: unexpected shape, fail closed.
+      throw new Error(PROTECT_FAILED_ERROR);
+    }
+    if (stripUnsupportedAttachments(item, seen)) changed = true;
   }
-  for (const item of Object.values(record)) refuseUnsupportedAttachments(item, seen);
+  return changed;
 }
 
 /**
@@ -568,10 +590,10 @@ export function createTransparentSessionGuard(config: GuardConfig): TransparentS
         assertPublishable(event[field], new WeakSet());
       }
     }
-    refuseUnsupportedAttachments(event.system, new WeakSet());
-    refuseUnsupportedAttachments(event.messages, new WeakSet());
-    refuseUnsupportedAttachments(event.options, new WeakSet());
-    refuseUnsupportedAttachments(event.tools, new WeakSet());
+    stripUnsupportedAttachments(event.system, new WeakSet());
+    stripUnsupportedAttachments(event.messages, new WeakSet());
+    stripUnsupportedAttachments(event.options, new WeakSet());
+    stripUnsupportedAttachments(event.tools, new WeakSet());
     const snapshot: Record<string, unknown> = {
       system: event.system,
       messages: event.messages,

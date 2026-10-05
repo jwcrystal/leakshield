@@ -312,17 +312,24 @@ describe("transparent outbound request snapshots", () => {
     }
   });
 
-  it("refuses media/file attachments with a static error, never a notice", async () => {
+  it("replaces media/file attachments with an explanatory text part (conversation survives)", async () => {
     const { hook } = await arm();
     const event = requestEvent();
-    (event.messages as Array<{ content: unknown[] }>)[0].content.push({
+    (event.messages as Array<{ content: Array<Record<string, unknown>> }>)[0].content.push({
       type: "media",
       mimeType: "image/png",
       data: "aGVsbG8=",
     });
-    const before = JSON.stringify(event);
-    await expect(hook("session:context")(event)).rejects.toThrow(PROTECT_FAILED);
-    expect(JSON.stringify(event)).toBe(before);
+    await hook("session:context")(event);
+    const content = (event.messages as Array<{ content: Array<Record<string, unknown>> }>)[0]
+      .content;
+    const last = content[content.length - 1];
+    expect(last.type).toBe("text");
+    expect(String(last.text)).toContain("attachment omitted");
+    // The binary payload must be gone from the event entirely.
+    expect(JSON.stringify(event)).not.toContain("aGVsbG8=");
+    // The surrounding text still gets masked normally.
+    expect(JSON.stringify(event)).toMatch(TOKEN_RE);
   });
 
   it("remasks restored local history on replay with the same stable token", async () => {

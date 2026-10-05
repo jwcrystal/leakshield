@@ -774,8 +774,9 @@ describe("transparent http.request wire mask", () => {
     expect(await (event.request as Request).clone().text()).toContain(FOREIGN_TOKEN);
   });
 
-  it("refuses non-chat routes and unsupported dialects (Anthropic shape)", async () => {
+  it("supports Anthropic Messages routes; refuses unsupported routes and mixed dialects", async () => {
     const { hook } = await arm();
+    // Phase 3: the Anthropic Messages wire route is now masked, not refused.
     const anthropicRoute = new Request("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -786,9 +787,9 @@ describe("transparent http.request wire mask", () => {
         max_tokens: 10,
       }),
     });
-    await expect(
-      hook("session:http.request")({ sessionID: "s", kind: "primary", request: anthropicRoute }),
-    ).rejects.toThrow();
+    // Resolving (not rejecting) is the success signal: the hook rewrites
+    // event.request in place and returns void.
+    await hook("session:http.request")({ sessionID: "s", kind: "primary", request: anthropicRoute });
 
     // A `/responses` URL is not chat completions, even with a messages body.
     const responsesRoute = new Request("https://api.openai.com/v1/responses", {

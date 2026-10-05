@@ -45,8 +45,8 @@ import {
   type PseudonymizerService,
 } from "./decision/pseudonymization.js";
 import {
-  remaskChatCompletionsRequest,
-  restoreChatCompletionsResponse,
+  remaskModelRequest,
+  restoreModelResponse,
   type TransportMaskingService,
 } from "./opencode-transparent-http.js";
 import type { GuardConfig } from "./types.js";
@@ -630,7 +630,7 @@ export function createTransparentSessionGuard(config: GuardConfig): TransparentS
     if (types.isProxy(event)) throw new Error(PROTECT_FAILED_ERROR);
     assertWritableDataProperty(event, "request");
     if (!(event.request instanceof Request)) throw new Error(PROTECT_FAILED_ERROR);
-    const request = await remaskChatCompletionsRequest(transportService, sessionID, event.request);
+    const request = await remaskModelRequest(transportService, sessionID, event.request);
     event.request = request;
     attributions.set(request, { sessionID, kind: kindOf(event) });
     track(sessionID);
@@ -650,7 +650,7 @@ export function createTransparentSessionGuard(config: GuardConfig): TransparentS
     ) {
       throw new Error(ATTRIBUTION_ERROR);
     }
-    event.response = await restoreChatCompletionsResponse(transportService, sessionID, event.response);
+    event.response = await restoreModelResponse(transportService, sessionID, event.request, event.response);
     track(sessionID);
   };
 

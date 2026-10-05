@@ -109,6 +109,31 @@ function isChatCompletionsUrl(url: string): boolean {
   }
 }
 
+/** The Anthropic Messages endpoint for this request, if any. */
+function isAnthropicMessagesUrl(url: string): boolean {
+  try {
+    return /\/messages\/?$/.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
+}
+
+/** Wire routes this module can protect, detected by URL PATH SHAPE — never by
+ * provider or model name, so any endpoint speaking a supported dialect
+ * (OpenAI-compatible gateways, Anthropic-native, …) is covered uniformly. */
+export type ModelWireRoute = "chat-completions" | "anthropic-messages";
+
+export function classifyModelRoute(url: string): ModelWireRoute | null {
+  try {
+    const pathname = new URL(url).pathname;
+    if (/\/chat\/completions\/?$/.test(pathname)) return "chat-completions";
+    if (/\/messages\/?$/.test(pathname)) return "anthropic-messages";
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** Whether a URL carries a reserved token, raw or percent-encoded. */
 function urlCarriesToken(url: string): boolean {
   if (url.includes(PSEUDONYM_TOKEN_PREFIX)) return true;
@@ -537,6 +562,193 @@ export async function remaskChatCompletionsRequest(
   return new Request(request, { body: serialized, headers });
 }
 
+// ─── Anthropic Messages request (wire dialect) ──────────────────────────────
+
+/**
+ * Validates an Anthropic Messages request body: top-level `system` (string or
+ * text blocks), `messages` with content blocks (text | tool_use |
+ * tool_result), flat `tools` ({name, description?, input_schema}). Images,
+ * documents, thinking blocks, and any unknown block type refuse — never pass
+ * tokenized or unscanned content through the wire boundary.
+ */
+function validateAnthropicSystem(system: unknown): void {
+  if (system === undefined || system === null || typeof system === "string") return;
+  if (!Array.isArray(system)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  for (const block of system) {
+    if (!isRecord(block) || block.type !== "text" || typeof block.text !== "string") {
+      throw new Error(UNSUPPORTED_REQUEST_BODY);
+    }
+  }
+}
+
+function validateAnthropicContent(content: unknown): void {
+  if (content === undefined || content === null || typeof content === "string") return;
+  if (!Array.isArray(content)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  for (const block of content) {
+    if (!isRecord(block)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+    switch (block.type) {
+      case "text":
+        if (typeof block.text !== "string") throw new Error(UNSUPPORTED_REQUEST_BODY);
+        break;
+      case "tool_use":
+        if (
+          typeof block.id !== "string" ||
+          typeof block.name !== "string" ||
+          !isRecord(block.input)
+        ) {
+          throw new Error(UNSUPPORTED_REQUEST_BODY);
+        }
+        break;
+      case "tool_result": {
+        if (typeof block.tool_use_id !== "string") throw new Error(UNSUPPORTED_REQUEST_BODY);
+        const inner = block.content;
+        if (inner === undefined || inner === null || typeof inner === "string") break;
+        if (!Array.isArray(inner)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+        for (const part of inner) {
+          // Images/documents inside tool results refuse like top-level ones.
+          if (!isRecord(part) || part.type !== "text" || typeof part.text !== "string") {
+            throw new Error(UNSUPPORTED_REQUEST_BODY);
+          }
+        }
+        break;
+      }
+      default:
+        throw new Error(UNSUPPORTED_REQUEST_BODY);
+    }
+  }
+}
+
+function validateAnthropicDialect(body: Record<string, unknown>): void {
+  validateAnthropicSystem(body.system);
+  if (body.tools !== undefined) {
+    if (!Array.isArray(body.tools)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+    for (const tool of body.tools) {
+      if (!isRecord(tool) || typeof tool.name !== "string") throw new Error(UNSUPPORTED_REQUEST_BODY);
+      if (tool.input_schema !== undefined && !isRecord(tool.input_schema)) {
+        throw new Error(UNSUPPORTED_REQUEST_BODY);
+      }
+    }
+  }
+  if (!Array.isArray(body.messages)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  for (const message of body.messages) {
+    if (!isRecord(message) || typeof message.role !== "string") {
+      throw new Error(UNSUPPORTED_REQUEST_BODY);
+    }
+    validateAnthropicContent(message.content);
+  }
+}
+
+/** Structural identifiers that must survive masking verbatim (Anthropic shape). */
+function collectAnthropicStructuralStrings(body: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  pushString(out, body.model);
+  if (Array.isArray(body.messages)) {
+    for (const message of body.messages) {
+      if (!isRecord(message)) continue;
+      pushString(out, message.role);
+      if (Array.isArray(message.content)) {
+        for (const block of message.content) {
+          if (!isRecord(block)) continue;
+          pushString(out, block.type);
+          if (block.type === "tool_use") {
+            pushString(out, block.id);
+            pushString(out, block.name);
+          }
+          if (block.type === "tool_result") pushString(out, block.tool_use_id);
+        }
+      }
+    }
+  }
+  if (Array.isArray(body.tools)) {
+    for (const tool of body.tools) {
+      if (isRecord(tool)) pushString(out, tool.name);
+    }
+  }
+  if (Array.isArray(body.stop_sequences)) {
+    for (const stop of body.stop_sequences) pushString(out, stop);
+  }
+  return out;
+}
+
+/**
+ * Remasks an Anthropic Messages JSON request body. Same contract as the
+ * chat-completions path: every check that can reject runs FIRST, then the
+ * whole body is protected in ONE transaction; a rejected request commits no
+ * mapping or session capacity. tool_use.input is already a JSON object (no
+ * string re-encoding needed) and stays tokenized on the wire; the typed tool
+ * gate restores before execution.
+ */
+export async function remaskAnthropicMessagesRequest(
+  service: TransportMaskingService,
+  sessionID: string,
+  request: Request,
+): Promise<Request> {
+  if (!isAnthropicMessagesUrl(request.url)) throw new Error(UNSUPPORTED_TRANSPORT);
+  if (urlCarriesToken(request.url)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  inspectTransportMetadata(service, request);
+  if (request.body === null) throw new Error(UNSUPPORTED_REQUEST_BODY);
+
+  const raw = await readCappedText(request, MAX_BODY_BYTES, UNSUPPORTED_REQUEST_BODY);
+  if (raw.length === 0) throw new Error(UNSUPPORTED_REQUEST_BODY);
+
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    throw new Error(UNSUPPORTED_REQUEST_BODY);
+  }
+  if (!isRecord(body)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+
+  validateAnthropicDialect(body);
+
+  const originalSerialized = JSON.stringify(body);
+
+  const structuralBefore = collectAnthropicStructuralStrings(body);
+  for (const identifier of structuralBefore) {
+    if (identifier.includes(PSEUDONYM_TOKEN_PREFIX) || service.detectSensitive(identifier)) {
+      throw new Error(UNSUPPORTED_REQUEST_BODY);
+    }
+  }
+  let unsafeNumber = false;
+  walkNumbers(body, (value) => {
+    if (service.detectSensitive(String(value))) unsafeNumber = true;
+  });
+  if (unsafeNumber) throw new Error(UNSUPPORTED_REQUEST_BODY);
+
+  const masked = service.protectJsonForModel(sessionID, body);
+  if (!masked.ok) throw new Error(MASK_FAILURE);
+  const next = masked.value;
+  if (!isRecord(next)) throw new Error(MASK_FAILURE);
+
+  const structuralAfter = collectAnthropicStructuralStrings(next);
+  if (
+    structuralAfter.length !== structuralBefore.length ||
+    structuralAfter.some((identifier, index) => identifier !== structuralBefore[index])
+  ) {
+    throw new Error(UNSUPPORTED_REQUEST_BODY);
+  }
+
+  const serialized = JSON.stringify(next);
+  if (serialized === originalSerialized) return request;
+  const headers = new Headers(request.headers);
+  headers.delete("content-encoding");
+  headers.set("content-length", String(byteLength(serialized)));
+  return new Request(request, { body: serialized, headers });
+}
+
+/** Protocol dispatcher: masks any supported wire route by URL shape. */
+export async function remaskModelRequest(
+  service: TransportMaskingService,
+  sessionID: string,
+  request: Request,
+): Promise<Request> {
+  const route = classifyModelRoute(request.url);
+  if (route === null) throw new Error(UNSUPPORTED_TRANSPORT);
+  return route === "anthropic-messages"
+    ? remaskAnthropicMessagesRequest(service, sessionID, request)
+    : remaskChatCompletionsRequest(service, sessionID, request);
+}
+
 // ─── Response restore (assistant display text only) ─────────────────────────
 
 /**
@@ -925,4 +1137,385 @@ export function createSseRestoreStream(
       return reader.cancel(reason);
     },
   });
+}
+
+// ─── Anthropic Messages response restore ────────────────────────────────────
+
+/**
+ * Token in an Anthropic response may appear ONLY in content-block text
+ * (restored below) or inside tool_use.input (deliberately kept tokenized for
+ * the typed tool gate). Anywhere else it is a stray that must refuse.
+ */
+function anthropicStrayTokenIn(body: unknown): boolean {
+  if (typeof body === "string") {
+    return body.includes(PSEUDONYM_TOKEN_PREFIX);
+  }
+  if (body === null || typeof body !== "object") return false;
+  if (Array.isArray(body)) {
+    return body.some((item) => anthropicStrayTokenIn(item));
+  }
+  const record = body as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (key.includes(PSEUDONYM_TOKEN_PREFIX)) return true;
+    const value = record[key];
+    // content[].text is restored in place before this check runs; a surviving
+    // token there was intentionally left by restore failure handling.
+    if (key === "content" && Array.isArray(value)) {
+      for (const block of value) {
+        if (!isRecord(block)) return true;
+        if (block.type === "tool_use") {
+          if (typeof block.id === "string" && block.id.includes(PSEUDONYM_TOKEN_PREFIX)) return true;
+          continue; // input stays tokenized by design
+        }
+        if (anthropicStrayTokenIn(block)) return true;
+      }
+      continue;
+    }
+    if (anthropicStrayTokenIn(value)) return true;
+  }
+  return false;
+}
+
+async function restoreAnthropicJsonResponse(
+  service: TransportMaskingService,
+  sessionID: string,
+  response: Response,
+): Promise<Response> {
+  const raw = await readCappedText(response, MAX_BODY_BYTES, UNSUPPORTED_RESPONSE);
+  if (raw.length === 0) return response;
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) throw new Error(UNSUPPORTED_RESPONSE);
+    return response;
+  }
+  if (!isRecord(body)) {
+    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) throw new Error(UNSUPPORTED_RESPONSE);
+    return response;
+  }
+  if (body.content === undefined) {
+    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) throw new Error(UNSUPPORTED_RESPONSE);
+    return response;
+  }
+  if (!Array.isArray(body.content)) throw new Error(UNSUPPORTED_RESPONSE);
+
+  let changed = false;
+  for (const block of body.content) {
+    if (!isRecord(block)) throw new Error(UNSUPPORTED_RESPONSE);
+    if (block.type === "text") {
+      if (typeof block.text !== "string") throw new Error(UNSUPPORTED_RESPONSE);
+      if (block.text.length > 0) {
+        block.text = restoreDisplayText(service, sessionID, block.text);
+        changed = true;
+      }
+    }
+    // tool_use / other blocks: input stays tokenized until the typed tool gate.
+  }
+  if (anthropicStrayTokenIn(body)) throw new Error(UNSUPPORTED_RESPONSE);
+  if (!changed) return response;
+  const next = JSON.stringify(body);
+  const headers = new Headers(response.headers);
+  headers.delete("content-encoding");
+  headers.set("content-length", String(byteLength(next)));
+  return new Response(next, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+/**
+ * Restores an Anthropic Messages SSE stream. Channel hold buffers are keyed by
+ * content-block index (tokens may split across content_block_delta events);
+ * content_block_stop requires an empty channel and marks the index terminal;
+ * message_stop requires every channel drained. input_json_delta is
+ * deliberately untouched (tool arguments restore at the typed tool gate). All
+ * framing/byte caps mirror the chat-completions stream.
+ */
+export function createAnthropicSseRestoreStream(
+  service: TransportMaskingService,
+  sessionID: string,
+  body: ReadableStream<Uint8Array>,
+): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  const encoder = new TextEncoder();
+  const channels = new Map<number, string>();
+  const terminalBlocks = new Set<number>();
+  let totalChannelBytes = 0;
+  let pending = "";
+  let pendingBytes = 0;
+  let eventLines: string[] = [];
+  let eventBytes = 0;
+  let finished = false;
+  const messageStopped = { value: false };
+
+  const setChannel = (channel: number, hold: string): void => {
+    const previous = channels.get(channel) ?? "";
+    totalChannelBytes += byteLength(hold) - byteLength(previous);
+    if (totalChannelBytes > MAX_TOTAL_CHANNEL_BYTES) throw new Error(STREAM_BUFFER_LIMIT);
+    channels.set(channel, hold);
+  };
+  const deleteChannel = (channel: number): void => {
+    const previous = channels.get(channel);
+    if (previous !== undefined) totalChannelBytes -= byteLength(previous);
+    channels.delete(channel);
+  };
+
+  const processEvent = (terminated: boolean): string => {
+    const lines = eventLines;
+    eventLines = [];
+    eventBytes = 0;
+    const framing: string[] = [];
+    const dataPayloads: string[] = [];
+    for (const rawLine of lines) {
+      const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+      if (line.startsWith("data:")) {
+        let payload = line.slice("data:".length);
+        if (payload.startsWith(" ")) payload = payload.slice(1);
+        dataPayloads.push(payload);
+      } else {
+        framing.push(line);
+      }
+    }
+    const emitPayload = (payload: string): string[] =>
+      framing.concat(payload.split("\n").map((line) => `data: ${line}`));
+
+    let outputLines: string[];
+    if (dataPayloads.length === 0) {
+      outputLines = framing;
+    } else {
+      const joined = dataPayloads.join("\n");
+      let chunk: unknown;
+      try {
+        chunk = JSON.parse(joined);
+      } catch {
+        throw new Error(MALFORMED_STREAM);
+      }
+      if (!isRecord(chunk) || typeof chunk.type !== "string") throw new Error(MALFORMED_STREAM);
+      if (messageStopped.value) throw new Error(MALFORMED_STREAM);
+
+      switch (chunk.type) {
+        case "message_start": {
+          const message = chunk.message;
+          if (isRecord(message) && Array.isArray(message.content)) {
+            for (const block of message.content) {
+              if (!isRecord(block)) throw new Error(MALFORMED_STREAM);
+              if (block.type === "text" && typeof block.text === "string" && block.text.length > 0) {
+                block.text = restoreDisplayText(service, sessionID, block.text);
+              }
+            }
+          }
+          break;
+        }
+        case "content_block_start": {
+          const index = chunk.index;
+          if (typeof index !== "number" || !Number.isInteger(index)) throw new Error(MALFORMED_STREAM);
+          if (terminalBlocks.has(index)) throw new Error(MALFORMED_STREAM);
+          const block = chunk.content_block;
+          if (!isRecord(block)) throw new Error(MALFORMED_STREAM);
+          if (block.type === "text" && typeof block.text === "string" && block.text.length > 0) {
+            const held = channels.get(index) ?? "";
+            const buffered = held + block.text;
+            const { emit, hold } = splitRestorable(buffered);
+            if (emit.length > 0) block.text = restoreDisplayText(service, sessionID, emit);
+            else block.text = "";
+            if (hold === "") deleteChannel(index);
+            else setChannel(index, hold);
+          }
+          break;
+        }
+        case "content_block_delta": {
+          const index = chunk.index;
+          if (typeof index !== "number" || !Number.isInteger(index)) throw new Error(MALFORMED_STREAM);
+          if (terminalBlocks.has(index)) throw new Error(MALFORMED_STREAM);
+          const delta = chunk.delta;
+          if (!isRecord(delta)) throw new Error(MALFORMED_STREAM);
+          if (delta.type === "text_delta") {
+            if (typeof delta.text !== "string") throw new Error(MALFORMED_STREAM);
+            const held = channels.get(index) ?? "";
+            const buffered = held + delta.text;
+            const { emit, hold } = splitRestorable(buffered);
+            delta.text = emit.length === 0 ? "" : restoreDisplayText(service, sessionID, emit);
+            if (hold === "") deleteChannel(index);
+            else setChannel(index, hold);
+          }
+          // input_json_delta / thinking_delta / signature_delta: untouched.
+          break;
+        }
+        case "content_block_stop": {
+          const index = chunk.index;
+          if (typeof index !== "number" || !Number.isInteger(index)) throw new Error(MALFORMED_STREAM);
+          if (channels.has(index)) throw new Error(MALFORMED_STREAM);
+          if (!terminalBlocks.has(index) && terminalBlocks.size >= MAX_CHANNELS) {
+            throw new Error(STREAM_BUFFER_LIMIT);
+          }
+          terminalBlocks.add(index);
+          break;
+        }
+        case "message_stop": {
+          if (channels.size !== 0) throw new Error(MALFORMED_STREAM);
+          messageStopped.value = true;
+          break;
+        }
+        default:
+          // ping / message_delta / unknown events carry no display text.
+          break;
+      }
+
+      if (anthropicChunkStrayTokenIn(chunk)) throw new Error(UNSUPPORTED_RESPONSE);
+      outputLines = emitPayload(JSON.stringify(chunk));
+    }
+    const text = outputLines.join("\n");
+    if (text.length === 0) return terminated ? "\n" : "";
+    return terminated ? `${text}\n\n` : text;
+  };
+
+  const pushLine = (line: string): void => {
+    eventBytes += byteLength(line) + 1;
+    if (eventBytes > MAX_EVENT_BYTES) throw new Error(STREAM_BUFFER_LIMIT);
+    eventLines.push(line);
+  };
+
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (finished) return;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) {
+            const tail = decoder.decode();
+            pendingBytes += byteLength(tail);
+            if (pendingBytes > MAX_PENDING_BYTES) throw new Error(STREAM_BUFFER_LIMIT);
+            pending += tail;
+            if (pending.length > 0) {
+              for (const line of pending.split("\n")) pushLine(line);
+              pending = "";
+              pendingBytes = 0;
+            }
+            let out = "";
+            if (eventLines.length > 0) out += processEvent(false);
+            if (channels.size !== 0) throw new Error(MALFORMED_STREAM);
+            finished = true;
+            if (out.length > 0) controller.enqueue(encoder.encode(out));
+            controller.close();
+            return;
+          }
+          const decoded = decoder.decode(value, { stream: true });
+          const decodedBytes = byteLength(decoded);
+          if (pendingBytes + decodedBytes > MAX_PENDING_BYTES) {
+            throw new Error(STREAM_BUFFER_LIMIT);
+          }
+          pendingBytes += decodedBytes;
+          pending += decoded;
+          let out = "";
+          let newline = pending.indexOf("\n");
+          while (newline !== -1) {
+            const line = pending.slice(0, newline);
+            pending = pending.slice(newline + 1);
+            pendingBytes -= byteLength(line) + 1;
+            if (line === "" || line === "\r") out += processEvent(true);
+            else pushLine(line);
+            newline = pending.indexOf("\n");
+          }
+          if (out.length > 0) {
+            controller.enqueue(encoder.encode(out));
+            return;
+          }
+          // No complete event yet: keep reading, bounded by the caps above.
+        }
+      } catch (error) {
+        if (finished) return;
+        finished = true;
+        controller.error(error);
+        try {
+          await reader.cancel();
+        } catch {
+          // Underlying stream is already gone; the error above is the outcome.
+        }
+      }
+    },
+    cancel(reason) {
+      finished = true;
+      return reader.cancel(reason);
+    },
+  });
+}
+
+/** Stray-token policy for one Anthropic SSE chunk: tokens may live only in
+ * text channels (already restored above) and tool_use/input_json payloads. */
+function anthropicChunkStrayTokenIn(chunk: Record<string, unknown>): boolean {
+  const check = (value: unknown, inToolPayload: boolean): boolean => {
+    if (typeof value === "string") {
+      return !inToolPayload && value.includes(PSEUDONYM_TOKEN_PREFIX);
+    }
+    if (value === null || typeof value !== "object") return false;
+    if (Array.isArray(value)) {
+      return value.some((item) => check(item, inToolPayload));
+    }
+    const record = value as Record<string, unknown>;
+    for (const key of Object.keys(record)) {
+      if (key.includes(PSEUDONYM_TOKEN_PREFIX)) return true;
+      if (key === "partial_json" || key === "input") {
+        continue; // tool-argument payloads stay tokenized by design
+      }
+      if (check(record[key], inToolPayload)) return true;
+    }
+    return false;
+  };
+  return check(chunk, false);
+}
+
+function restoreAnthropicSseResponse(
+  service: TransportMaskingService,
+  sessionID: string,
+  response: Response,
+): Response {
+  if (response.body === null) return response;
+  const headers = new Headers(response.headers);
+  headers.delete("content-encoding");
+  headers.delete("content-length");
+  const stream = createAnthropicSseRestoreStream(service, sessionID, response.body);
+  return new Response(stream, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+/**
+ * Restores assistant display text in an Anthropic Messages response. Error
+ * bodies and unsupported content types pass through only when provably free
+ * of reserved tokens; otherwise the response fails closed.
+ */
+export async function restoreAnthropicMessagesResponse(
+  service: TransportMaskingService,
+  sessionID: string,
+  response: Response,
+): Promise<Response> {
+  const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
+  const restorable = response.status >= 200 && response.status < 300;
+  if (restorable && contentType.includes("application/json")) {
+    return restoreAnthropicJsonResponse(service, sessionID, response);
+  }
+  if (restorable && contentType.includes("text/event-stream")) {
+    return restoreAnthropicSseResponse(service, sessionID, response);
+  }
+  return refuseIfTokenBearing(response);
+}
+
+/** Protocol dispatcher: restores a response using the SAME wire route the
+ * masked request used (classified by request URL shape). */
+export async function restoreModelResponse(
+  service: TransportMaskingService,
+  sessionID: string,
+  request: Request,
+  response: Response,
+): Promise<Response> {
+  const route = classifyModelRoute(request.url);
+  if (route === null) throw new Error(UNSUPPORTED_TRANSPORT);
+  return route === "anthropic-messages"
+    ? restoreAnthropicMessagesResponse(service, sessionID, response)
+    : restoreChatCompletionsResponse(service, sessionID, response);
 }

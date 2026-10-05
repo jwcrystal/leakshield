@@ -53,7 +53,7 @@ interface Harness {
   hook: (name: string) => (event: unknown) => Promise<unknown> | unknown;
 }
 
-async function arm(config: GuardConfig = baseConfig): Promise<Harness> {
+async function arm(config: GuardConfig = baseConfig, attachmentsPolicy: "block" | "allow" = "block"): Promise<Harness> {
   const registered: RecordedHook[] = [];
   const disposed: string[] = [];
   const hookFor = (domain: string) => {
@@ -67,7 +67,7 @@ async function arm(config: GuardConfig = baseConfig): Promise<Harness> {
     tool: { hook: hookFor("tool") },
     aisdk: { hook: hookFor("aisdk") },
   };
-  const guard = createTransparentSessionGuard(config);
+  const guard = createTransparentSessionGuard(config, attachmentsPolicy);
   await guard.setup(ctx as never);
   const hook = (name: string) => {
     const hit = registered.find((r) => `${r.domain}:${r.name}` === name);
@@ -1810,5 +1810,61 @@ describe("transparent unsupported routes", () => {
         hook(name)({ sessionID: "session-1", kind: "primary", url: "wss://x", frame: "{}" }),
       ).rejects.toThrow(UNSUPPORTED_ROUTE);
     }
+  });
+});
+
+describe("attachment policy: allow", () => {
+  it("schema rejects attachments allow outside transparent mode", async () => {
+    const { validatePluginOptions } = await import("../src/plugin-options.js");
+    const bad = validatePluginOptions({ mode: "redact", attachments: "allow" });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error).toContain('attachments "allow"');
+    const good = validatePluginOptions({ mode: "transparent", attachments: "allow" });
+    expect(good.ok).toBe(true);
+  });
+
+  it("session layer keeps attachments and appends a visible notice", async () => {
+    const { hook } = await arm(baseConfig, "allow");
+    const event = requestEvent();
+    (event.messages as Array<{ content: Array<Record<string, unknown>> }>)[0].content.push({
+      type: "media",
+      mimeType: "image/png",
+      data: "aGVsbG8=",
+    });
+    await hook("session:context")(event);
+    const serialized = JSON.stringify(event);
+    expect(serialized).toContain("aGVsbG8="); // attachment intact
+    expect(serialized).toContain("allowed through unscanned"); // visible notice
+    expect(serialized).toMatch(TOKEN_RE); // surrounding text still masked
+  });
+
+  it("wire layer sends the media part verbatim and masks surrounding text", async () => {
+    const { hook } = await arm(baseConfig, "allow");
+    const event = {
+      sessionID: "s",
+      kind: "primary",
+      request: chatRequest({
+        model: "m",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: `secret ${KEY} inline` },
+              { type: "media", mimeType: "image/png", data: "aGVsbG8=" },
+            ],
+          },
+        ],
+      }),
+    };
+    await hook("session:http.request")(event);
+    const body = JSON.parse(await (event.request as Request).clone().text());
+    const content = body.messages[0].content;
+    expect(content).toHaveLength(2);
+    expect(content[0].type).toBe("text");
+    expect(content[0].text).not.toContain(KEY);
+    expect(content[0].text).toMatch(TOKEN_RE);
+    expect(content[1].type).toBe("media");
+    expect(content[1].data).toBe("aGVsbG8="); // binary untouched
+    expect(JSON.stringify(body)).not.toContain("__sg_opaque_attachment");
   });
 });

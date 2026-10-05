@@ -30,7 +30,7 @@ interface RecordedHook {
   callback: (event: unknown) => unknown;
 }
 
-async function arm(config: GuardConfig = baseConfig) {
+async function arm(config: GuardConfig = baseConfig, attachmentsPolicy: "block" | "allow" = "block") {
   const registered: RecordedHook[] = [];
   const hookFor = (domain: string) => {
     return async (name: string, callback: unknown) => {
@@ -43,7 +43,7 @@ async function arm(config: GuardConfig = baseConfig) {
     aisdk: { hook: hookFor("aisdk") },
     tool: { hook: hookFor("tool") },
   };
-  const guard = createTransparentSessionGuard(config);
+  const guard = createTransparentSessionGuard(config, attachmentsPolicy);
   await guard.setup(ctx as never);
   const hook = (name: string) => {
     const record = registered.find((r) => `${r.domain}:${r.name}` === name);
@@ -213,5 +213,36 @@ describe("openai responses http.response restore", () => {
     expect(deltas).toBe(`the key is ${KEY} ok`);
     // function_call_arguments payload survives verbatim for the tool gate
     expect(text).toContain(`"delta":"{\\"token\\":\\"${token}\\"}"`);
+  });
+});
+
+describe("responses attachment policy: allow", () => {
+  it("wire layer sends media parts verbatim and masks input_text", async () => {
+    const { hook } = await arm(baseConfig, "allow");
+    const event = {
+      sessionID: "s",
+      kind: "primary",
+      request: responsesRequest({
+        model: "gpt-response",
+        input: [
+          {
+            type: "message",
+            role: "user",
+            content: [
+              { type: "input_text", text: `key ${KEY}` },
+              { type: "media", mimeType: "image/png", data: "aGVsbG8=" },
+            ],
+          },
+        ],
+      }),
+    };
+    await hook("session:http.request")(event);
+    const body = JSON.parse(await (event.request as Request).clone().text());
+    const parts = body.input[0].content;
+    expect(parts[0].type).toBe("input_text");
+    expect(parts[0].text).not.toContain(KEY);
+    expect(parts[0].text).toMatch(TOKEN_RE);
+    expect(parts[1].type).toBe("media");
+    expect(parts[1].data).toBe("aGVsbG8=");
   });
 });

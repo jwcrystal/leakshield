@@ -300,7 +300,23 @@ function collectStructuralStrings(event: RecordLike): string[] {
 const ATTACHMENT_PLACEHOLDER_TEXT =
   "[sensitive-guard: attachment omitted — binary content is never sent to the model]";
 
-function stripUnsupportedAttachments(value: unknown, seen: WeakSet<object>): boolean {
+const ATTACHMENT_ALLOW_NOTICE_TEXT =
+  "[sensitive-guard: attachment(s) allowed through unscanned per configuration — the user vouches for their content]";
+
+/**
+ * Applies the attachment policy to a live event field.
+ * "block": media/file parts in part arrays become omission-notice text parts
+ * (the attachment is not sent; the conversation continues).
+ * "allow": parts are left intact and ONE notice text part is appended to the
+ * field so the choice stays visible to the user and the model.
+ * A media/file record in a non-part slot (a bare object value) is an
+ * unexpected shape and fails closed in BOTH policies.
+ */
+function applyAttachmentPolicy(
+  value: unknown,
+  seen: WeakSet<object>,
+  policy: "block" | "allow",
+): boolean {
   if (value === null || typeof value !== "object") return false;
   if (seen.has(value)) return false;
   seen.add(value);
@@ -311,9 +327,12 @@ function stripUnsupportedAttachments(value: unknown, seen: WeakSet<object>): boo
     for (let index = 0; index < value.length; index++) {
       const item = value[index];
       if (isAttachment(item)) {
-        value[index] = { type: "text", text: ATTACHMENT_PLACEHOLDER_TEXT };
-        changed = true;
-      } else if (stripUnsupportedAttachments(item, seen)) {
+        if (policy === "block") {
+          value[index] = { type: "text", text: ATTACHMENT_PLACEHOLDER_TEXT };
+          changed = true;
+        }
+        // allow mode: leave the attachment intact; the caller appends the notice.
+      } else if (applyAttachmentPolicy(item, seen, policy)) {
         changed = true;
       }
     }
@@ -326,9 +345,41 @@ function stripUnsupportedAttachments(value: unknown, seen: WeakSet<object>): boo
       // Not a parts-array slot: unexpected shape, fail closed.
       throw new Error(PROTECT_FAILED_ERROR);
     }
-    if (stripUnsupportedAttachments(item, seen)) changed = true;
+    if (applyAttachmentPolicy(item, seen, policy)) changed = true;
   }
   return changed;
+}
+
+/** Appends ONE visible notice when allow-mode attachments are present. */
+function appendAllowNotice(event: RecordLike, found: boolean): void {
+  if (!found) return;
+  const messages = event.messages;
+  if (!Array.isArray(messages) || messages.length === 0) return;
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (!isRecordLike(message) || !Array.isArray(message.content)) continue;
+    message.content.push({ type: "text", text: ATTACHMENT_ALLOW_NOTICE_TEXT });
+    return;
+  }
+}
+
+function hasAttachmentPart(value: unknown, seen: WeakSet<object>): boolean {
+  if (value === null || typeof value !== "object") return false;
+  if (seen.has(value)) return false;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.some(
+      (item) =>
+        (isRecordLike(item) && (item.type === "media" || item.type === "file")) ||
+        hasAttachmentPart(item, seen),
+    );
+  }
+  const record = value as RecordLike;
+  return Object.values(record).some(
+    (item) =>
+      (isRecordLike(item) && (item.type === "media" || item.type === "file")) ||
+      hasAttachmentPart(item, seen),
+  );
 }
 
 /**
@@ -425,7 +476,10 @@ export function createFailClosedTransparentGuard(): TransparentSessionGuard {
  * process): a single bounded pseudonymizer, exact-session mapping, private
  * request attribution, and its own registrations.
  */
-export function createTransparentSessionGuard(config: GuardConfig): TransparentSessionGuard {
+export function createTransparentSessionGuard(
+  config: GuardConfig,
+  attachmentsPolicy: "block" | "allow" = "block",
+): TransparentSessionGuard {
   const created = createPseudonymizer(config);
   if (!created.ok) return createFailClosedTransparentGuard();
   const pseudonymizer: PseudonymizerService = created;
@@ -481,6 +535,7 @@ export function createTransparentSessionGuard(config: GuardConfig): TransparentS
     restoreText: (sid, text) => pseudonymizer.restoreText(sid, text),
     restoreTextForDisplay: (sid, text) => pseudonymizer.restoreTextForDisplay(sid, text),
     detectSensitive,
+    attachmentsPolicy,
   };
 
   /**
@@ -590,10 +645,14 @@ export function createTransparentSessionGuard(config: GuardConfig): TransparentS
         assertPublishable(event[field], new WeakSet());
       }
     }
-    stripUnsupportedAttachments(event.system, new WeakSet());
-    stripUnsupportedAttachments(event.messages, new WeakSet());
-    stripUnsupportedAttachments(event.options, new WeakSet());
-    stripUnsupportedAttachments(event.tools, new WeakSet());
+    const allowFound =
+      attachmentsPolicy === "allow" &&
+      ["system", "messages", "options", "tools"].some((field) => hasAttachmentPart(event[field], new WeakSet()));
+    applyAttachmentPolicy(event.system, new WeakSet(), attachmentsPolicy);
+    applyAttachmentPolicy(event.messages, new WeakSet(), attachmentsPolicy);
+    applyAttachmentPolicy(event.options, new WeakSet(), attachmentsPolicy);
+    applyAttachmentPolicy(event.tools, new WeakSet(), attachmentsPolicy);
+    if (attachmentsPolicy === "allow") appendAllowNotice(event, allowFound);
     const snapshot: Record<string, unknown> = {
       system: event.system,
       messages: event.messages,

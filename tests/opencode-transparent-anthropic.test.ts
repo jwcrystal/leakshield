@@ -33,7 +33,7 @@ interface RecordedHook {
   callback: (event: unknown) => unknown;
 }
 
-async function arm(config: GuardConfig = baseConfig) {
+async function arm(config: GuardConfig = baseConfig, attachmentsPolicy: "block" | "allow" = "block") {
   const registered: RecordedHook[] = [];
   const hookFor = (domain: string) => {
     return async (name: string, callback: unknown) => {
@@ -46,7 +46,7 @@ async function arm(config: GuardConfig = baseConfig) {
     aisdk: { hook: hookFor("aisdk") },
     tool: { hook: hookFor("tool") },
   };
-  const guard = createTransparentSessionGuard(config);
+  const guard = createTransparentSessionGuard(config, attachmentsPolicy);
   await guard.setup(ctx as never);
   const hook = (name: string) => {
     const record = registered.find((r) => `${r.domain}:${r.name}` === name);
@@ -284,5 +284,36 @@ describe("anthropic messages http.response restore", () => {
     expect(textDeltas).toBe(`the key is ${KEY} ok`);
     // input_json_delta payload survives verbatim for the typed tool gate
     expect(text).toContain(`"partial_json":"{\\"token\\":\\"${token}\\"}"`);
+  });
+});
+
+describe("anthropic attachment policy: allow", () => {
+  it("wire layer sends image blocks verbatim and masks text blocks", async () => {
+    const { hook } = await arm(baseConfig, "allow");
+    const event = {
+      sessionID: "s",
+      kind: "primary",
+      request: anthropicRequest({
+        model: "claude-3",
+        max_tokens: 8,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: `key ${KEY}` },
+              { type: "media", mimeType: "image/png", data: "aGVsbG8=" },
+            ],
+          },
+        ],
+      }),
+    };
+    await hook("session:http.request")(event);
+    const body = JSON.parse(await (event.request as Request).clone().text());
+    const blocks = body.messages[0].content;
+    expect(blocks[0].type).toBe("text");
+    expect(blocks[0].text).not.toContain(KEY);
+    expect(blocks[0].text).toMatch(TOKEN_RE);
+    expect(blocks[1].type).toBe("media");
+    expect(blocks[1].data).toBe("aGVsbG8=");
   });
 });

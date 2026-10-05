@@ -208,6 +208,6 @@ describe("runDoctor", () => {
       config: (tmp) => ({ plugins: [{ package: distRef(tmp), options: { mode: "transparent" } }] }),
     });
     const report = await runDoctor(deps);
-    expect(report.checks.find((c) => c.id === "coverage")?.detail).toContain("Chat-Completions");
+    expect(report.checks.find((c) => c.id === "coverage")?.detail).toContain("Chat Completions");
   });
 });

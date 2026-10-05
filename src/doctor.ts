@@ -322,7 +322,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   checks.push({
     id: "options",
     state: "ok",
-    detail: `mode=${options.mode}${options.deidentify ? " +deidentify" : ""}${options.envQueries ? " +envQueries" : ""}${options.configPath ? ` configPath=${options.configPath}` : ""}`,
+    detail: `mode=${options.mode}${options.attachments === "allow" ? " attachments=allow" : ""}${options.deidentify ? " +deidentify" : ""}${options.envQueries ? " +envQueries" : ""}${options.configPath ? ` configPath=${options.configPath}` : ""}`,
   });
 
   // Guard config load
@@ -371,8 +371,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     checks.push({
       id: "coverage",
       state: "warn",
-      detail:
-        "transparent mode protects the three OpenCode API protocols by wire shape (Chat Completions, Anthropic Messages, OpenAI Responses); built-in aisdk provider packages, WebSocket, and unknown shapes are refused (fail-closed), not passed. Attachments are replaced with an omission notice (never sent).",
+      detail: `transparent mode protects the three OpenCode API protocols by wire shape (Chat Completions, Anthropic Messages, OpenAI Responses); built-in aisdk provider packages, WebSocket, and unknown shapes are refused (fail-closed), not passed. Attachments policy: ${options.attachments === "allow" ? "ALLOW — attachments pass through unscanned with a visible notice (you vouch for their content)" : "block — replaced with an omission notice, never sent"}.`,
     });
   }
 

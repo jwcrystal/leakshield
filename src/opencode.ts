@@ -72,7 +72,7 @@ const v2Setup = async (ctx: V2PluginContext): Promise<PluginNamespace.Cleanup | 
       // transport hooks, and disposal; deidentify/envQueries combos were
       // already rejected at the option schema. The guard's dispose is returned
       // so the host can clean up registrations and mappings on unload.
-      const guard = createTransparentSessionGuard(config);
+      const guard = createTransparentSessionGuard(config, options.attachments);
       await guard.setup(ctx);
       return guard.dispose;
     }

@@ -42,6 +42,13 @@ export interface TransportMaskingService {
   restoreTextForDisplay(sessionID: string, text: string): PseudonymTextResult;
   /** Non-committing sensitivity detection: no mapping, no mutation. */
   detectSensitive(text: string): boolean;
+  /**
+   * Attachment policy: "block" (default) refuses media/file parts at the
+   * wire; "allow" tolerates them as opaque leaves that are substituted with a
+   * sentinel around the masking transaction and restored verbatim after it,
+   * so binary payloads are neither scanned nor altered.
+   */
+  readonly attachmentsPolicy?: "block" | "allow";
 }
 
 // ─── Static failure messages (no content ever included) ─────────────────────
@@ -300,6 +307,83 @@ function inspectTransportMetadata(service: TransportMaskingService, request: Req
   }
 }
 
+// ─── Attachment pass-through (allow policy) ─────────────────────────────────
+
+const OPAQUE_ATTACHMENT_SENTINEL = "__sg_opaque_attachment";
+
+/**
+ * In "allow" mode, temporarily substitutes every media/file record with a
+ * unique sentinel string around the masking transaction, then restores the
+ * originals into the protected result: binary payloads are neither scanned
+ * nor altered, and the structural checks outside this wrapper see identical
+ * attachment records before and after.
+ */
+function withOpaqueAttachments<T extends Record<string, unknown>>(
+  service: TransportMaskingService,
+  body: T,
+  fn: (input: T) => T,
+): T {
+  if (service.attachmentsPolicy !== "allow") return fn(body);
+  const originals: Array<Record<string, unknown>> = [];
+  let counter = 0;
+  const isAttachmentRecord = (item: unknown): item is Record<string, unknown> =>
+    isRecord(item) && (item.type === "media" || item.type === "file");
+  const substitute = (value: unknown): void => {
+    if (value === null || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      for (let index = 0; index < value.length; index++) {
+        const item = value[index];
+        if (isAttachmentRecord(item)) {
+          originals.push(item);
+          value[index] = `${OPAQUE_ATTACHMENT_SENTINEL}_${counter++}`;
+        } else substitute(item);
+      }
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    for (const key of Object.keys(record)) {
+      const item = record[key];
+      if (isAttachmentRecord(item)) {
+        originals.push(item);
+        record[key] = `${OPAQUE_ATTACHMENT_SENTINEL}_${counter++}`;
+      } else substitute(item);
+    }
+  };
+  substitute(body);
+  const result = fn(body);
+  const sentinelRe = new RegExp(`^${OPAQUE_ATTACHMENT_SENTINEL}_\\d+$`);
+  let restoreIndex = 0;
+  const restore = (value: unknown): void => {
+    if (value === null || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      for (let index = 0; index < value.length; index++) {
+        const item = value[index];
+        if (typeof item === "string" && sentinelRe.test(item)) {
+          if (restoreIndex >= originals.length) throw new Error(MASK_FAILURE);
+          value[index] = originals[restoreIndex++];
+        } else restore(item);
+      }
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    for (const key of Object.keys(record)) {
+      const item = record[key];
+      if (typeof item === "string" && sentinelRe.test(item)) {
+        if (restoreIndex >= originals.length) throw new Error(MASK_FAILURE);
+        record[key] = originals[restoreIndex++];
+      } else restore(item);
+    }
+  };
+  restore(result);
+  if (restoreIndex !== originals.length) throw new Error(MASK_FAILURE);
+  return result;
+}
+
+/** True when the policy tolerates media/file parts as opaque leaves. */
+function attachmentsAllowed(service: TransportMaskingService): boolean {
+  return service.attachmentsPolicy === "allow";
+}
+
 // ─── Request validation (runs before any issuance) ──────────────────────────
 
 function validateDialect(body: Record<string, unknown>): void {
@@ -316,7 +400,7 @@ function validateDialect(body: Record<string, unknown>): void {
   }
 }
 
-function validateMessages(body: Record<string, unknown>): void {
+function validateMessages(body: Record<string, unknown>, allowAttachments: boolean): void {
   if (!Array.isArray(body.messages)) throw new Error(UNSUPPORTED_REQUEST_BODY);
   for (const message of body.messages) {
     if (!isRecord(message) || typeof message.role !== "string") {
@@ -327,7 +411,11 @@ function validateMessages(body: Record<string, unknown>): void {
       if (!Array.isArray(content)) throw new Error(UNSUPPORTED_REQUEST_BODY);
       for (const part of content) {
         // Attachments and foreign part types must refuse, never pass tokenized
-        // or unscanned content through the wire boundary.
+        // or unscanned content through the wire boundary — unless the user
+        // explicitly chose the "allow" policy (visible, unscanned pass-through).
+        if (allowAttachments && isRecord(part) && (part.type === "media" || part.type === "file")) {
+          continue;
+        }
         if (!isRecord(part) || part.type !== "text" || typeof part.text !== "string") {
           throw new Error(UNSUPPORTED_REQUEST_BODY);
         }
@@ -475,7 +563,7 @@ export async function remaskChatCompletionsRequest(
   if (!isRecord(body)) throw new Error(UNSUPPORTED_REQUEST_BODY);
 
   validateDialect(body);
-  validateMessages(body);
+  validateMessages(body, attachmentsAllowed(service));
 
   // Capture the original wire shape BEFORE transforming tool arguments, so a
   // no-op protection still returns the ORIGINAL request untouched.
@@ -532,10 +620,13 @@ export async function remaskChatCompletionsRequest(
   if (unsafeNumber) throw new Error(UNSUPPORTED_REQUEST_BODY);
 
   // Atomic protection: one transaction over the whole body.
-  const masked = service.protectJsonForModel(sessionID, body);
-  if (!masked.ok) throw new Error(MASK_FAILURE);
-  const next = masked.value;
-  if (!isRecord(next)) throw new Error(MASK_FAILURE);
+  const next = withOpaqueAttachments(service, body, (input) => {
+    const masked = service.protectJsonForModel(sessionID, input);
+    if (!masked.ok) throw new Error(MASK_FAILURE);
+    const value = masked.value;
+    if (!isRecord(value)) throw new Error(MASK_FAILURE);
+    return value as Record<string, unknown>;
+  });
 
   // Defense in depth: no structural identifier may have changed.
   const structuralAfter = collectWireStructuralStrings(next);
@@ -591,11 +682,12 @@ function validateAnthropicSystem(system: unknown): void {
   }
 }
 
-function validateAnthropicContent(content: unknown): void {
+function validateAnthropicContent(content: unknown, allowAttachments: boolean): void {
   if (content === undefined || content === null || typeof content === "string") return;
   if (!Array.isArray(content)) throw new Error(UNSUPPORTED_REQUEST_BODY);
   for (const block of content) {
     if (!isRecord(block)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+    if (allowAttachments && (block.type === "media" || block.type === "file")) continue;
     switch (block.type) {
       case "text":
         if (typeof block.text !== "string") throw new Error(UNSUPPORTED_REQUEST_BODY);
@@ -615,7 +707,11 @@ function validateAnthropicContent(content: unknown): void {
         if (inner === undefined || inner === null || typeof inner === "string") break;
         if (!Array.isArray(inner)) throw new Error(UNSUPPORTED_REQUEST_BODY);
         for (const part of inner) {
-          // Images/documents inside tool results refuse like top-level ones.
+          // Images/documents inside tool results refuse like top-level ones,
+          // unless the user explicitly chose the "allow" policy.
+          if (allowAttachments && isRecord(part) && (part.type === "media" || part.type === "file")) {
+            continue;
+          }
           if (!isRecord(part) || part.type !== "text" || typeof part.text !== "string") {
             throw new Error(UNSUPPORTED_REQUEST_BODY);
           }
@@ -628,7 +724,7 @@ function validateAnthropicContent(content: unknown): void {
   }
 }
 
-function validateAnthropicDialect(body: Record<string, unknown>): void {
+function validateAnthropicDialect(body: Record<string, unknown>, allowAttachments: boolean): void {
   validateAnthropicSystem(body.system);
   if (body.tools !== undefined) {
     if (!Array.isArray(body.tools)) throw new Error(UNSUPPORTED_REQUEST_BODY);
@@ -644,7 +740,7 @@ function validateAnthropicDialect(body: Record<string, unknown>): void {
     if (!isRecord(message) || typeof message.role !== "string") {
       throw new Error(UNSUPPORTED_REQUEST_BODY);
     }
-    validateAnthropicContent(message.content);
+    validateAnthropicContent(message.content, allowAttachments);
   }
 }
 
@@ -709,7 +805,7 @@ export async function remaskAnthropicMessagesRequest(
   }
   if (!isRecord(body)) throw new Error(UNSUPPORTED_REQUEST_BODY);
 
-  validateAnthropicDialect(body);
+  validateAnthropicDialect(body, attachmentsAllowed(service));
 
   const originalSerialized = JSON.stringify(body);
 
@@ -725,10 +821,13 @@ export async function remaskAnthropicMessagesRequest(
   });
   if (unsafeNumber) throw new Error(UNSUPPORTED_REQUEST_BODY);
 
-  const masked = service.protectJsonForModel(sessionID, body);
-  if (!masked.ok) throw new Error(MASK_FAILURE);
-  const next = masked.value;
-  if (!isRecord(next)) throw new Error(MASK_FAILURE);
+  const next = withOpaqueAttachments(service, body, (input) => {
+    const masked = service.protectJsonForModel(sessionID, input);
+    if (!masked.ok) throw new Error(MASK_FAILURE);
+    const value = masked.value;
+    if (!isRecord(value)) throw new Error(MASK_FAILURE);
+    return value as Record<string, unknown>;
+  });
 
   const structuralAfter = collectAnthropicStructuralStrings(next);
   if (
@@ -754,10 +853,13 @@ export async function remaskAnthropicMessagesRequest(
  * flat `tools` ({type:"function", name, parameters}). Reasoning items,
  * item references, and unknown types refuse.
  */
-function validateResponsesContentParts(content: unknown): void {
+function validateResponsesContentParts(content: unknown, allowAttachments: boolean): void {
   if (content === undefined || content === null || typeof content === "string") return;
   if (!Array.isArray(content)) throw new Error(UNSUPPORTED_REQUEST_BODY);
   for (const part of content) {
+    if (allowAttachments && isRecord(part) && (part.type === "media" || part.type === "file")) {
+      continue;
+    }
     if (
       !isRecord(part) ||
       (part.type !== "input_text" && part.type !== "output_text") ||
@@ -768,13 +870,13 @@ function validateResponsesContentParts(content: unknown): void {
   }
 }
 
-function validateResponsesInputItem(item: unknown): void {
+function validateResponsesInputItem(item: unknown, allowAttachments: boolean): void {
   if (typeof item === "string") return;
   if (!isRecord(item)) throw new Error(UNSUPPORTED_REQUEST_BODY);
   switch (item.type) {
     case "message":
       if (typeof item.role !== "string") throw new Error(UNSUPPORTED_REQUEST_BODY);
-      validateResponsesContentParts(item.content);
+      validateResponsesContentParts(item.content, allowAttachments);
       return;
     case "function_call":
       if (typeof item.name !== "string" || typeof item.arguments !== "string") {
@@ -790,7 +892,7 @@ function validateResponsesInputItem(item: unknown): void {
   }
 }
 
-function validateResponsesDialect(body: Record<string, unknown>): void {
+function validateResponsesDialect(body: Record<string, unknown>, allowAttachments: boolean): void {
   // A chat-completions/anthropic-shaped body on a /responses route is a
   // mixed dialect this masker cannot place; refuse it explicitly.
   if (body.messages !== undefined || body.system !== undefined) {
@@ -811,7 +913,7 @@ function validateResponsesDialect(body: Record<string, unknown>): void {
   if (body.input !== undefined) {
     if (typeof body.input !== "string") {
       if (!Array.isArray(body.input)) throw new Error(UNSUPPORTED_REQUEST_BODY);
-      for (const item of body.input) validateResponsesInputItem(item);
+      for (const item of body.input) validateResponsesInputItem(item, allowAttachments);
     }
   }
 }
@@ -865,7 +967,7 @@ export async function remaskResponsesRequest(
   }
   if (!isRecord(body)) throw new Error(UNSUPPORTED_REQUEST_BODY);
 
-  validateResponsesDialect(body);
+  validateResponsesDialect(body, attachmentsAllowed(service));
 
   const originalSerialized = JSON.stringify(body);
 
@@ -898,10 +1000,13 @@ export async function remaskResponsesRequest(
   });
   if (unsafeNumber) throw new Error(UNSUPPORTED_REQUEST_BODY);
 
-  const masked = service.protectJsonForModel(sessionID, body);
-  if (!masked.ok) throw new Error(MASK_FAILURE);
-  const next = masked.value;
-  if (!isRecord(next)) throw new Error(MASK_FAILURE);
+  const next = withOpaqueAttachments(service, body, (input) => {
+    const masked = service.protectJsonForModel(sessionID, input);
+    if (!masked.ok) throw new Error(MASK_FAILURE);
+    const value = masked.value;
+    if (!isRecord(value)) throw new Error(MASK_FAILURE);
+    return value as Record<string, unknown>;
+  });
 
   const structuralAfter = collectResponsesStructuralStrings(next);
   if (

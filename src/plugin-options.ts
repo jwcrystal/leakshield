@@ -19,12 +19,24 @@ export const PluginOptionsSchema = z
     deidentify: z.boolean().default(false),
     /** Opt-in readonly env query tools over `settings.env_files`. Default off. */
     envQueries: z.boolean().default(false),
+    /**
+     * Attachment policy for transparent mode. "block" (default) omits
+     * media/file parts — a notice replaces them, binary never crosses the
+     * boundary, and the conversation survives. "allow" sends attachments
+     * through unscanned with a visible notice part: an explicit,
+     * configuration-level decision by the user to vouch for their content.
+     * (DLP-standard action names: block / allow.)
+     */
+    attachments: z.enum(["block", "allow"]).default("block"),
   })
   .refine((options) => !options.deidentify || options.mode === "redact", {
     message: "deidentify requires mode 'redact'",
   })
   .refine((options) => options.mode !== "transparent" || !options.envQueries, {
     message: "envQueries is not supported in mode 'transparent'",
+  })
+  .refine((options) => options.attachments === "block" || options.mode === "transparent", {
+    message: 'attachments "allow" requires mode "transparent"',
   })
   .default({});
 

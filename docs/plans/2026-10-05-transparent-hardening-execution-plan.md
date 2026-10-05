@@ -100,6 +100,8 @@
 
 ## Phase 3：協定擴充，不綁模型名稱（優先項 3）
 
+> **2026-10-05 補註**：OpenCode v2.0.23 自訂 provider 的「API protocol」欄位**只有三個選項**：OpenAI Chat Completions（今天已支援）、OpenAI Responses、Anthropic Messages——Phase 3 完成後自訂 provider 協定即 100% 覆蓋。另：host 內建數十個 `@opencode/ai/providers/*` 套件（google、bedrock、cohere…）各有原生協定、走 `aisdk` 路由——transparent 模式目前在 `aisdk:sdk/language` hook **明確拒絕**（清晰報錯，非靜默放行），未來按需求評估加 adapter；這些 provider 多半也可經 openai-compatible 閘道接入（今天即可用）。
+
 **原則**：以 **body 形狀**判斷協定，非模型/provider 白名單。形狀無法辨識 → 顯式 refuse（維持現有 fail-closed）。
 
 順序：

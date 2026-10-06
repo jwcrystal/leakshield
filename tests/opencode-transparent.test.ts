@@ -2116,16 +2116,31 @@ describe("tool schema annotation prose masks instead of refusing", () => {
     expect(serialized).toMatch(TOKEN_RE);
   });
 
-  it("still refuses when a property KEY is sensitive (identifier)", async () => {
+  it("still refuses when a property KEY is the sensitive word itself (identifier)", async () => {
     const { hook } = await arm(keywordConfig);
     const event = schemaEvent({
       vault_scanner: {
-        input: { type: "object", properties: { secrets_path: { type: "string" } } },
+        input: { type: "object", properties: { secrets: { type: "string" } } },
       },
     });
     const before = JSON.stringify(event);
     await expect(hook("session:context")(event)).rejects.toThrow("scans as sensitive");
     expect(JSON.stringify(event)).toBe(before);
+  });
+
+  it("passes a compound identifier that merely contains a keyword (P2 word-boundary narrowing)", async () => {
+    const { hook } = await arm(keywordConfig);
+    // 「secrets_path」/「Foundation」are not the standalone word「secrets」/「NDA」:
+    // keyword rules match the word, not substrings inside longer identifiers
+    // (2026-10-06 live dogfood: Apple Foundation Models was masked).
+    const event = schemaEvent({
+      vault_scanner: {
+        input: { type: "object", properties: { secrets_path: { type: "string" } } },
+      },
+    });
+    await expect(hook("session:context")(event)).resolves.toBeUndefined();
+    const tools = event.tools as Record<string, unknown>;
+    expect(Object.keys(tools)).toEqual(["vault_scanner"]);
   });
 
   it("still refuses when an enum VALUE is sensitive (identifier)", async () => {
@@ -2143,13 +2158,22 @@ describe("tool schema annotation prose masks instead of refusing", () => {
     expect(JSON.stringify(event)).toBe(before);
   });
 
-  it("still refuses when the tool NAME is sensitive (identifier)", async () => {
+  it("still refuses when the tool NAME is the sensitive word itself (identifier)", async () => {
     const { hook } = await arm(keywordConfig);
     const event = schemaEvent({
-      secrets_scanner: { input: { type: "object", properties: {} } },
+      secrets: { input: { type: "object", properties: {} } },
     });
     const before = JSON.stringify(event);
     await expect(hook("session:context")(event)).rejects.toThrow("scans as sensitive");
     expect(JSON.stringify(event)).toBe(before);
+  });
+
+  it("passes a compound tool name that merely contains a keyword (P2 word-boundary narrowing)", async () => {
+    const { hook } = await arm(keywordConfig);
+    const event = schemaEvent({
+      secrets_scanner: { input: { type: "object", properties: {} } },
+    });
+    await expect(hook("session:context")(event)).resolves.toBeUndefined();
+    expect(Object.keys(event.tools as Record<string, unknown>)).toEqual(["secrets_scanner"]);
   });
 });

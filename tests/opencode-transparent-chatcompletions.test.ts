@@ -108,7 +108,7 @@ describe("chat-completions tool schema annotations on the wire", () => {
     expect(properties.path.description).not.toContain("secrets");
   });
 
-  it("still refuses when a property KEY in fn.parameters is sensitive", async () => {
+  it("still refuses when a property KEY in fn.parameters is the sensitive word itself", async () => {
     const { hook } = await arm();
     const body = {
       model: "gpt-test",
@@ -120,7 +120,9 @@ describe("chat-completions tool schema annotations on the wire", () => {
             name: "vault_scanner",
             parameters: {
               type: "object",
-              properties: { secrets_path: { type: "string" } },
+              // P2 word-boundary narrowing: the key must BE the keyword —
+              // compound keys like「secrets_path」no longer refuse.
+              properties: { secrets: { type: "string" } },
             },
           },
         },

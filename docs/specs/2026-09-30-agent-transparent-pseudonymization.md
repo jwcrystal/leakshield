@@ -2,6 +2,15 @@
 
 Status: Specification approved for publication; implementation and runtime capabilities are not yet verified.
 
+## Revision Log
+
+### 2026-10-06 (owner-approved)
+
+1. **Attachments policy (`block` / `allow`).** Transparent mode has a configurable `attachments` policy with DLP-standard action names. `"block"` (the default) replaces unsupported media/file parts with an omission-notice text part and never crosses the boundary with the binary; `"allow"` (valid only with `mode: "transparent"`) sends attachments through unscanned with a visible notice part and is an explicit configuration-level decision that the operator vouches for their content. The 2026-10-05 revision's "binary content still never crosses the boundary" applies to `"block"`; non-part-slot attachment shapes still fail closed under both policies.
+2. **New-install default and implicit-default migration deferred behind a gate.** User stories 1–3 are not delivered yet; the shipped default remains `block` and no migration mechanism exists. Transparent mode becomes the new-install default only after (a) real-provider end-to-end acceptance passes and (b) owner re-review; until that gate, README and `--doctor` continue to present `block` as the default.
+3. **Optional local NER deferred to a follow-up issue.** User stories 28–31 are not delivered in this release: no local NER ships, `--doctor` does not report NER availability, and the bilingual NER evaluation is not a release gate for this release.
+4. **Detector and workspace-coverage corrections (match the shipped implementation).** Identity coverage is regex-format only — the Traditional Chinese ID rule is not checksum-validated — and no financial format is enabled by default. Workspace secret-file support is a manual `settings.env_files` allowlist (at most 16 files, 1 MiB each, minimum value length 8, symlink containment, restart required after configuration changes); constrained automatic `.env` discovery is not implemented and is no longer claimed for this release.
+
 ## Problem Statement
 
 Sensitive Guard protects model-bound content today, but blocking or irreversible replacement can interrupt an agent's work. Users need the agent to distinguish sensitive records, use original values in permitted local tools, and present readable results without routinely sending detected sensitive values to an LLM provider.
@@ -22,7 +31,7 @@ New installations should use transparent mode by default. Existing explicit bloc
 
 ## User Stories
 
-1. As an OpenCode user, I want new plugin installations to use transparent protection by default, so that normal agent work does not require configuring each sensitive operation.
+1. As an OpenCode user, I want new plugin installations to use transparent protection by default, so that normal agent work does not require configuring each sensitive operation. *(Deferred: see the 2026-10-06 revision item 2.)*
 2. As an existing user, I want my explicitly chosen block or redact behavior preserved, so that an upgrade does not silently weaken my chosen policy.
 3. As an existing user with an implicit default, I want a clear migration notice and choice, so that credential restoration is not enabled without my awareness.
 4. As a user, I want detected sensitive values replaced before model requests, so that the provider does not need the original values to perform the task.
@@ -44,12 +53,12 @@ New installations should use transparent mode by default. Existing explicit bloc
 20. As a user, I want titles, compaction, auxiliary generation, and history replay protected as well as the main turn, so that less-visible requests do not bypass protection.
 21. As a user, I want supported streaming responses covered, so that the protection does not work only for non-streaming calls.
 22. As a user, I want credentials and known secrets protected by default, so that API keys and tokens are not excluded merely because another SDK defaults secret detection off.
-23. As a user, I want common supported structured PII protected by default, so that email, telephone, and validated financial or identity formats receive useful coverage.
+23. As a user, I want common supported structured PII protected by default, so that email, telephone, and validated financial or identity formats receive useful coverage. *(Amended: see the 2026-10-06 revision item 4.)*
 24. As a developer, I want public URLs, ordinary dates, and program symbols to remain useful unless a relevant detector or explicit rule identifies sensitive content, so that protection does not unnecessarily degrade coding tasks.
 25. As a user, I want secret values inside a URL protected even when generic URL detection is disabled, so that the URL policy is not a credential bypass.
-26. As a user, I want constrained automatic discovery of supported workspace secret files, so that known-value protection does not require manually listing every ordinary .env file.
+26. As a user, I want constrained automatic discovery of supported workspace secret files, so that known-value protection does not require manually listing every ordinary .env file. *(Amended: see the 2026-10-06 revision item 4.)*
 27. As a user, I want explicit sensitive values and custom patterns supported, so that project-specific identifiers can be protected without universal NER.
-28. As a user, I want local NER available as an optional capability, so that I can add contextual PII detection when its resource cost is acceptable.
+28. As a user, I want local NER available as an optional capability, so that I can add contextual PII detection when its resource cost is acceptable. *(Deferred: see the 2026-10-06 revision item 3.)*
 29. As a Chinese and English user, I want Traditional Chinese, Simplified Chinese, English, and mixed-text NER evaluated, so that a type name or locale hint is not mistaken for reliable language coverage.
 30. As a user, I want model download requirements and detector availability reported clearly, so that missing NER does not silently masquerade as full contextual PII protection.
 31. As a user, I want detector processing to avoid sending original text to a remote inference service by default, so that privacy detection does not create another disclosure path.
@@ -72,7 +81,7 @@ New installations should use transparent mode by default. Existing explicit bloc
 
 - Add transparent pseudonymization as a distinct mode rather than silently changing the semantics of irreversible redact or de-identify.
 - Keep the existing email de-identification trial irreversible; it remains a separate feature and historical specification.
-- Make transparent mode the new-install default. Preserve explicit legacy policies. Distinguish existing implicit-default installations before changing their behavior; define and test a practical migration mechanism before releasing the new default.
+- Make transparent mode the new-install default. Preserve explicit legacy policies. Distinguish existing implicit-default installations before changing their behavior; define and test a practical migration mechanism before releasing the new default. *(Deferred: see the 2026-10-06 revision item 2.)*
 - If reliable new-versus-existing-install detection cannot be established, require explicit adoption for ambiguous installations. Do not silently treat every omitted mode as consent to credential restoration.
 - Keep agent detector defaults separate from global scanner defaults so that CLI, CI, and Web behavior is unchanged.
 
@@ -84,7 +93,7 @@ New installations should use transparent mode by default. Existing explicit bloc
 - A provider HTTP-response hook is not a generic client-display hook. Do not claim it restores assistant text for both UIs solely because it exists.
 - Provider HTTP streaming and WebSocket transport are distinct. Enumerate and prove supported routes; do not enable an unprotected route under a blanket model-boundary guarantee.
 - Prefer one server-side integration for both clients if runtime evidence supports it. Client adaptation is permitted if necessary for automatic presentation, but strict display-only isolation is not required. Avoid unrelated client changes.
-- Every supported provider-bound request must be protected, including tool-driven continuations, restored local history, title, compaction, and auxiliary generation. Reuse the current strict boundary behavior for scan truncation, encoded content, and unscannable input rather than forwarding unchecked content. **2026-10-05 revision (owner-approved)**: unsupported attachments are no longer a hard refusal in transparent mode — media/file parts are replaced with an omission-notice text part (strip-and-notify, the mainstream DLP action); binary content still never crosses the boundary, and non-part-slot attachment shapes still fail closed.
+- Every supported provider-bound request must be protected, including tool-driven continuations, restored local history, title, compaction, and auxiliary generation. Reuse the current strict boundary behavior for scan truncation, encoded content, and unscannable input rather than forwarding unchecked content. **2026-10-05 revision (owner-approved)**: unsupported attachments are no longer a hard refusal in transparent mode — media/file parts are replaced with an omission-notice text part (strip-and-notify, the mainstream DLP action); binary content still never crosses the boundary, and non-part-slot attachment shapes still fail closed. *(Amended by the 2026-10-06 revision item 1: the never-crosses rule applies to the default `block` policy; `allow` is scan-free by explicit configuration.)*
 - In-text ignore directives must not disable model-boundary protection. Verify the actual request after interaction with other plugins; plugin ordering is part of the compatibility evidence.
 
 ### Mapping and restoration
@@ -113,11 +122,11 @@ New installations should use transparent mode by default. Existing explicit bloc
 
 ### Detector policy and dependencies
 
-- Default-enable common credential formats, known secrets, email, telephone, and validated supported financial/identity formats. Publish concrete format and region coverage rather than claiming every national identifier is covered.
+- Default-enable common credential formats, known secrets, email, telephone, and validated supported financial/identity formats. Publish concrete format and region coverage rather than claiming every national identifier is covered. *(Amended by the 2026-10-06 revision item 4.)*
 - Prioritize Taiwanese identity/telephone fixtures and common international formats; separately document supported regions. Language coverage is not the same as identifier-region coverage.
 - Do not indiscriminately enable generic URL, IP-address, date, organization, or place detection. Explicit sensitive values/custom rules may still protect such content, and credentials embedded inside URLs remain protected.
 - Distinguish a contextual date of birth from an ordinary date. An organization's NER label alone does not establish whether its name is confidential.
-- Add constrained workspace .env discovery and explicit known values using existing exact-value mechanisms. Define supported filenames, bounded discovery/loading, excluded dependency/generated directories, symlink containment, refresh/invalidation behavior, and short-value handling. Do not scan arbitrary files outside the approved workspace scope.
+- Add constrained workspace .env discovery and explicit known values using existing exact-value mechanisms. Define supported filenames, bounded discovery/loading, excluded dependency/generated directories, symlink containment, refresh/invalidation behavior, and short-value handling. Do not scan arbitrary files outside the approved workspace scope. *(Amended by the 2026-10-06 revision item 4.)*
 - Reuse current detectors where suitable. Evaluate independently usable Rehydra recognizer/NER capabilities before adding a dependency; do not install a second overlapping OpenCode plugin or commit to the entire SDK without checking its boundaries.
 - Review dependency licensing, maintenance, runtime compatibility, resource use, and whether detector APIs can be used without an unwanted parallel mapping pipeline. If unsuitable, evaluate another detector/model rather than automatically building a new NER engine.
 - Enable credential detection explicitly if a reused SDK makes it opt-in. Our defaults are product decisions, not the dependency's defaults.

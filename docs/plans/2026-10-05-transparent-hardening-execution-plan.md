@@ -3,7 +3,7 @@
 日期：2026-10-05
 性質：執行計畫（roadmap + 驗收條件）。不修改程式碼；實作另依各 Phase 開工。
 上游文件：
-- Spec：`docs/specs/2026-09-30-agent-transparent-pseudonymization.md`（目標、28 條 user stories、failure contract）
+- Spec：`docs/specs/2026-09-30-agent-transparent-pseudonymization.md`（目標、34 條 user stories、failure contract）
 - 研究：`docs/evidence/2026-10-05-provider-transport-reference-research.md`（三方參考實作、hook 名稱、未驗證清單）
 - 既有 E2E：`scripts/e2e/run-boundary.mjs`（C1–C13，含 transparent C10–C13）
 
@@ -114,7 +114,7 @@
 2. **OpenAI Responses**（`/v1/responses`：input items、function_call）
    - 注意 V2 provider options 已用語義選項（如 `reasoningEffort`），adapter 需對應新形狀
 3. **明示不支援**：WebSocket、Gemini 原生等 → refuse 訊息列原因，`status`同步顯示
-4. 附件：維持 refuse（spec 範圍內），但列入未來工作
+4. 附件：依 spec 2026-10-05 revision——`block`（預設）以 omission notice 取代、二進位不出界；`allow` 為明示未掃描放行的 opt-in；README 與 doctor 文案同步。
 
 驗收（每個協定 individually）：
 - [ ] 假名化往返：request canary → token；response token → restore

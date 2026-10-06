@@ -39,4 +39,4 @@
 
 計畫 Phase 2 的矩陣 8 格中 **7 格有 payload 級證據**（含本次新增 C14/C15/C16 三案例與 C6 對照組確立的 title 洩漏真實性）；僅 compaction 為結構論證降級。未發現任何繞過（bypass）路徑——V1 host 的 title/compaction 繞過問題（研究文件 §7.1）在 V2 未重現：V2 的 title 與 context 證據皆為實測乾淨。
 
-下一步（Phase 3 前不阻塞）：找到 compaction 確定觸發方式後補 C17 案例，將最後一格升級為已證。
+下一步（Phase 3 前不阻塞）：找到 compaction 確定觸發方式後補案例（編號 C20——C17 已用於 reply-restore，C18／C19 為 Anthropic／Responses），將最後一格升級為已證。

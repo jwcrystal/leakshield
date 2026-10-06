@@ -293,7 +293,7 @@ curl -s -X POST http://localhost:3001/scan \
 
 ### OpenCode Plugin（建議使用）
 
-OpenCode plugin 成功載入後會成為強制性整合：它會在 OpenCode 儲存或送出使用者文字給模型前掃描並攔截，清理 system prompt 與 tool definition，並在下一輪模型讀取前清理工具輸出及歷史訊息。它會固定啟用編碼內容偵測。plugin 選項或掃描設定無效時，所有受保護 hook 都會 fail closed 並中止模型請求。受限的 SHA-256 決策快取會避免重複掃描未變動歷史，同時不保留原文或脫敏後內容。
+OpenCode plugin 成功載入後會成為強制性整合：它會在 OpenCode 儲存或送出使用者文字給模型前掃描並攔截，清理 system prompt 與 tool definition，並在下一輪模型讀取前清理工具輸出及歷史訊息。它會固定啟用編碼內容偵測。plugin 選項或掃描設定無效時，所有受保護 hook 都會 fail closed 並中止模型請求。受限的 SHA-256 決策快取會避免重複掃描未變動歷史，同時不保留原文或脫敏後內容。transparent 模式下，tool input schema 內的注解文字（`description`/`title` 的值）若命中掃描規則，會與一般內容一樣遮罩為化名 token；識別碼位置（tool 名稱、property key、enum/const 值、regex pattern）仍會拒絕整個請求而不會被改名。
 
 同一份編譯產物同時支援兩個 OpenCode 大版本：v2 載入套件的 `id` + `setup(ctx)` 定義，v1（1.18.29+）呼叫舊版 `server()` factory。
 
@@ -328,6 +328,8 @@ OpenCode plugin 成功載入後會成為強制性整合：它會在 OpenCode 儲
 
 `block` 是預設值，會用不含機敏值的攔截訊息替換危險內容。只有在你明確希望已辨識的直接命中改為 `[REDACTED_TYPE]` 佔位符時，才設定 `mode: "redact"`。
 
+**僅限 OpenCode v2 — 透明假名化（transparent）：** 設定 `"mode": "transparent"` 後，偵測到的敏感值會在送往支援的模型請求前替換為穩定的不透明 `[SGP1:…]` 佔位符；反查映射僅存在行程記憶體、以 OpenCode session 為界、永不持久化，也沒有固定 TTL。已知佔位符會在工具執行前還原到工具輸入，並在支援的 wire 回應中還原助理顯示文字。防護涵蓋以 URL 路徑形狀判別的三種自訂 provider 協定——Chat Completions、Anthropic Messages、OpenAI Responses——含串流。無法安全防護的一律拒絕而非放行：WebSocket 與 `aisdk` provider 套件路由、未知或混形 body、以及出現在 transport metadata 或結構識別碼中的佔位符。重新啟動或映射遺失後，請重讀來源並更新受影響的參數；無法還原或不安全的還原會拒絕該次工具呼叫，附可行指引且不留副作用。本機歷史、日誌與產生的檔案仍可能含原文——plugin 保護的是模型邊界，不是你的磁碟。
+
 **僅限 OpenCode v2 — Email 去識別化試驗：** 選擇性開啟的 `deidentify` 選項（必須搭配 `mode: "redact"`）會將重複出現的 MEDIUM 等級 email 命中改為穩定且不透明的 `[SG-EMAIL-…]` 佔位符，讓 agent 能關聯多筆記錄而不會看到原始地址。對應金鑰在每次 plugin setup（即一個 OpenCode session）產生一次、僅存在記憶體、永不持久化——佔位符在同一個 live session 內穩定，重新啟動後即改變，且不存在反查映射。其他行為維持不變：HIGH 憑證仍會被脫敏或攔截，截斷、編碼或無法驗證的內容會攔截整個單元。
 
 ```jsonc
@@ -350,7 +352,7 @@ OpenCode plugin 成功載入後會成為強制性整合：它會在 OpenCode 儲
 
 檔案存取採「盡力而為的路徑身分驗證」，不是 sandbox。Workspace root 在 setup 時凍結（解析後的路徑加上 device/inode 身分）；每次查詢都會在開檔前與讀取後重新 lstat root 與每個祖先目錄、拒絕任何路徑元件上的 symlink（包括解析到別處——即使仍在 workspace 內——的祖先目錄 symlink）、要求一般檔案、以 `O_NOFOLLOW` 與 `O_NONBLOCK` 開啟完整解析後的 canonical 路徑，並以讀取前後的 size/mtime 檢查把開啟的 descriptor 綁定到 lstat 過的 inode。限制（據實以告）：同一擁有者的惡意並發檔案系統變動不在本威脅模型內——在兩次檢查之間替換又還原（ABA 競態，發生在 root、祖先目錄或檔案上）無法靠路徑檢查偵測；hardlink 與原始檔案不做區分（不檢查出處）；保留 size 與 mtime 的就地覆寫無法分辨；且 agent 仍可透過其他工具修改 env 檔案——因此結果描述的是檔案當下狀態，而非可信任的基準。key 名稱本身照原樣回傳，並照常通過既有的輸出／歷史保護。OpenCode v1 上這些工具透過標準 v1 tool API（`@opencode-ai/plugin`，由 v1 host 提供）註冊。
 
-附件會被攔截，因為文字掃描器無法安全檢查任意二進位或遠端附件內容。既有 session 可能已存有原文，安裝 plugin 後請建立新 session。此 plugin 僅保護 OpenCode 發出的模型請求，不涵蓋其他 AI client 或本機工具。
+附件：transparent 模式支援 `attachments` 政策，動作為 DLP 標準命名。**`"block"`（預設）** 會略過 media／file parts——以通知文字取代，二進位永不離開本機，對話照常繼續（模型讀不到圖片）。**`"allow"`** 會將附件未掃描送出並附加一則可見通知——這是明確的設定層決定，代表你為圖片內容作保（`"allow"` 需搭配 `mode: "transparent"`）。三家參考產品都直接放行附件且無選項。block／redact 模式下附件照舊攔截。既有 session 可能已存有原文，安裝 plugin 後請建立新 session。此 plugin 僅保護 OpenCode 發出的模型請求，不涵蓋其他 AI client 或本機工具。
 
 OpenCode 目前會記錄並跳過在 plugin factory 執行前就載入失敗的模組，例如套件缺失或 JavaScript 語法錯誤。安裝或升級後，請先用 `sk-` 加至少 20 個英數字元的合成測試 key 執行 smoke test，確認訊息已被 Sensitive Guard 替換，再處理真實機敏資料。
 

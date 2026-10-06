@@ -8,6 +8,8 @@
 
 事實基礎：`docs/evidence/2026-10-05-provider-transport-reference-research.md`（三方 source 均固定 SHA）＋ 本 repo C1–C17 payload 實證（`scripts/e2e/run-boundary.mjs`，17 案例全綠）。
 
+> **更新註記（2026-10-05 稍後，Phase 3 完成後）**：wire 協定已為三條（Chat Completions／Anthropic Messages／Responses，C18／C19 實證）；附件政策為 `block`（omission notice，預設）／`allow`（明示未掃描）。本文 §3、§4 中與此牴觸的敘述（含「Anthropic／Responses 待補」與附件相關字句）以本註記為準。
+
 ## 1. 操作流程：跟三家一樣嗎？
 
 | | 安裝 | 之後的使用者操作 |
@@ -41,7 +43,7 @@
 | 攔截層 | host 內 `http.request/response`（wire）＋ 4 種 session hooks | MITM 代理 `OnRequest/OnResponse` | V1 hooks（3 個，無 wire 層） | plugin：V1 hooks；proxy：分協定 adapter |
 | 適用 host | OpenCode v2（v1 走 block/redact） | 任何客戶端（經代理） | OpenCode v1 形 | v1 形 plugin／proxy 獨立 |
 | 協定形狀 | Chat Completions（形狀判別，非模型白名單） | JSON 欄位 best-effort | —（無 wire 層） | proxy：OpenAI CC＋**Anthropic Messages** |
-| **不支援 payload 行為** | **refuse（fail-closed），絕不原樣放行** | **原樣轉送**（=靜默不保護） | — | proxy 未涵蓋者依其實作 |
+| **不支援 payload 行為** | **refuse（fail-closed），絕不原樣放行**（附件除外：`block`＝omission notice、`allow`＝明示未掃描放行） | **原樣轉送**（=靜默不保護） | — | proxy 未涵蓋者依其實作 |
 | 回覆還原 | wire response 還原（C17 實證） | JSON/SSE 還原 | tool.execute.before | session mapping 還原 |
 | 工具參數還原 | 執行前還原（C13 實證） | N/A（代理層） | ✅ | ✅（plugin 路線） |
 | title/compaction/retry 覆蓋 | title 實證＋retry 實證＋context 實證；compaction 結構論證 | 代理理論全涵蓋 | 無證據 | 無證據 |
@@ -50,7 +52,7 @@
 
 ## 4. 誠實差距（目前輸給三家的點）
 
-1. **Anthropic Messages 協定**：Rehydra proxy 已有 adapter；我們拒絕並明示（Phase 3 補）。OpenAI Responses 同待補。
+1. **（Phase 3 已完成，此差距關閉）Anthropic Messages 與 OpenAI Responses**：Rehydra proxy 已有 Anthropic adapter；我們已補上 Anthropic 與 Responses，並以 C18／C19 實證。
 2. **覆蓋範圍**：VibeGuard 代理可保護其他 AI 客戶端；我們明確限縮在「OpenCode 模型對話邊界」，工具外送（curl/remote MCP）本來就不在保證範圍（README 已聲明）。
 3. **發布形態**：三家有 npm 已發布套件；我們尚未 publish（doctor 已支援套件名註冊形態，publish 後零改動）。
 4. **真實 provider E2E**：我們的 17 案例全在本地 capture server；真實 provider 端到端尚未重跑（open item，與三家比較無關，是我們自己的閘門）。

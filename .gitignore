@@ -45,3 +45,8 @@ coverage/
 Thumbs.db
 .idea/
 .vscode/
+
+# bun.lock is intentionally not tracked: npm (package-lock.json) is the
+# package manager of record; bun is only used for `binary:*` compile builds,
+# which do not read a lockfile.
+bun.lock

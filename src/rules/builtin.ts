@@ -113,7 +113,11 @@ export const BUILTIN_RULES: Rule[] = [
     type: "SECRET",
     severity: "HIGH",
     description: "PEM Private Key",
-    pattern: /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g,
+    // Full PEM block first (header + body + END) so the base64 body cannot
+    // survive a redaction/pseudonymization that only renamed the header; a
+    // truncated block (no END line) falls back to the header-only match.
+    pattern:
+      /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----|-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g,
   },
 
   // ── PII ──────────────────────────────────────────────────────────────────

@@ -246,6 +246,68 @@ describe("anthropic messages http.response restore", () => {
     expect(body.content[1].input.token).toBe(token); // untouched for the tool gate
   });
 
+  it("keeps a foreign literal marker in display text instead of refusing (spec line 96)", async () => {
+    const { hook } = await arm();
+    const foreign = `[SGP1:${"deadbeef".repeat(4)}-00000007]`;
+    const restored = await dispatch(
+      hook,
+      new Response(
+        JSON.stringify({
+          id: "msg_1",
+          content: [{ type: "text", text: `docs say ${foreign} is literal` }],
+          stop_reason: "end_turn",
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+    const body = JSON.parse(await restored.text());
+    expect(body.content[0].text).toBe(`docs say ${foreign} is literal`);
+  });
+
+  it("still refuses a token outside display text (response id)", async () => {
+    const { hook } = await arm();
+    const token = await mintToken(hook, KEY);
+    await expect(
+      dispatch(
+        hook,
+        new Response(
+          JSON.stringify({
+            id: token,
+            content: [{ type: "text", text: "clean" }],
+            stop_reason: "end_turn",
+          }),
+          { headers: { "content-type": "application/json" } },
+        ),
+      ),
+    ).rejects.toThrow(/Sensitive Guard/);
+  });
+
+  it("SSE: keeps a foreign literal marker in text_delta instead of refusing", async () => {
+    const { hook } = await arm();
+    const foreign = `[SGP1:${"cafebabe".repeat(4)}-00000009]`;
+    const events = [
+      { type: "message_start", message: { id: "m", content: [] } },
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: `docs say ${foreign} is literal` } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_stop" },
+    ];
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const encoder = new TextEncoder();
+        for (const event of events) {
+          controller.enqueue(encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`));
+        }
+        controller.close();
+      },
+    });
+    const restored = await dispatch(hook, new Response(stream, {
+      headers: { "content-type": "text/event-stream" },
+    }));
+    const text = await restored.text();
+    expect(text).toContain(foreign);
+  });
+
   it("restores a token split across text_delta events and drains on message_stop", async () => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY);
@@ -315,5 +377,37 @@ describe("anthropic attachment policy: allow", () => {
     expect(blocks[0].text).toMatch(TOKEN_RE);
     expect(blocks[1].type).toBe("media");
     expect(blocks[1].data).toBe("aGVsbG8=");
+  });
+});
+
+describe("anthropic attachments allow: wire image format", () => {
+  const imageBody = {
+    model: "claude-test",
+    max_tokens: 16,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "what is in this picture" },
+          { type: "image", source: { type: "base64", media_type: "image/png", data: "aGVsbG8=" } },
+        ],
+      },
+    ],
+  };
+
+  it("allow passes Anthropic image blocks through unscanned", async () => {
+    const { hook } = await arm(baseConfig, "allow");
+    const { wireBody } = await wire(hook, imageBody);
+    const blocks = (wireBody.messages as Array<{ content: Array<Record<string, unknown>> }>)[0].content;
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].type).toBe("text");
+    expect(blocks[1].type).toBe("image");
+    expect(JSON.stringify(blocks[1])).toContain("aGVsbG8=");
+  });
+
+  it("block still refuses Anthropic image blocks", async () => {
+    const { hook } = await arm(baseConfig, "block");
+    const event = { sessionID: "session-1", kind: "primary", request: anthropicRequest(imageBody) };
+    await expect(hook("session:http.request")(event)).rejects.toThrow();
   });
 });

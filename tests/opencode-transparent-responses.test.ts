@@ -177,6 +177,202 @@ describe("openai responses http.response restore", () => {
     expect(JSON.parse(body.output[1].arguments).token).toBe(token);
   });
 
+  function streamResponse(events: Array<Record<string, unknown> | string>): Response {
+    const body = events.map((event) => `data: ${typeof event === "string" ? event : JSON.stringify(event)}\n\n`).join("");
+    return new Response(body, { headers: { "content-type": "text/event-stream" } });
+  }
+
+  it.each(["plain", "sensitive", "literal"])("reads a complete %s conversation lifecycle without interrupting the stream", async (kind) => {
+    const { hook } = await arm();
+    const text = kind === "sensitive"
+      ? `contact ${await mintToken(hook, EMAIL)}`
+      : kind === "literal" ? "Document the literal [SGP1:example] marker" : "Hello, how can I help?";
+    const item = { type: "message", id: "msg_1", role: "assistant", content: [{ type: "output_text", text }] };
+    const restored = await dispatch(hook, streamResponse([
+      { type: "response.created", response: { id: "resp_1", output: [] } },
+      { type: "response.output_item.added", output_index: 0, item: { ...item, content: [] } },
+      { type: "response.content_part.added", item_id: "msg_1", output_index: 0, content_index: 0, part: { type: "output_text", text: "" } },
+      { type: "response.output_text.delta", item_id: "msg_1", output_index: 0, content_index: 0, delta: text },
+      { type: "response.output_text.done", item_id: "msg_1", output_index: 0, content_index: 0, text },
+      { type: "response.content_part.done", item_id: "msg_1", output_index: 0, content_index: 0, part: item.content[0] },
+      { type: "response.output_item.done", output_index: 0, item },
+      { type: "response.completed", response: { id: "resp_1", output: [item] } },
+    ]));
+    const output = await restored.text();
+    const events = output.split("\n").filter((line) => line.startsWith("data:")).map((line) => JSON.parse(line.slice(5)));
+    const expected = kind === "sensitive" ? `contact ${EMAIL}` : text;
+    expect(events.find((event) => event.type === "response.output_text.done").text).toBe(expected);
+    expect(events.find((event) => event.type === "response.content_part.done").part.text).toBe(expected);
+    expect(events.find((event) => event.type === "response.completed").response.output[0].content[0].text).toBe(expected);
+    if (kind === "sensitive") expect(output).not.toMatch(TOKEN_RE);
+  });
+
+  it("reads a normal conversation with a DONE sentinel after completion", async () => {
+    const { hook } = await arm();
+    const restored = await dispatch(hook, streamResponse([
+      { type: "response.output_text.delta", item_id: "msg_1", delta: "Hello" },
+      { type: "response.output_text.done", item_id: "msg_1", text: "Hello" },
+      { type: "response.completed", response: { id: "resp_1", output: [] } },
+      "[DONE]",
+    ]));
+    const output = await restored.text();
+    expect(output).toContain('"delta":"Hello"');
+    expect(output).toContain("data: [DONE]");
+  });
+
+  it("restores reasoning summary deltas, completed text, and summary parts", async () => {
+    const { hook } = await arm();
+    const token = await mintToken(hook, KEY);
+    const text = `Checking ${token}`;
+    const item = { type: "reasoning", id: "rs_1", summary: [{ type: "summary_text", text }] };
+    const restored = await dispatch(hook, streamResponse([
+      { type: "response.output_item.added", output_index: 0, item: { ...item, summary: [] } },
+      { type: "response.reasoning_summary_part.added", item_id: "rs_1", summary_index: 0, part: { type: "summary_text", text: "" } },
+      { type: "response.reasoning_summary_text.delta", item_id: "rs_1", summary_index: 0, delta: text.slice(0, 15) },
+      { type: "response.reasoning_summary_text.delta", item_id: "rs_1", summary_index: 0, delta: text.slice(15) },
+      { type: "response.reasoning_summary_text.done", item_id: "rs_1", summary_index: 0, text },
+      { type: "response.reasoning_summary_part.done", item_id: "rs_1", summary_index: 0, part: item.summary[0] },
+      { type: "response.output_item.done", output_index: 0, item },
+      { type: "response.completed", response: { id: "resp_1", output: [item] } },
+    ]));
+    const output = await restored.text();
+    const events = output.split("\n").filter((line) => line.startsWith("data:")).map((line) => JSON.parse(line.slice(5)));
+    expect(events.filter((event) => event.type === "response.reasoning_summary_text.delta").map((event) => event.delta).join("")).toBe(`Checking ${KEY}`);
+    expect(events.find((event) => event.type === "response.reasoning_summary_text.done").text).toBe(`Checking ${KEY}`);
+    expect(events.find((event) => event.type === "response.completed").response.output[0].summary[0].text).toBe(`Checking ${KEY}`);
+    expect(output).not.toMatch(TOKEN_RE);
+  });
+
+  it("still refuses metadata that imitates a display part", async () => {
+    const { hook } = await arm();
+    const token = await mintToken(hook, KEY);
+    const restored = await dispatch(hook, streamResponse([
+      { type: "response.created", response: { id: "resp_1", metadata: { type: "output_text", text: token } } },
+    ]));
+    await expect(restored.text()).rejects.toThrow("cannot restore safely");
+  });
+
+  it.each([
+    { doneText: true, sensitive: false },
+    { doneText: false, sensitive: false },
+    { doneText: true, sensitive: true },
+    { doneText: false, sensitive: true },
+  ])("preserves reasoning tails in the native consumer with done text $doneText and sensitive $sensitive", async ({ doneText, sensitive }) => {
+    const { createRequire } = await import("node:module");
+    const nativeRequire = createRequire(new URL("../node_modules/@opencode/ai/package.json", import.meta.url));
+    const Effect = await import(nativeRequire.resolve("effect/Effect"));
+    const OpenResponses = await import("@opencode/ai/protocols/open-responses");
+    const { hook } = await arm();
+    const first = sensitive ? `你好🙂 Checking ${await mintToken(hook, KEY)}` : "你好🙂 Checking [SGP1:example";
+    const expectedFirst = sensitive ? `你好🙂 Checking ${KEY}` : first;
+    const second = "Continue normally.";
+    const summary = [{ type: "summary_text", text: first }, { type: "summary_text", text: second }];
+    const events: Array<Record<string, unknown>> = [
+      { type: "response.output_item.added", output_index: 0, item: { type: "reasoning", id: "rs_1", summary: [] } },
+      { type: "response.reasoning_summary_part.added", item_id: "rs_1", summary_index: 0, part: { type: "summary_text", text: "" } },
+      { type: "response.reasoning_summary_text.delta", item_id: "rs_1", summary_index: 0, delta: sensitive ? first.slice(0, 24) : first },
+    ];
+    if (doneText) events.push({ type: "response.reasoning_summary_text.done", item_id: "rs_1", summary_index: 0, text: first });
+    events.push(
+      { type: "response.reasoning_summary_part.done", item_id: "rs_1", summary_index: 0, part: summary[0] },
+      { type: "response.reasoning_summary_part.added", item_id: "rs_1", summary_index: 1, part: { type: "summary_text", text: "" } },
+      { type: "response.reasoning_summary_text.delta", item_id: "rs_1", summary_index: 1, delta: second },
+      { type: "response.reasoning_summary_part.done", item_id: "rs_1", summary_index: 1, part: summary[1] },
+      { type: "response.output_item.done", output_index: 0, item: { type: "reasoning", id: "rs_1", summary } },
+      { type: "response.completed", response: { id: "resp_1", output: [] } },
+    );
+    const restored = await dispatch(hook, streamResponse(events));
+    const nativeEvents = (await restored.text()).split("\n").filter((line) => line.startsWith("data:")).map((line) => JSON.parse(line.slice(5)));
+    let state = OpenResponses.initial({ model: { provider: "fixture", route: { providerMetadataKey: "openai" } } } as never);
+    const parts: Array<{ type?: string; id?: string; text?: string }> = [];
+    for (const event of nativeEvents) {
+      const [next, emitted] = await Effect.runPromise(OpenResponses.step(state, event));
+      state = next;
+      parts.push(...emitted);
+    }
+    expect(parts.filter((part) => part.id === "rs_1:0" && part.type === "reasoning-delta").map((part) => part.text).join("")).toBe(expectedFirst);
+    expect(parts.filter((part) => part.id === "rs_1:1" && part.type === "reasoning-delta").map((part) => part.text).join("")).toBe(second);
+  });
+
+  it("keeps completed function arguments tokenized for local tool restoration", async () => {
+    const { hook } = await arm();
+    const token = await mintToken(hook, KEY);
+    const argumentsText = JSON.stringify({ content: token });
+    const restored = await dispatch(hook, streamResponse([
+      { type: "response.function_call_arguments.delta", item_id: "fc_1", delta: argumentsText },
+      { type: "response.function_call_arguments.done", item_id: "fc_1", arguments: argumentsText },
+      { type: "response.completed", response: { id: "resp_1", output: [{ type: "function_call", id: "fc_1", call_id: "call_1", name: "write", arguments: argumentsText }] } },
+    ]));
+    const output = await restored.text();
+    expect(output).toContain(token);
+    expect(output).not.toContain(KEY);
+  });
+
+  it("still refuses token-bearing response metadata", async () => {
+    const { hook } = await arm();
+    const token = await mintToken(hook, KEY);
+    const restored = await dispatch(hook, streamResponse([
+      { type: "response.created", response: { id: token } },
+    ]));
+    await expect(restored.text()).rejects.toThrow("cannot restore safely");
+  });
+
+  it.each(["delta", "arguments", "output", "output_text"])("still refuses token-bearing %s outside a supported event field", async (field) => {
+    const { hook } = await arm();
+    const token = await mintToken(hook, KEY);
+    const restored = await dispatch(hook, streamResponse([
+      { type: "response.created", [field]: token, response: { id: "resp_1" } },
+    ]));
+    await expect(restored.text()).rejects.toThrow("cannot restore safely");
+  });
+
+  it.each(["response.output_text.delta", "response.reasoning_summary_text.delta"])("isolates interleaved indexes for %s", async (type) => {
+    const { hook } = await arm();
+    const first = await mintToken(hook, KEY);
+    const second = await mintToken(hook, EMAIL);
+    const index = type === "response.output_text.delta" ? "content_index" : "summary_index";
+    const restored = await dispatch(hook, streamResponse([
+      { type, item_id: "item_1", [index]: 0, delta: first.slice(0, 20) },
+      { type, item_id: "item_1", [index]: 1, delta: second.slice(0, 20) },
+      { type, item_id: "item_1", [index]: 0, delta: first.slice(20) },
+      { type, item_id: "item_1", [index]: 1, delta: second.slice(20) },
+      { type: "response.completed", response: { output: [] } },
+    ]));
+    const events = (await restored.text()).split("\n").filter((line) => line.startsWith("data:")).map((line) => JSON.parse(line.slice(5)));
+    expect(events.filter((event) => event.type === type && event[index] === 0).map((event) => event.delta).join("")).toBe(KEY);
+    expect(events.filter((event) => event.type === type && event[index] === 1).map((event) => event.delta).join("")).toBe(EMAIL);
+  });
+
+  it("uses authoritative done text to finish a buffered token", async () => {
+    const { hook } = await arm();
+    const token = await mintToken(hook, KEY);
+    const restored = await dispatch(hook, streamResponse([
+      { type: "response.output_text.delta", item_id: "msg_1", delta: token.slice(0, 12) },
+      { type: "response.output_text.done", item_id: "msg_1", text: token },
+      { type: "response.completed", response: { output: [] } },
+    ]));
+    expect(await restored.text()).toContain(`"text":"${KEY}"`);
+  });
+
+  it("still refuses events appended after the DONE sentinel", async () => {
+    const { hook } = await arm();
+    const restored = await dispatch(hook, streamResponse([
+      { type: "response.completed", response: { output: [] } },
+      "[DONE]",
+      { type: "response.output_text.delta", item_id: "msg_1", delta: "late" },
+    ]));
+    await expect(restored.text()).rejects.toThrow("malformed or incomplete");
+  });
+
+  it("still refuses a truncated token instead of passing partial content through", async () => {
+    const { hook } = await arm();
+    const token = await mintToken(hook, KEY);
+    const restored = await dispatch(hook, streamResponse([
+      { type: "response.output_text.delta", item_id: "msg_1", delta: token.slice(0, 12) },
+    ]));
+    await expect(restored.text()).rejects.toThrow("malformed or incomplete");
+  });
+
   it("restores a token split across output_text.delta events; completed drains", async () => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY);
@@ -244,5 +440,39 @@ describe("responses attachment policy: allow", () => {
     expect(parts[0].text).toMatch(TOKEN_RE);
     expect(parts[1].type).toBe("media");
     expect(parts[1].data).toBe("aGVsbG8=");
+  });
+});
+
+describe("responses attachments allow: wire image format", () => {
+  const imageBody = {
+    model: "gpt-test",
+    input: [
+      {
+        type: "message",
+        role: "user",
+        content: [
+          { type: "input_text", text: "what is in this picture" },
+          { type: "input_image", image_url: "data:image/png;base64,aGVsbG8=" },
+        ],
+      },
+    ],
+  };
+
+  it("allow passes input_image parts through unscanned", async () => {
+    const { hook } = await arm(baseConfig, "allow");
+    const event = { sessionID: "session-1", kind: "primary", request: responsesRequest(imageBody) };
+    await hook("session:http.request")(event);
+    const body = JSON.parse(await (event.request as Request).clone().text()) as Record<string, unknown>;
+    const parts = ((body.input as Array<{ content: Array<Record<string, unknown>> }>)[0]).content;
+    expect(parts).toHaveLength(2);
+    expect(parts[0].type).toBe("input_text");
+    expect(parts[1].type).toBe("input_image");
+    expect(JSON.stringify(parts[1])).toContain("aGVsbG8=");
+  });
+
+  it("block still refuses input_image parts", async () => {
+    const { hook } = await arm(baseConfig, "block");
+    const event = { sessionID: "session-1", kind: "primary", request: responsesRequest(imageBody) };
+    await expect(hook("session:http.request")(event)).rejects.toThrow();
   });
 });

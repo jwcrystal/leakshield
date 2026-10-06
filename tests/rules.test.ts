@@ -482,3 +482,45 @@ describe("buildDynamicRules()", () => {
     expect(rules).toHaveLength(0);
   });
 });
+
+// ─── PEM Private Key（完整區塊保護） ────────────────────────────────────────
+
+describe("PEM Private Key", () => {
+  const pat = ruleFor("PEM Private Key");
+
+  const PEM_BODY =
+    "MIIEowIBAAKCAQEA0Z3VSZSJdyyY8wzwLS0cSBMubeJ6h1LpZfK0hVfX4mW2pQ9zRrTnXyBvGcE7dNaU5fHiJkOlM";
+  const pem = `-----BEGIN RSA PRIVATE KEY-----\n${PEM_BODY}\n${PEM_BODY}\n-----END RSA PRIVATE KEY-----`;
+
+  it("完整區塊：match 覆蓋 header、body 與 END 行", () => {
+    const re = new RegExp(pat.source, pat.flags);
+    const hit = re.exec(pem);
+    expect(hit).not.toBeNull();
+    expect(hit![0].startsWith("-----BEGIN RSA PRIVATE KEY-----")).toBe(true);
+    expect(hit![0].endsWith("-----END RSA PRIVATE KEY-----")).toBe(true);
+    expect(hit![0]).toContain(PEM_BODY);
+  });
+
+  it("截斷區塊（無 END）：仍命中 header", () => {
+    expect(matches(pat, `-----BEGIN OPENSSH PRIVATE KEY-----\n${PEM_BODY}`)).toBe(true);
+  });
+
+  it("多把 key：逐一完整匹配", () => {
+    const re = new RegExp(pat.source, pat.flags);
+    const two = `${pem}\nmiddle text\n${pem}`;
+    const hits = [...two.matchAll(re)];
+    expect(hits).toHaveLength(2);
+    expect(hits[0][0]).toBe(pem);
+    expect(hits[1][0]).toBe(pem);
+  });
+
+  it("EC / DSA / 無前綴變體同樣完整匹配", () => {
+    for (const kind of ["EC", "DSA", ""]) {
+      const label = kind === "" ? "PRIVATE KEY" : `${kind} PRIVATE KEY`;
+      const block = `-----BEGIN ${label}-----\n${PEM_BODY}\n-----END ${label}-----`;
+      const re = new RegExp(pat.source, pat.flags);
+      const hit = re.exec(block);
+      expect(hit?.[0]).toBe(block);
+    }
+  });
+});

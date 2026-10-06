@@ -44,9 +44,11 @@ import {
   type PseudonymFailureReason,
   type PseudonymizerService,
 } from "./decision/pseudonymization.js";
+import { walkSchemaStrings } from "./decision/schema-strings.js";
 import {
   remaskModelRequest,
   restoreModelResponse,
+  withOpaqueAttachments,
   type TransportMaskingService,
 } from "./opencode-transparent-http.js";
 import type { GuardConfig } from "./types.js";
@@ -240,22 +242,6 @@ function collectStructuralStrings(event: RecordLike): string[] {
   const pushString = (value: unknown): void => {
     if (typeof value === "string") out.push(value);
   };
-  const walkStrings = (value: unknown): void => {
-    if (typeof value === "string") {
-      out.push(value);
-      return;
-    }
-    if (value === null || typeof value !== "object") return;
-    if (Array.isArray(value)) {
-      for (const item of value) walkStrings(item);
-      return;
-    }
-    const record = value as RecordLike;
-    for (const key of Object.keys(record)) {
-      out.push(key);
-      walkStrings(record[key]);
-    }
-  };
   if (Array.isArray(event.system)) {
     for (const part of event.system) {
       if (isRecordLike(part)) pushString(part.type);
@@ -283,7 +269,9 @@ function collectStructuralStrings(event: RecordLike): string[] {
     for (const name of Object.keys(event.tools)) {
       out.push(name);
       const tool = (event.tools as RecordLike)[name];
-      if (isRecordLike(tool) && tool.input !== undefined) walkStrings(tool.input);
+      // Schema annotation prose (description/title values) is content, not
+      // structural: it masks to a token instead of refusing the request.
+      if (isRecordLike(tool) && tool.input !== undefined) walkSchemaStrings(out, tool.input);
     }
   }
   return out;
@@ -350,14 +338,21 @@ function applyAttachmentPolicy(
   return changed;
 }
 
-/** Appends ONE visible notice when allow-mode attachments are present. */
+/**
+ * Appends ONE visible notice when allow-mode attachments are present.
+ * Only a user-role message is an eligible slot: a bare text part inside an
+ * assistant/tool message breaks the host's provider serialization ("OpenAI
+ * Chat tool messages only support tool-result content for now"). When no
+ * user message with a content array exists, the notice is skipped — the
+ * request shape is never corrupted to deliver it.
+ */
 function appendAllowNotice(event: RecordLike, found: boolean): void {
   if (!found) return;
   const messages = event.messages;
   if (!Array.isArray(messages) || messages.length === 0) return;
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index];
-    if (!isRecordLike(message) || !Array.isArray(message.content)) continue;
+    if (!isRecordLike(message) || message.role !== "user" || !Array.isArray(message.content)) continue;
     message.content.push({ type: "text", text: ATTACHMENT_ALLOW_NOTICE_TEXT });
     return;
   }
@@ -676,9 +671,18 @@ export function createTransparentSessionGuard(
     const structuralBefore = collectStructuralStrings(plain);
     for (const identifier of structuralBefore) assertStructuralSafe(identifier);
     assertNumbersSafe(plain);
-    const protectedSnapshot = pseudonymizer.protectJsonForModel(sessionID, plain);
-    if (!protectedSnapshot.ok) throw new Error(PROTECT_FAILED_ERROR);
-    const value = protectedSnapshot.value as RecordLike;
+    // "allow" means unscanned: attachment payloads are substituted with opaque
+    // sentinels around the masking transaction (the same mechanism the wire
+    // remaskers use) and restored afterwards, so a real image's base64 is
+    // never token-mangled into an unparseable payload and never trips
+    // encoded-content detection.
+    const protectTree = (input: RecordLike): RecordLike => {
+      const masked = pseudonymizer.protectJsonForModel(sessionID, input);
+      if (!masked.ok) throw new Error(PROTECT_FAILED_ERROR);
+      if (!isRecordLike(masked.value)) throw new Error(PROTECT_FAILED_ERROR);
+      return masked.value as RecordLike;
+    };
+    const value = withOpaqueAttachments(attachmentsPolicy, plain, protectTree);
     // Defense in depth: no structural identifier may have changed.
     const structuralAfter = collectStructuralStrings(value);
     if (

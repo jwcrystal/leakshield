@@ -1838,6 +1838,90 @@ describe("attachment policy: allow", () => {
     expect(serialized).toMatch(TOKEN_RE); // surrounding text still masked
   });
 
+  it("allow notice never lands in a tool message (host serialization safety)", async () => {
+    const { hook } = await arm(baseConfig, "allow");
+    const event = requestEvent();
+    // Attachment in the FIRST user message; the LAST content-bearing message
+    // is a tool message — exactly the replay shape that broke the host's
+    // OpenAI Chat conversion ("tool messages only support tool-result").
+    (event.messages as Array<{ content: Array<Record<string, unknown>> }>)[0].content.push({
+      type: "media",
+      mimeType: "image/png",
+      data: "aGVsbG8=",
+    });
+    await hook("session:context")(event);
+
+    const messages = event.messages as Array<{ role: string; content: Array<Record<string, unknown>> }>;
+    const toolMessage = messages.find((m) => m.role === "tool");
+    expect(toolMessage).toBeDefined();
+    // The tool message gained NO bare text part.
+    expect(
+      toolMessage!.content.some((part) => part.type === "text" && typeof part.text === "string"),
+    ).toBe(false);
+    // The notice went to the user message that carries the attachment.
+    const userMessage = messages.find(
+      (m) => m.role === "user" && m.content.some((p) => p.type === "media"),
+    );
+    expect(userMessage).toBeDefined();
+    expect(
+      userMessage!.content.some(
+        (part) => part.type === "text" && String(part.text).includes("allowed through unscanned"),
+      ),
+    ).toBe(true);
+  });
+
+  it("skips the allow notice when no user message can carry it", async () => {
+    const { hook } = await arm(baseConfig, "allow");
+    const event = requestEvent();
+    // Attachment nested in the system prompt field only: no user message with
+    // a content array exists in this event's messages after we strip roles.
+    (event.system as Array<Record<string, unknown>>)[0] = {
+      type: "media",
+      mimeType: "image/png",
+      data: "aGVsbG8=",
+    };
+    event.messages = [];
+    const before = JSON.stringify(event);
+    // Must not throw and must not mutate messages.
+    await hook("session:context")(event);
+    expect(JSON.stringify(event.messages)).toBe("[]");
+    expect(before).toContain("aGVsbG8=");
+  });
+
+  it("allow keeps an attachment payload VERBATIM even when it contains a credential-like run", async () => {
+    const { hook } = await arm(baseConfig, "allow");
+    const event = requestEvent();
+    const payload = `data:image/png;base64,${KEY}AAAAAAAAAAAA`;
+    (event.messages as Array<{ content: Array<Record<string, unknown>> }>)[0].content.push({
+      type: "media",
+      mimeType: "image/png",
+      data: payload,
+    });
+    await hook("session:context")(event);
+    const messages = event.messages as Array<{ content: Array<Record<string, unknown>> }>;
+    const media = messages[0].content.find((part) => part.type === "media") as { data: string };
+    // Payload survives byte-for-byte: no token substitution inside base64.
+    expect(media.data).toBe(payload);
+    // The surrounding text is still masked normally.
+    expect(JSON.stringify(messages)).toMatch(TOKEN_RE);
+  });
+
+  it("allow keeps an attachment payload VERBATIM even when it decodes to sensitive text", async () => {
+    const { hook } = await arm(baseConfig, "allow");
+    const event = requestEvent();
+    const payload = Buffer.from(`reach ${EMAIL} now`, "utf8").toString("base64");
+    (event.messages as Array<{ content: Array<Record<string, unknown>> }>)[0].content.push({
+      type: "media",
+      mimeType: "image/png",
+      data: payload,
+    });
+    await hook("session:context")(event);
+    const messages = event.messages as Array<{ content: Array<Record<string, unknown>> }>;
+    const media = messages[0].content.find((part) => part.type === "media") as { data: string };
+    expect(media.data).toBe(payload);
+    expect(media.data).not.toContain(EMAIL);
+  });
+
   it("wire layer sends the media part verbatim and masks surrounding text", async () => {
     const { hook } = await arm(baseConfig, "allow");
     const event = {
@@ -1866,5 +1950,104 @@ describe("attachment policy: allow", () => {
     expect(content[1].type).toBe("media");
     expect(content[1].data).toBe("aGVsbG8="); // binary untouched
     expect(JSON.stringify(body)).not.toContain("__sg_opaque_attachment");
+  });
+});
+
+// ─── Tool schema: annotation prose vs identifiers ───────────────────────────
+
+describe("tool schema annotation prose masks instead of refusing", () => {
+  const keywordConfig: GuardConfig = { ...baseConfig, nda_keywords: ["secrets"] };
+
+  /** Minimal context event whose tools subtree is supplied by the caller. */
+  function schemaEvent(tools: Record<string, unknown>): Record<string, unknown> {
+    return {
+      sessionID: "session-1",
+      system: [{ type: "text", text: "system" }],
+      messages: [
+        { id: "msg_1", role: "user", content: [{ type: "text", text: "scan the directory" }] },
+      ],
+      options: {},
+      tools,
+    };
+  }
+
+  it("masks a schema description VALUE containing a keyword (request passes)", async () => {
+    const { hook } = await arm(keywordConfig);
+    const event = schemaEvent({
+      vault_scanner: {
+        input: {
+          type: "object",
+          properties: { path: { type: "string", description: "Detects hardcoded secrets" } },
+          required: ["path"],
+        },
+      },
+    });
+    await hook("session:context")(event);
+
+    const tools = event.tools as Record<
+      string,
+      { input: { properties: Record<string, { description?: string; type?: string }> } }
+    >;
+    const description = tools.vault_scanner.input.properties.path.description ?? "";
+    expect(description).toMatch(TOKEN_RE);
+    expect(description).not.toContain("secrets");
+    // Identifiers survive verbatim.
+    expect(Object.keys(tools)).toEqual(["vault_scanner"]);
+    expect(Object.keys(tools.vault_scanner.input.properties)).toEqual(["path"]);
+    expect(tools.vault_scanner.input.properties.path.type).toBe("string");
+  });
+
+  it("masks a schema title VALUE the same way", async () => {
+    const { hook } = await arm(keywordConfig);
+    const event = schemaEvent({
+      vault_scanner: {
+        input: {
+          type: "object",
+          title: "Vault scan options",
+          properties: { mode: { type: "string", title: "Detection secrets level" } },
+        },
+      },
+    });
+    await hook("session:context")(event);
+    const serialized = JSON.stringify(event);
+    expect(serialized).not.toContain("secrets");
+    expect(serialized).toMatch(TOKEN_RE);
+  });
+
+  it("still refuses when a property KEY is sensitive (identifier)", async () => {
+    const { hook } = await arm(keywordConfig);
+    const event = schemaEvent({
+      vault_scanner: {
+        input: { type: "object", properties: { secrets_path: { type: "string" } } },
+      },
+    });
+    const before = JSON.stringify(event);
+    await expect(hook("session:context")(event)).rejects.toThrow(PROTECT_FAILED);
+    expect(JSON.stringify(event)).toBe(before);
+  });
+
+  it("still refuses when an enum VALUE is sensitive (identifier)", async () => {
+    const { hook } = await arm(keywordConfig);
+    const event = schemaEvent({
+      vault_scanner: {
+        input: {
+          type: "object",
+          properties: { mode: { type: "string", enum: ["secrets", "public"] } },
+        },
+      },
+    });
+    const before = JSON.stringify(event);
+    await expect(hook("session:context")(event)).rejects.toThrow(PROTECT_FAILED);
+    expect(JSON.stringify(event)).toBe(before);
+  });
+
+  it("still refuses when the tool NAME is sensitive (identifier)", async () => {
+    const { hook } = await arm(keywordConfig);
+    const event = schemaEvent({
+      secrets_scanner: { input: { type: "object", properties: {} } },
+    });
+    const before = JSON.stringify(event);
+    await expect(hook("session:context")(event)).rejects.toThrow(PROTECT_FAILED);
+    expect(JSON.stringify(event)).toBe(before);
   });
 });

@@ -5,12 +5,13 @@
  * Source-verified against the installed @opencode/plugin 2.0.19 declarations:
  * `session:http.request` / `session:http.response` expose native `Request` /
  * `Response` objects whose bodies are one-shot streams (clone before reading).
- * The ONLY supported wire protocol is the OpenAI-compatible Chat Completions
- * JSON request body and its JSON / text-event-stream responses.
+ * Supported wire protocols are the three custom-provider dialects — OpenAI
+ * Chat Completions, Anthropic Messages and OpenAI Responses — selected by URL
+ * path shape; each has JSON / event-stream response restore.
  *
  * Fail-closed rules implemented here:
- * - Unsupported routes, dialects (e.g. Anthropic-shaped bodies), bodyless
- *   requests and reserved tokens in transport metadata are refused.
+ * - Unsupported routes, unknown or mixed dialects, bodyless requests and
+ *   reserved tokens in transport metadata are refused.
  * - Transport metadata is inspected: decoded non-auth headers and query
  *   parameters, and numeric body values, must not scan as sensitive;
  *   legitimate authentication headers are preserved.
@@ -34,6 +35,7 @@ import {
   type PseudonymJsonResult,
   type PseudonymTextResult,
 } from "./decision/pseudonymization.js";
+import { walkSchemaStrings } from "./decision/schema-strings.js";
 
 /** The masking/detection subset of the pseudonymization core this module needs. */
 export interface TransportMaskingService {
@@ -312,22 +314,42 @@ function inspectTransportMetadata(service: TransportMaskingService, request: Req
 const OPAQUE_ATTACHMENT_SENTINEL = "__sg_opaque_attachment";
 
 /**
+ * Internal + wire-serialized attachment part types. Beyond the host's own
+ * media/file records this includes what the provider serializers actually
+ * emit on the wire: image_url (Chat Completions), image (Anthropic
+ * Messages), input_image/input_file (Responses). Under the "allow" policy
+ * every one of these passes as an opaque, unscanned leaf in all dialects.
+ */
+const ATTACHMENT_PART_TYPES = new Set([
+  "media",
+  "file",
+  "image_url",
+  "image",
+  "input_image",
+  "input_file",
+]);
+
+function isAttachmentRecord(item: unknown): item is Record<string, unknown> {
+  return isRecord(item) && typeof item.type === "string" && ATTACHMENT_PART_TYPES.has(item.type);
+}
+
+/**
  * In "allow" mode, temporarily substitutes every media/file record with a
  * unique sentinel string around the masking transaction, then restores the
  * originals into the protected result: binary payloads are neither scanned
  * nor altered, and the structural checks outside this wrapper see identical
- * attachment records before and after.
+ * attachment records before and after. Shared by the wire remaskers and the
+ * session-layer request guard so "allow means unscanned" holds at both
+ * boundaries.
  */
-function withOpaqueAttachments<T extends Record<string, unknown>>(
-  service: TransportMaskingService,
+export function withOpaqueAttachments<T extends Record<string, unknown>>(
+  policy: "block" | "allow",
   body: T,
   fn: (input: T) => T,
 ): T {
-  if (service.attachmentsPolicy !== "allow") return fn(body);
+  if (policy !== "allow") return fn(body);
   const originals: Array<Record<string, unknown>> = [];
   let counter = 0;
-  const isAttachmentRecord = (item: unknown): item is Record<string, unknown> =>
-    isRecord(item) && (item.type === "media" || item.type === "file");
   const substitute = (value: unknown): void => {
     if (value === null || typeof value !== "object") return;
     if (Array.isArray(value)) {
@@ -413,7 +435,7 @@ function validateMessages(body: Record<string, unknown>, allowAttachments: boole
         // Attachments and foreign part types must refuse, never pass tokenized
         // or unscanned content through the wire boundary — unless the user
         // explicitly chose the "allow" policy (visible, unscanned pass-through).
-        if (allowAttachments && isRecord(part) && (part.type === "media" || part.type === "file")) {
+        if (allowAttachments && isAttachmentRecord(part)) {
           continue;
         }
         if (!isRecord(part) || part.type !== "text" || typeof part.text !== "string") {
@@ -482,9 +504,11 @@ function walkStrings(out: string[], value: unknown): void {
 /**
  * Protocol/structural identifiers of a Chat Completions body: model id,
  * message roles/ids, content part types, tool-call ids/names and the tool
- * input schema (property names, types, required entries, enum values). These
- * must survive masking verbatim; a sensitive or token-bearing one refuses the
- * request rather than being silently renamed.
+ * input schema identifiers (property names, types, required entries, enum
+ * values). These must survive masking verbatim; a sensitive or token-bearing
+ * one refuses the request rather than being silently renamed. Schema
+ * annotation prose (description/title values) is intentionally absent: it is
+ * masked as ordinary content instead of refusing.
  */
 function collectWireStructuralStrings(body: Record<string, unknown>): string[] {
   const out: string[] = [];
@@ -519,11 +543,13 @@ function collectWireStructuralStrings(body: Record<string, unknown>): string[] {
       pushString(out, tool.name);
       const fn = isRecord(tool.function) ? tool.function : tool;
       pushString(out, fn.name);
-      if (fn.parameters !== undefined) walkStrings(out, fn.parameters);
+      // Annotation prose (description/title values) masks as content; only
+      // identifiers stay structural and can refuse the request.
+      if (fn.parameters !== undefined) walkSchemaStrings(out, fn.parameters);
     }
   }
   if (body.tool_choice !== undefined) walkStrings(out, body.tool_choice);
-  if (body.response_format !== undefined) walkStrings(out, body.response_format);
+  if (body.response_format !== undefined) walkSchemaStrings(out, body.response_format);
   return out;
 }
 
@@ -620,7 +646,7 @@ export async function remaskChatCompletionsRequest(
   if (unsafeNumber) throw new Error(UNSUPPORTED_REQUEST_BODY);
 
   // Atomic protection: one transaction over the whole body.
-  const next = withOpaqueAttachments(service, body, (input) => {
+  const next = withOpaqueAttachments(service.attachmentsPolicy ?? "block", body, (input) => {
     const masked = service.protectJsonForModel(sessionID, input);
     if (!masked.ok) throw new Error(MASK_FAILURE);
     const value = masked.value;
@@ -687,7 +713,7 @@ function validateAnthropicContent(content: unknown, allowAttachments: boolean): 
   if (!Array.isArray(content)) throw new Error(UNSUPPORTED_REQUEST_BODY);
   for (const block of content) {
     if (!isRecord(block)) throw new Error(UNSUPPORTED_REQUEST_BODY);
-    if (allowAttachments && (block.type === "media" || block.type === "file")) continue;
+    if (allowAttachments && isAttachmentRecord(block)) continue;
     switch (block.type) {
       case "text":
         if (typeof block.text !== "string") throw new Error(UNSUPPORTED_REQUEST_BODY);
@@ -709,7 +735,7 @@ function validateAnthropicContent(content: unknown, allowAttachments: boolean): 
         for (const part of inner) {
           // Images/documents inside tool results refuse like top-level ones,
           // unless the user explicitly chose the "allow" policy.
-          if (allowAttachments && isRecord(part) && (part.type === "media" || part.type === "file")) {
+          if (allowAttachments && isAttachmentRecord(part)) {
             continue;
           }
           if (!isRecord(part) || part.type !== "text" || typeof part.text !== "string") {
@@ -821,7 +847,7 @@ export async function remaskAnthropicMessagesRequest(
   });
   if (unsafeNumber) throw new Error(UNSUPPORTED_REQUEST_BODY);
 
-  const next = withOpaqueAttachments(service, body, (input) => {
+  const next = withOpaqueAttachments(service.attachmentsPolicy ?? "block", body, (input) => {
     const masked = service.protectJsonForModel(sessionID, input);
     if (!masked.ok) throw new Error(MASK_FAILURE);
     const value = masked.value;
@@ -857,7 +883,7 @@ function validateResponsesContentParts(content: unknown, allowAttachments: boole
   if (content === undefined || content === null || typeof content === "string") return;
   if (!Array.isArray(content)) throw new Error(UNSUPPORTED_REQUEST_BODY);
   for (const part of content) {
-    if (allowAttachments && isRecord(part) && (part.type === "media" || part.type === "file")) {
+    if (allowAttachments && isAttachmentRecord(part)) {
       continue;
     }
     if (
@@ -1000,7 +1026,7 @@ export async function remaskResponsesRequest(
   });
   if (unsafeNumber) throw new Error(UNSUPPORTED_REQUEST_BODY);
 
-  const next = withOpaqueAttachments(service, body, (input) => {
+  const next = withOpaqueAttachments(service.attachmentsPolicy ?? "block", body, (input) => {
     const masked = service.protectJsonForModel(sessionID, input);
     if (!masked.ok) throw new Error(MASK_FAILURE);
     const value = masked.value;
@@ -1450,15 +1476,30 @@ export function createSseRestoreStream(
  * (restored below) or inside tool_use.input (deliberately kept tokenized for
  * the typed tool gate). Anywhere else it is a stray that must refuse.
  */
-function anthropicStrayTokenIn(body: unknown): boolean {
-  if (typeof body === "string") {
-    return body.includes(PSEUDONYM_TOKEN_PREFIX);
+type AnthropicAllowedFields = WeakMap<object, Set<string>>;
+
+/**
+ * Marks a field as display-restored assistant text. Per the literal-content
+ * policy (spec §Mapping and restoration), an unknown or malformed marker
+ * string that survives display restoration there is literal content — not a
+ * stray — while identifiers, transport metadata, and tool arguments stay
+ * strict everywhere else.
+ */
+function allowAnthropicField(fields: AnthropicAllowedFields, record: Record<string, unknown>, field: string): void {
+  const allowed = fields.get(record) ?? new Set<string>();
+  allowed.add(field);
+  fields.set(record, allowed);
+}
+
+function anthropicStrayTokenIn(value: unknown, fields?: AnthropicAllowedFields): boolean {
+  if (typeof value === "string") {
+    return value.includes(PSEUDONYM_TOKEN_PREFIX);
   }
-  if (body === null || typeof body !== "object") return false;
-  if (Array.isArray(body)) {
-    return body.some((item) => anthropicStrayTokenIn(item));
+  if (value === null || typeof value !== "object") return false;
+  if (Array.isArray(value)) {
+    return value.some((item) => anthropicStrayTokenIn(item, fields));
   }
-  const record = body as Record<string, unknown>;
+  const record = value as Record<string, unknown>;
   for (const key of Object.keys(record)) {
     if (key.includes(PSEUDONYM_TOKEN_PREFIX)) return true;
     const value = record[key];
@@ -1471,11 +1512,12 @@ function anthropicStrayTokenIn(body: unknown): boolean {
           if (typeof block.id === "string" && block.id.includes(PSEUDONYM_TOKEN_PREFIX)) return true;
           continue; // input stays tokenized by design
         }
-        if (anthropicStrayTokenIn(block)) return true;
+        if (anthropicStrayTokenIn(block, fields)) return true;
       }
       continue;
     }
-    if (anthropicStrayTokenIn(value)) return true;
+    if (fields?.get(record)?.has(key)) continue;
+    if (anthropicStrayTokenIn(value, fields)) return true;
   }
   return false;
 }
@@ -1505,18 +1547,20 @@ async function restoreAnthropicJsonResponse(
   if (!Array.isArray(body.content)) throw new Error(UNSUPPORTED_RESPONSE);
 
   let changed = false;
+  const fields: AnthropicAllowedFields = new WeakMap();
   for (const block of body.content) {
     if (!isRecord(block)) throw new Error(UNSUPPORTED_RESPONSE);
     if (block.type === "text") {
       if (typeof block.text !== "string") throw new Error(UNSUPPORTED_RESPONSE);
       if (block.text.length > 0) {
         block.text = restoreDisplayText(service, sessionID, block.text);
+        allowAnthropicField(fields, block, "text");
         changed = true;
       }
     }
     // tool_use / other blocks: input stays tokenized until the typed tool gate.
   }
-  if (anthropicStrayTokenIn(body)) throw new Error(UNSUPPORTED_RESPONSE);
+  if (anthropicStrayTokenIn(body, fields)) throw new Error(UNSUPPORTED_RESPONSE);
   if (!changed) return response;
   const next = JSON.stringify(body);
   const headers = new Headers(response.headers);
@@ -1547,6 +1591,7 @@ export function createAnthropicSseRestoreStream(
   const encoder = new TextEncoder();
   const channels = new Map<number, string>();
   const terminalBlocks = new Set<number>();
+  const allowedFields: AnthropicAllowedFields = new WeakMap();
   let totalChannelBytes = 0;
   let pending = "";
   let pendingBytes = 0;
@@ -1608,6 +1653,7 @@ export function createAnthropicSseRestoreStream(
               if (!isRecord(block)) throw new Error(MALFORMED_STREAM);
               if (block.type === "text" && typeof block.text === "string" && block.text.length > 0) {
                 block.text = restoreDisplayText(service, sessionID, block.text);
+                allowAnthropicField(allowedFields, block, "text");
               }
             }
           }
@@ -1625,6 +1671,7 @@ export function createAnthropicSseRestoreStream(
             const { emit, hold } = splitRestorable(buffered);
             if (emit.length > 0) block.text = restoreDisplayText(service, sessionID, emit);
             else block.text = "";
+            allowAnthropicField(allowedFields, block, "text");
             if (hold === "") deleteChannel(index);
             else setChannel(index, hold);
           }
@@ -1642,6 +1689,7 @@ export function createAnthropicSseRestoreStream(
             const buffered = held + delta.text;
             const { emit, hold } = splitRestorable(buffered);
             delta.text = emit.length === 0 ? "" : restoreDisplayText(service, sessionID, emit);
+            allowAnthropicField(allowedFields, delta, "text");
             if (hold === "") deleteChannel(index);
             else setChannel(index, hold);
           }
@@ -1668,7 +1716,7 @@ export function createAnthropicSseRestoreStream(
           break;
       }
 
-      if (anthropicChunkStrayTokenIn(chunk)) throw new Error(UNSUPPORTED_RESPONSE);
+      if (anthropicChunkStrayTokenIn(chunk, allowedFields)) throw new Error(UNSUPPORTED_RESPONSE);
       outputLines = emitPayload(JSON.stringify(chunk));
     }
     const text = outputLines.join("\n");
@@ -1749,7 +1797,7 @@ export function createAnthropicSseRestoreStream(
 
 /** Stray-token policy for one Anthropic SSE chunk: tokens may live only in
  * text channels (already restored above) and tool_use/input_json payloads. */
-function anthropicChunkStrayTokenIn(chunk: Record<string, unknown>): boolean {
+function anthropicChunkStrayTokenIn(chunk: Record<string, unknown>, fields?: AnthropicAllowedFields): boolean {
   const check = (value: unknown, inToolPayload: boolean): boolean => {
     if (typeof value === "string") {
       return !inToolPayload && value.includes(PSEUDONYM_TOKEN_PREFIX);
@@ -1764,6 +1812,7 @@ function anthropicChunkStrayTokenIn(chunk: Record<string, unknown>): boolean {
       if (key === "partial_json" || key === "input") {
         continue; // tool-argument payloads stay tokenized by design
       }
+      if (fields?.get(record)?.has(key)) continue;
       if (check(record[key], inToolPayload)) return true;
     }
     return false;
@@ -1830,53 +1879,86 @@ export async function restoreModelResponse(
 
 // ─── OpenAI Responses response restore ──────────────────────────────────────
 
-/** Restores output_text parts inside one Responses output item (in place). */
+const RESPONSES_TEXT_PART_TYPES = new Set(["output_text", "input_text", "summary_text", "reasoning_text"]);
+const RESPONSES_TEXT_DELTA_TYPES = new Set([
+  "response.output_text.delta",
+  "response.refusal.delta",
+  "response.reasoning.delta",
+  "response.reasoning_text.delta",
+  "response.reasoning_summary_text.delta",
+]);
+const RESPONSES_TEXT_DONE_TYPES = new Set([
+  "response.output_text.done",
+  "response.refusal.done",
+  "response.reasoning.done",
+  "response.reasoning_text.done",
+  "response.reasoning_summary_text.done",
+]);
+
+type ResponsesAllowedFields = WeakMap<object, Set<string>>;
+
+function allowResponsesField(fields: ResponsesAllowedFields, record: Record<string, unknown>, field: string): void {
+  const allowed = fields.get(record) ?? new Set<string>();
+  allowed.add(field);
+  fields.set(record, allowed);
+}
+
+function restoreResponsesPartText(
+  service: TransportMaskingService,
+  sessionID: string,
+  part: Record<string, unknown>,
+  fields: ResponsesAllowedFields,
+): boolean {
+  if (typeof part.type === "string" && RESPONSES_TEXT_PART_TYPES.has(part.type) && typeof part.text === "string") {
+    part.text = restoreDisplayText(service, sessionID, part.text);
+    allowResponsesField(fields, part, "text");
+    return true;
+  }
+  if (part.type === "refusal" && typeof part.refusal === "string") {
+    part.refusal = restoreDisplayText(service, sessionID, part.refusal);
+    allowResponsesField(fields, part, "refusal");
+    return true;
+  }
+  return false;
+}
+
 function restoreResponsesItemText(
   service: TransportMaskingService,
   sessionID: string,
   item: Record<string, unknown>,
+  fields: ResponsesAllowedFields,
 ): boolean {
+  if (item.type === "function_call" && typeof item.arguments === "string") {
+    allowResponsesField(fields, item, "arguments");
+  }
+  if (item.type === "function_call_output" && typeof item.output === "string") {
+    allowResponsesField(fields, item, "output");
+  }
   let changed = false;
-  const content = item.content;
-  if (Array.isArray(content)) {
-    for (const part of content) {
-      if (
-        isRecord(part) &&
-        (part.type === "output_text" || part.type === "input_text") &&
-        typeof part.text === "string" &&
-        part.text.length > 0
-      ) {
-        part.text = restoreDisplayText(service, sessionID, part.text);
-        changed = true;
-      }
+  const partFields = item.type === "message" ? ["content"] : item.type === "reasoning" ? ["content", "summary"] : [];
+  for (const field of partFields) {
+    const parts = item[field];
+    if (!Array.isArray(parts)) continue;
+    for (const part of parts) {
+      if (isRecord(part)) changed = restoreResponsesPartText(service, sessionID, part, fields) || changed;
     }
   }
-  if (typeof item.text === "string" && item.type === "output_text" && item.text.length > 0) {
-    item.text = restoreDisplayText(service, sessionID, item.text);
-    changed = true;
-  }
-  return changed;
+  return restoreResponsesPartText(service, sessionID, item, fields) || changed;
 }
 
-/** Token in a Responses payload may appear only in output/input text (in
- * place before this check) and function_call arguments/output (tool gate). */
-function responsesStrayTokenIn(value: unknown): boolean {
+function responsesStrayTokenIn(value: unknown, fields: ResponsesAllowedFields): boolean {
   if (typeof value === "string") {
     return value.includes(PSEUDONYM_TOKEN_PREFIX);
   }
   if (value === null || typeof value !== "object") return false;
   if (Array.isArray(value)) {
-    return value.some((item) => responsesStrayTokenIn(item));
+    return value.some((item) => responsesStrayTokenIn(item, fields));
   }
   const record = value as Record<string, unknown>;
   for (const key of Object.keys(record)) {
     if (key.includes(PSEUDONYM_TOKEN_PREFIX)) return true;
-    // Tool-gate payloads: function_call arguments/output, and SSE delta
-    // payloads (output_text deltas are restored in place before this check,
-    // so a surviving token under "delta" is a function_call_arguments delta,
-    // which stays tokenized by design).
-    if (key === "arguments" || key === "output" || key === "delta") continue;
-    if (responsesStrayTokenIn(record[key])) return true;
+    if (fields.get(record)?.has(key)) continue;
+    if (responsesStrayTokenIn(record[key], fields)) return true;
   }
   return false;
 }
@@ -1899,17 +1981,18 @@ async function restoreResponsesJsonResponse(
     if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) throw new Error(UNSUPPORTED_RESPONSE);
     return response;
   }
+  const fields: ResponsesAllowedFields = new WeakMap();
   if (body.output_text !== undefined && typeof body.output_text === "string") {
     body.output_text = restoreDisplayText(service, sessionID, body.output_text);
+    allowResponsesField(fields, body, "output_text");
   }
   if (Array.isArray(body.output)) {
     for (const item of body.output) {
       if (!isRecord(item)) throw new Error(UNSUPPORTED_RESPONSE);
-      restoreResponsesItemText(service, sessionID, item);
-      // function_call items stay tokenized for the typed tool gate.
+      restoreResponsesItemText(service, sessionID, item, fields);
     }
   }
-  if (responsesStrayTokenIn(body)) throw new Error(UNSUPPORTED_RESPONSE);
+  if (responsesStrayTokenIn(body, fields)) throw new Error(UNSUPPORTED_RESPONSE);
   const next = JSON.stringify(body);
   const headers = new Headers(response.headers);
   headers.delete("content-encoding");
@@ -1932,6 +2015,7 @@ export function createResponsesSseRestoreStream(
   const decoder = new TextDecoder("utf-8");
   const encoder = new TextEncoder();
   const channels = new Map<string, string>();
+  const emittedRawCounts = new Map<string, number>();
   let totalChannelBytes = 0;
   let pending = "";
   let pendingBytes = 0;
@@ -1950,6 +2034,26 @@ export function createResponsesSseRestoreStream(
     const previous = channels.get(channel);
     if (previous !== undefined) totalChannelBytes -= byteLength(previous);
     channels.delete(channel);
+  };
+  const finishChannel = (key: string, fullText: string, chunk: Record<string, unknown>, kind: string): string => {
+    const held = channels.get(key);
+    const offset = emittedRawCounts.get(key) ?? 0;
+    emittedRawCounts.delete(key);
+    if (held === undefined) return "";
+    const remainder = fullText.slice(offset);
+    if (offset > fullText.length || !remainder.startsWith(held)) throw new Error(MALFORMED_STREAM);
+    const delta = restoreDisplayText(service, sessionID, remainder);
+    deleteChannel(key);
+    if (delta.length === 0) return "";
+    const event = {
+      type: `${kind}.delta`,
+      item_id: chunk.item_id,
+      output_index: chunk.output_index,
+      content_index: chunk.content_index,
+      summary_index: chunk.summary_index,
+      delta,
+    };
+    return `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
   };
 
   const processEvent = (terminated: boolean): string => {
@@ -1972,62 +2076,119 @@ export function createResponsesSseRestoreStream(
       framing.concat(payload.split("\n").map((line) => `data: ${line}`));
 
     let outputLines: string[];
+    let additionalEvents = "";
     if (dataPayloads.length === 0) {
       outputLines = framing;
     } else {
       const joined = dataPayloads.join("\n");
-      let chunk: unknown;
-      try {
-        chunk = JSON.parse(joined);
-      } catch {
-        throw new Error(MALFORMED_STREAM);
-      }
-      if (!isRecord(chunk) || typeof chunk.type !== "string") throw new Error(MALFORMED_STREAM);
-      if (terminal.value) throw new Error(MALFORMED_STREAM);
-
-      const channelKey = (): string => {
-        const item = chunk.item_id ?? chunk.id ?? chunk.output_index;
-        return typeof item === "string" || typeof item === "number" ? String(item) : "0";
-      };
-
-      if (chunk.type === "response.output_text.delta") {
-        if (typeof chunk.delta !== "string") throw new Error(MALFORMED_STREAM);
-        const key = channelKey();
-        if (!channels.has(key) && channels.size >= MAX_CHANNELS) throw new Error(STREAM_BUFFER_LIMIT);
-        const held = channels.get(key) ?? "";
-        if (byteLength(held) + byteLength(chunk.delta) > MAX_CHANNEL_BYTES) {
-          throw new Error(STREAM_BUFFER_LIMIT);
-        }
-        const buffered = held + chunk.delta;
-        const { emit, hold } = splitRestorable(buffered);
-        chunk.delta = emit.length === 0 ? "" : restoreDisplayText(service, sessionID, emit);
-        if (hold === "") deleteChannel(key);
-        else setChannel(key, hold);
-      } else if (chunk.type === "response.output_item.added" || chunk.type === "response.output_item.done") {
-        const item = chunk.item;
-        if (isRecord(item)) restoreResponsesItemText(service, sessionID, item);
-      } else if (
-        chunk.type === "response.completed" ||
-        chunk.type === "response.failed" ||
-        chunk.type === "response.incomplete"
-      ) {
+      if (joined.trim() === "[DONE]") {
         if (channels.size !== 0) throw new Error(MALFORMED_STREAM);
+        emittedRawCounts.clear();
         terminal.value = true;
-        const response = chunk.response;
-        if (isRecord(response) && Array.isArray(response.output)) {
-          for (const item of response.output) {
-            if (isRecord(item)) restoreResponsesItemText(service, sessionID, item);
-          }
+        outputLines = emitPayload("[DONE]");
+      } else {
+        let chunk: unknown;
+        try {
+          chunk = JSON.parse(joined);
+        } catch {
+          throw new Error(MALFORMED_STREAM);
         }
-      }
-      // function_call_arguments deltas, reasoning events, others: untouched.
+        if (!isRecord(chunk) || typeof chunk.type !== "string") throw new Error(MALFORMED_STREAM);
+        if (terminal.value) throw new Error(MALFORMED_STREAM);
+        const eventType = chunk.type;
+        const fields: ResponsesAllowedFields = new WeakMap();
 
-      if (responsesStrayTokenIn(chunk)) throw new Error(UNSUPPORTED_RESPONSE);
-      outputLines = emitPayload(JSON.stringify(chunk));
+        const channelKey = (kind = eventType.replace(/\.(?:delta|done)$/, "")): string => {
+          const item = chunk.item_id ?? chunk.id ?? chunk.output_index;
+          const identity = typeof item === "string" || typeof item === "number" ? item : "0";
+          return JSON.stringify([kind, identity, chunk.content_index ?? chunk.summary_index ?? 0]);
+        };
+
+        if (RESPONSES_TEXT_DELTA_TYPES.has(eventType)) {
+          if (typeof chunk.delta !== "string") throw new Error(MALFORMED_STREAM);
+          const key = channelKey();
+          if ((!emittedRawCounts.has(key) && emittedRawCounts.size >= MAX_CHANNELS) || byteLength(key) > MAX_CHANNEL_BYTES) {
+            throw new Error(STREAM_BUFFER_LIMIT);
+          }
+          const held = channels.get(key) ?? "";
+          if (byteLength(held) + byteLength(chunk.delta) > MAX_CHANNEL_BYTES) {
+            throw new Error(STREAM_BUFFER_LIMIT);
+          }
+          const buffered = held + chunk.delta;
+          const { emit, hold } = splitRestorable(buffered);
+          emittedRawCounts.set(key, (emittedRawCounts.get(key) ?? 0) + emit.length);
+          chunk.delta = emit.length === 0 ? "" : restoreDisplayText(service, sessionID, emit);
+          allowResponsesField(fields, chunk, "delta");
+          if (hold === "") deleteChannel(key);
+          else setChannel(key, hold);
+        } else if (RESPONSES_TEXT_DONE_TYPES.has(eventType)) {
+          const field = eventType === "response.refusal.done" ? "refusal" : "text";
+          if (chunk[field] !== undefined) {
+            if (typeof chunk[field] !== "string") throw new Error(MALFORMED_STREAM);
+            additionalEvents += finishChannel(channelKey(), chunk[field], chunk, eventType.replace(/\.done$/, ""));
+            chunk[field] = restoreDisplayText(service, sessionID, chunk[field]);
+            allowResponsesField(fields, chunk, field);
+          } else if (channels.has(channelKey())) {
+            throw new Error(MALFORMED_STREAM);
+          } else {
+            emittedRawCounts.delete(channelKey());
+          }
+        } else if (
+          eventType === "response.content_part.added" ||
+          eventType === "response.content_part.done" ||
+          eventType === "response.reasoning_summary_part.added" ||
+          eventType === "response.reasoning_summary_part.done"
+        ) {
+          const part = chunk.part;
+          if (isRecord(part)) {
+            const completeText = part.type === "refusal" ? part.refusal : part.text;
+            if (restoreResponsesPartText(service, sessionID, part, fields) && eventType.endsWith(".done") && typeof completeText === "string") {
+              const kind = part.type === "summary_text" ? "reasoning_summary_text" : String(part.type);
+              additionalEvents += finishChannel(channelKey(`response.${kind}`), completeText, chunk, `response.${kind}`);
+            }
+          }
+        } else if (eventType === "response.output_item.added" || eventType === "response.output_item.done") {
+          const item = chunk.item;
+          if (isRecord(item)) {
+            restoreResponsesItemText(service, sessionID, item, fields);
+            if (eventType === "response.output_item.done") {
+              for (const key of emittedRawCounts.keys()) {
+                if (JSON.parse(key)[1] === item.id && !channels.has(key)) emittedRawCounts.delete(key);
+              }
+            }
+          }
+        } else if (
+          eventType === "response.completed" ||
+          eventType === "response.failed" ||
+          eventType === "response.incomplete"
+        ) {
+          if (channels.size !== 0) throw new Error(MALFORMED_STREAM);
+          emittedRawCounts.clear();
+          terminal.value = true;
+          const response = chunk.response;
+          if (isRecord(response)) {
+            if (typeof response.output_text === "string") {
+              response.output_text = restoreDisplayText(service, sessionID, response.output_text);
+              allowResponsesField(fields, response, "output_text");
+            }
+            if (Array.isArray(response.output)) {
+              for (const item of response.output) {
+                if (isRecord(item)) restoreResponsesItemText(service, sessionID, item, fields);
+              }
+            }
+          }
+        } else if (eventType === "response.function_call_arguments.delta" || eventType === "response.function_call_arguments.done") {
+          const field = eventType.endsWith(".delta") ? "delta" : "arguments";
+          if (typeof chunk[field] === "string") allowResponsesField(fields, chunk, field);
+        }
+
+        if (responsesStrayTokenIn(chunk, fields)) throw new Error(UNSUPPORTED_RESPONSE);
+        outputLines = emitPayload(JSON.stringify(chunk));
+      }
     }
     const text = outputLines.join("\n");
     if (text.length === 0) return terminated ? "\n" : "";
-    return terminated ? `${text}\n\n` : text;
+    return additionalEvents + (terminated ? `${text}\n\n` : text);
   };
 
   const pushLine = (line: string): void => {

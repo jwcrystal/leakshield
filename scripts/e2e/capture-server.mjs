@@ -350,27 +350,51 @@ function writeResponsesSse(res, parsed) {
     connection: "keep-alive",
   });
   res.write(event("response.created", { type: "response.created", response: { id: `resp-${seq}` } }));
+  const part = { type: "output_text", text, annotations: [] };
+  const item = { type: "message", id: `msg-${seq}`, role: "assistant", status: "completed", content: [part] };
   res.write(event("response.output_item.added", {
     type: "response.output_item.added",
     output_index: 0,
-    item: { type: "message", id: `msg-${seq}`, role: "assistant", content: [] },
+    item: { ...item, status: "in_progress", content: [] },
+  }));
+  res.write(event("response.content_part.added", {
+    type: "response.content_part.added",
+    item_id: item.id,
+    output_index: 0,
+    content_index: 0,
+    part: { ...part, text: "" },
   }));
   res.write(event("response.output_text.delta", {
     type: "response.output_text.delta",
-    item_id: `msg-${seq}`,
+    item_id: item.id,
     output_index: 0,
     content_index: 0,
     delta: text,
   }));
+  res.write(event("response.output_text.done", {
+    type: "response.output_text.done",
+    item_id: item.id,
+    output_index: 0,
+    content_index: 0,
+    text,
+  }));
+  res.write(event("response.content_part.done", {
+    type: "response.content_part.done",
+    item_id: item.id,
+    output_index: 0,
+    content_index: 0,
+    part,
+  }));
   res.write(event("response.output_item.done", {
     type: "response.output_item.done",
     output_index: 0,
-    item: { type: "message", id: `msg-${seq}`, role: "assistant", content: [] },
+    item,
   }));
   res.write(event("response.completed", {
     type: "response.completed",
-    response: { id: `resp-${seq}`, output: [] },
+    response: { id: `resp-${seq}`, status: "completed", output: [item] },
   }));
+  res.write("data: [DONE]\n\n");
   res.end();
 }
 

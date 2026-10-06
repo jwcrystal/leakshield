@@ -78,6 +78,8 @@ const TOOL_SHELL_CONTEXT_ERROR =
   "Sensitive Guard transparent mode blocked this tool call because the shell command does not use a supported literal-argument form. Rewrite it as a simple command or use a non-shell tool.";
 const TOOL_INPUT_SHAPE_ERROR =
   "Sensitive Guard transparent mode blocked this tool call because its argument structure cannot be safely restored. Refresh the arguments using plain JSON values and retry.";
+const STRUCTURAL_SENSITIVE_ERROR =
+  "Sensitive Guard transparent mode refused this model request: a structural identifier (message or tool id, name, role, or part type) scans as sensitive, and masking cannot rewrite it without breaking the protocol. Adjust the matching rule in the guard config or change the identifier, then retry.";
 
 function toolRestoreError(reason: PseudonymFailureReason): string {
   if (reason === "unknown_token" || reason === "malformed_token") return TOOL_UNKNOWN_MAPPING_ERROR;
@@ -200,6 +202,33 @@ const NON_SHELL_TOOLS = new Set([
   "todoread",
   "notebookedit",
 ]);
+/**
+ * Tools whose calls are observably read-only: an unresolved placeholder in
+ * their arguments reads/greps/lists against a literal string and matches
+ * nothing — no state change, no outbound transmission. Only these qualify
+ * for P1 (2026-10-06b) best-effort literal passthrough when restoration is
+ * incomplete. Everything else — writes, deletes, edits, network calls,
+ * shell, unknown tools — refuses the affected invocation.
+ */
+const READ_ONLY_TOOLS = new Set([
+  "read",
+  "read_file",
+  "view",
+  "grep",
+  "glob",
+  "list",
+  "ls",
+  "find",
+  "todoread",
+]);
+/**
+ * Content-free degradation notice for the host log: one WARN line, a fixed
+ * context word plus a count, never request content. No side files, no
+ * provider-body notices (P1, 2026-10-06b).
+ */
+const warnDegradation = (context: string): void => {
+  console.warn(`[sensitive-guard] degraded: ${context}`);
+};
 /** A value is shell-safe when it is non-empty, does not start with "-", and
  * contains no shell-significant character. */
 function isShellSafeOriginal(text: string): boolean {
@@ -501,15 +530,23 @@ export function createTransparentSessionGuard(
     typeof event.kind === "string" ? event.kind : "";
 
   /**
-   * Refuses a structural identifier that content-aware masking would rewrite: a
-   * reserved token prefix (unmappable replay) or a scanner finding (sensitive
-   * id, tool name, or schema constraint). Preserved identifiers never change;
-   * unsafe ones fail the whole request instead of being silently renamed.
+   * Structural identifiers are preserved verbatim, so they are judged, not
+   * masked. P1 (2026-10-06b): marker-shaped content is never refused per se —
+   * registered-marker interiors are exempt from scanning, unregistered
+   * payloads scan as ordinary text. Clean → preserved literal with a
+   * content-free WARN. Any finding → refusal: the position cannot be masked
+   * or renamed without breaking the protocol (genuine leak-risk refusal).
    */
   const detectSensitive = (text: string): boolean => !pseudonymizer.isTextSafe(text);
-  const assertStructuralSafe = (text: string): void => {
-    if (text.includes(PSEUDONYM_TOKEN_PREFIX)) throw new Error(PROTECT_FAILED_ERROR);
-    if (detectSensitive(text)) throw new Error(PROTECT_FAILED_ERROR);
+  const assertStructuralSafe = (text: string, sessionID: string): void => {
+    if (text.includes(PSEUDONYM_TOKEN_PREFIX)) {
+      if (!pseudonymizer.isStructuralIdentifierSafe(sessionID, text)) {
+        throw new Error(STRUCTURAL_SENSITIVE_ERROR);
+      }
+      warnDegradation("structural identifier preserved with a literal placeholder");
+      return;
+    }
+    if (detectSensitive(text)) throw new Error(STRUCTURAL_SENSITIVE_ERROR);
   };
   /** Rejects a snapshot whose numeric values scan as sensitive (never masked). */
   const assertNumbersSafe = (value: unknown): void => {
@@ -530,6 +567,7 @@ export function createTransparentSessionGuard(
     restoreText: (sid, text) => pseudonymizer.restoreText(sid, text),
     restoreTextForDisplay: (sid, text) => pseudonymizer.restoreTextForDisplay(sid, text),
     detectSensitive,
+    isStructuralIdentifierSafe: (sid, text) => pseudonymizer.isStructuralIdentifierSafe(sid, text),
     attachmentsPolicy,
   };
 
@@ -665,11 +703,13 @@ export function createTransparentSessionGuard(
     }
     if (!isRecordLike(plain)) throw new Error(PROTECT_FAILED_ERROR);
     // Structural identifiers must be preserved verbatim. Verify them BEFORE
-    // masking so an unsafe one (sensitive-looking id/name/schema constraint)
-    // refuses the whole request rather than being silently renamed. Numeric
-    // values are never transformed by masking, so a sensitive one refuses.
+    // masking: a sensitive one (sensitive-looking id/name) refuses the whole
+    // request rather than being silently renamed, while a placeholder-shaped
+    // one is judged session-aware — clean markers are preserved literal with
+    // a WARN (P1, 2026-10-06b). Numeric values are never transformed by
+    // masking, so a sensitive one refuses.
     const structuralBefore = collectStructuralStrings(plain);
-    for (const identifier of structuralBefore) assertStructuralSafe(identifier);
+    for (const identifier of structuralBefore) assertStructuralSafe(identifier, sessionID);
     assertNumbersSafe(plain);
     // "allow" means unscanned: attachment payloads are substituted with opaque
     // sentinels around the masking transaction (the same mechanism the wire
@@ -746,8 +786,21 @@ export function createTransparentSessionGuard(
    * substitution could change the command's meaning (variable expansion,
    * word splitting, globbing, option injection). Anything not provably safe
    * refuses the whole call.
+   *
+   * P1 (2026-10-06b) limited best-effort: when `allowDegraded` is set (the
+   * call is a proven read-only tool, not shell-like) a mapping failure
+   * (unknown/malformed marker) keeps the leaf literal and records a
+   * degradation instead of refusing — the placeholder reads as a literal
+   * that matches nothing, the tool's own output is the in-band signal, and a
+   * content-free WARN line is logged. Every other failure kind still refuses.
    */
-  const restoreLeaf = (sessionID: string, text: string, shellLike: boolean): string => {
+  const restoreLeaf = (
+    sessionID: string,
+    text: string,
+    shellLike: boolean,
+    allowDegraded: boolean,
+    degraded: { count: number },
+  ): string => {
     if (!text.includes(PSEUDONYM_TOKEN_PREFIX)) return text;
     if (shellLike) {
       if (!isSupportedSimpleShellCommand(text)) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
@@ -761,8 +814,15 @@ export function createTransparentSessionGuard(
       }
     }
     const restored = transportService.restoreText(sessionID, text);
-    if (!restored.ok) throw new Error(toolRestoreError(restored.reason));
-    return restored.text;
+    if (restored.ok) return restored.text;
+    if (
+      allowDegraded &&
+      (restored.reason === "unknown_token" || restored.reason === "malformed_token")
+    ) {
+      degraded.count += 1;
+      return text;
+    }
+    throw new Error(toolRestoreError(restored.reason));
   };
 
   type ToolAssignment = { container: RecordLike | unknown[]; key: string | number; value: string };
@@ -778,6 +838,8 @@ export function createTransparentSessionGuard(
     shellLike: boolean,
     seen: WeakSet<object>,
     out: ToolAssignment[],
+    allowDegraded: boolean,
+    degraded: { count: number },
   ): void => {
     if (value === null || typeof value !== "object") return;
     if (types.isProxy(value) || seen.has(value) || Object.isFrozen(value)) {
@@ -795,10 +857,10 @@ export function createTransparentSessionGuard(
         if (!("value" in descriptor)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
         const item = descriptor.value;
         if (typeof item === "string") {
-          const next = restoreLeaf(sessionID, item, shellLike);
+          const next = restoreLeaf(sessionID, item, shellLike, allowDegraded, degraded);
           if (next !== item) out.push({ container: value, key: index, value: next });
         } else {
-          planToolInput(item, sessionID, shellLike, seen, out);
+          planToolInput(item, sessionID, shellLike, seen, out, allowDegraded, degraded);
         }
       }
       return;
@@ -812,10 +874,10 @@ export function createTransparentSessionGuard(
       if (descriptor === undefined || !("value" in descriptor)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
       const item = descriptor.value;
       if (typeof item === "string") {
-        const next = restoreLeaf(sessionID, item, shellLike);
+        const next = restoreLeaf(sessionID, item, shellLike, allowDegraded, degraded);
         if (next !== item) out.push({ container: record, key, value: next });
       } else {
-        planToolInput(item, sessionID, shellLike, seen, out);
+        planToolInput(item, sessionID, shellLike, seen, out, allowDegraded, degraded);
       }
     }
   };
@@ -846,18 +908,28 @@ export function createTransparentSessionGuard(
     const shellLike =
       !NON_SHELL_TOOLS.has(tool) ||
       (isRecordLike(event.input) && typeof (event.input as RecordLike).command === "string");
+    // P1 (2026-10-06b): only proven read-only, non-shell tools may degrade to
+    // literal placeholders; writes/deletes/outbound/unknown tools keep
+    // refusing the affected invocation when restoration is incomplete.
+    const allowDegraded = READ_ONLY_TOOLS.has(tool) && !shellLike;
+    const degraded = { count: 0 };
     if (typeof event.input === "string") {
       const descriptor = Object.getOwnPropertyDescriptor(event, "input");
       if (descriptor === undefined || !("value" in descriptor) || descriptor.writable !== true) {
         throw new Error(TOOL_INPUT_SHAPE_ERROR);
       }
-      event.input = restoreLeaf(sessionID, event.input, shellLike);
-      return;
+      event.input = restoreLeaf(sessionID, event.input, shellLike, allowDegraded, degraded);
+    } else {
+      const plan: ToolAssignment[] = [];
+      planToolInput(event.input, sessionID, shellLike, new WeakSet(), plan, allowDegraded, degraded);
+      assertToolPlanWritable(plan);
+      applyToolPlan(plan);
     }
-    const plan: ToolAssignment[] = [];
-    planToolInput(event.input, sessionID, shellLike, new WeakSet(), plan);
-    assertToolPlanWritable(plan);
-    applyToolPlan(plan);
+    if (degraded.count > 0) {
+      warnDegradation(
+        `read-only tool call kept ${degraded.count} literal placeholder(s); the tool's no-match output is the in-band signal`,
+      );
+    }
   };
 
   return {

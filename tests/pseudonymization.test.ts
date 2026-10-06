@@ -4,9 +4,10 @@
  * These tests exercise PUBLIC observable behavior of createPseudonymizer with
  * the real scanner and synthetic secrets only: mapping stability/distinction,
  * exact reversible roundtrips, session isolation, token-namespace validation,
- * fail-closed hazards (encoded/truncated/unicode/overlap/scanner errors),
- * documented budgets with atomic rollback, strict-JSON structural rules, and
- * static-only failure payloads. No private map layout or factory internals.
+ * fail-closed hazards (encoded/truncated/unicode/scanner errors), union
+ * masking of overlapping findings (P1, 2026-10-06b), documented budgets with
+ * atomic rollback, strict-JSON structural rules, and static-only failure
+ * payloads. No private map layout or factory internals.
  */
 
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -533,13 +534,21 @@ describe("fail-closed content hazards", () => {
     expect(ps.protectText("s", longUnicode)).toEqual({ ok: false, reason: "invalid_finding_span" });
   });
 
-  it("dedups identical spans from different rules but rejects real overlaps", () => {
+  it("dedups identical spans from different rules and unions real overlaps", () => {
     const overlapping = createPseudonymizer(
       configWith({}, [{ description: "overlap-inner", pattern: "Abcdef1234567890", severity: "LOW" }]),
     );
     expect(overlapping.ok).toBe(true);
     if (overlapping.ok) {
-      expect(overlapping.protectText("s", KEY1)).toEqual({ ok: false, reason: "overlapping_findings" });
+      // P1 (2026-10-06b): overlapping findings union-mask — one token covers
+      // both spans; no refusal, no partially-covered tail left behind.
+      const result = overlapping.protectText("s", KEY1);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(tokensIn(result.text)).toHaveLength(1);
+        expect(result.text).not.toContain(KEY1);
+        expect(result.text).not.toContain("Abcdef1234567890");
+      }
     }
     const identical = createPseudonymizer(
       configWith({}, [{ description: "same-span", pattern: "sk-[A-Za-z0-9\\-_]{20,120}", severity: "LOW" }]),
@@ -1176,5 +1185,128 @@ describe("durable validated configuration", () => {
       ...baseConfig,
       exact_value_detector: broken as unknown as GuardConfig["exact_value_detector"],
     })).toEqual({ ok: false, reason: "STATIC_CODE" });
+  });
+});
+
+// ─── P1 (2026-10-06b): union masking + whole-marker replacement ──────────────
+
+describe("P1 best-effort masking (2026-10-06b policy revision)", () => {
+  it("unions partially overlapping findings into one covering token with exact roundtrip", () => {
+    const svc = createPseudonymizer(
+      configWith({}, [
+        { description: "rule-a", pattern: "SUBJECT-ONE-REGION", severity: "LOW" },
+        { description: "rule-b", pattern: "ONE-REGION-END", severity: "LOW" },
+      ]),
+    );
+    expect(svc.ok).toBe(true);
+    if (!svc.ok) return;
+    const result = svc.protectText("s", "pre SUBJECT-ONE-REGION-END post");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // One token covers the union [rule-a.start, rule-b.end); no tail dropped.
+    expect(tokensIn(result.text)).toHaveLength(1);
+    expect(result.text).not.toContain("SUBJECT-ONE-REGION");
+    expect(result.text).not.toContain("ONE-REGION-END");
+    const token = tokensIn(result.text)[0];
+    expect(svc.restoreText("s", token)).toEqual({
+      ok: true,
+      text: "SUBJECT-ONE-REGION-END",
+    });
+  });
+
+  it("keeps the outer span for containment overlaps", () => {
+    const svc = createPseudonymizer(
+      configWith({}, [
+        { description: "outer", pattern: "SECRET-CONTAINER-TEXT", severity: "LOW" },
+        { description: "inner", pattern: "CONTAINER", severity: "LOW" },
+      ]),
+    );
+    expect(svc.ok).toBe(true);
+    if (!svc.ok) return;
+    const result = svc.protectText("s", "x SECRET-CONTAINER-TEXT y");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(tokensIn(result.text)).toHaveLength(1);
+    expect(result.text).not.toContain("SECRET-CONTAINER-TEXT");
+    expect(result.text).not.toContain("CONTAINER");
+  });
+
+  it("merges transitively overlapping chains into one span", () => {
+    const svc = createPseudonymizer(
+      configWith({}, [
+        { description: "chain-a", pattern: "AAA-BBB", severity: "LOW" },
+        { description: "chain-b", pattern: "BBB-CCC", severity: "LOW" },
+        { description: "chain-c", pattern: "CCC-DDD", severity: "LOW" },
+      ]),
+    );
+    expect(svc.ok).toBe(true);
+    if (!svc.ok) return;
+    const result = svc.protectText("s", "x AAA-BBB-CCC-DDD y");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(tokensIn(result.text)).toHaveLength(1);
+    expect(result.text).not.toContain("AAA-BBB");
+    expect(result.text).not.toContain("BBB-CCC");
+    expect(result.text).not.toContain("CCC-DDD");
+    const token = tokensIn(result.text)[0];
+    expect(svc.restoreText("s", token)).toEqual({ ok: true, text: "AAA-BBB-CCC-DDD" });
+  });
+
+  it("replaces a whole preserved marker when a finding touches its payload (no nesting)", () => {
+    // A prefix is not proof of trust: the payload still scans, and a hit
+    // replaces the ENTIRE marker as one unit — never a token nested inside
+    // the marker text (the corruption seen in the 02:23 replay).
+    const svc = createPseudonymizer(
+      configWith({}, [{ description: "hex-payload", pattern: "deadbeefdeadbeef", severity: "LOW" }]),
+    );
+    expect(svc.ok).toBe(true);
+    if (!svc.ok) return;
+    const result = svc.protectTextForModel("s", `keep ${FOREIGN_TOKEN} here`);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(tokensIn(result.text)).toHaveLength(1);
+    expect(result.text).not.toContain(FOREIGN_TOKEN);
+    expect(result.text).not.toContain("deadbeefdeadbeef");
+    // No nested-marker corruption ([SGP1:…[SGP1:…]): exactly one flat token.
+    expect(result.text).not.toMatch(/\[SGP1:[^\]]*\[SGP1:/);
+    const token = tokensIn(result.text)[0];
+    expect(svc.restoreTextForDisplay("s", token)).toEqual({ ok: true, text: FOREIGN_TOKEN });
+  });
+
+  it("still masks secrets after a bare prefix with no closing bracket", () => {
+    // Malformed/bare-prefix text is ordinary text: no exemption for what
+    // follows the unterminated prefix (P1: 不因缺少結尾而豁免後續文字).
+    const svc = createPseudonymizer(
+      configWith({}, [{ description: "hex-payload", pattern: "deadbeefdeadbeef", severity: "LOW" }]),
+    );
+    expect(svc.ok).toBe(true);
+    if (!svc.ok) return;
+    const result = svc.protectTextForModel(
+      "s",
+      "note [SGP1:deadbeefdeadbeef and plain deadbeefdeadbeef too",
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.text).not.toContain("deadbeefdeadbeef");
+    expect(result.text).toContain("[SGP1:");
+    expect(tokensIn(result.text)).toHaveLength(2);
+  });
+
+  it("passes a seq-1332 shaped replay: overlapping findings no longer fail the request", () => {
+    const svc = createPseudonymizer(
+      configWith({}, [
+        { description: "cred", pattern: "sk-[A-Za-z0-9\\-_]{20,120}", severity: "HIGH" },
+        { description: "kw-overlap", pattern: "KEYWORD-OVERLAP-sk", severity: "LOW" },
+      ]),
+    );
+    expect(svc.ok).toBe(true);
+    if (!svc.ok) return;
+    const text = "leak KEYWORD-OVERLAP-sk-QwertyuiopAsdfghjklZx tail";
+    const result = svc.protectTextForModel("s", text);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.text).not.toContain("KEYWORD-OVERLAP");
+    expect(result.text).not.toContain("sk-QwertyuiopAsdfghjklZx");
+    expect(tokensIn(result.text)).toHaveLength(1);
   });
 });

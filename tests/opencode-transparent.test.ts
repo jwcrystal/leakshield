@@ -247,9 +247,18 @@ describe("transparent session guard registration", () => {
     await hook("session:http.request")(event);
     expect(await (event.request as Request).clone().text()).toContain(token);
 
-    // The same unmapped token is still refused when a tool must restore it.
+    // The same unmapped token degrades for a proven read-only tool — the
+    // argument keeps the literal placeholder, whose no-match output is the
+    // in-band signal — while a side-effecting tool still refuses (P1).
+    const readOnly = { tool: "read", sessionID: "session-1", input: { filePath: `/x/${FOREIGN_TOKEN}` } };
+    await hook("tool:execute.before")(readOnly);
+    expect(readOnly.input.filePath).toBe(`/x/${FOREIGN_TOKEN}`);
     await expect(
-      hook("tool:execute.before")({ tool: "read", sessionID: "session-1", input: { filePath: `/x/${FOREIGN_TOKEN}` } }),
+      hook("tool:execute.before")({
+        tool: "write",
+        sessionID: "session-1",
+        input: { filePath: `/x/${FOREIGN_TOKEN}`, content: "data" },
+      }),
     ).rejects.toThrow("placeholder has no mapping in this session");
 
     // Idempotent second dispose.
@@ -295,10 +304,23 @@ describe("transparent outbound request snapshots", () => {
   it("rolls back atomically: a refused snapshot leaves the event untouched", async () => {
     const { hook } = await arm();
     const event = requestEvent();
-    (event.messages as Array<{ id: string }>)[0].id = FOREIGN_TOKEN;
+    // A sensitive structural identifier is a genuine leak-risk refusal; a
+    // placeholder-shaped id alone no longer refuses (P1, 2026-10-06b).
+    (event.messages as Array<{ id: string }>)[0].id = EMAIL;
     const before = JSON.stringify(event);
-    await expect(hook("session:context")(event)).rejects.toThrow(PROTECT_FAILED);
+    await expect(hook("session:context")(event)).rejects.toThrow("scans as sensitive");
     expect(JSON.stringify(event)).toBe(before);
+  });
+
+  it("preserves a placeholder-shaped structural identifier instead of refusing (P1)", async () => {
+    const { hook } = await arm();
+    const event = requestEvent();
+    // 02:07 shape: an orphan marker in a structural position is judged, not
+    // refused — payload scans clean, so the id stays literal with a WARN.
+    (event.messages as Array<{ id: string }>)[0].id = FOREIGN_TOKEN;
+    await expect(hook("session:context")(event)).resolves.toBeUndefined();
+    expect((event.messages as Array<{ id: string }>)[0].id).toBe(FOREIGN_TOKEN);
+    expect(JSON.stringify(event)).not.toContain(KEY);
   });
 
   it("refuses events without a usable sessionID and leaves them untouched", async () => {
@@ -365,8 +387,14 @@ describe("transparent outbound request snapshots", () => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY, "session-1");
 
+    // P1 (2026-10-06b): session isolation still holds — a foreign session
+    // never restores. A read-only tool degrades to the literal placeholder
+    // (no cross-session restore), a side-effecting tool refuses.
+    const readOnly = { tool: "read", sessionID: "session-2", input: { path: token } };
+    await hook("tool:execute.before")(readOnly);
+    expect(readOnly.input.path).toBe(token);
     await expect(
-      hook("tool:execute.before")({ tool: "read", sessionID: "session-2", input: { path: token } }),
+      hook("tool:execute.before")({ tool: "write", sessionID: "session-2", input: { filePath: "/x", content: token } }),
     ).rejects.toThrow(TOOL_REFUSED);
   });
 
@@ -412,7 +440,11 @@ describe("transparent outbound request snapshots", () => {
       const event = requestEvent();
       mutate(event);
       const before = JSON.stringify(event);
-      await expect(hook("session:context")(event)).rejects.toThrow(PROTECT_FAILED);
+      // P1 (2026-10-06b): genuine leak-risk refusals stay, with an actionable
+      // content-free message naming the position kind.
+      await expect(hook("session:context")(event)).rejects.toThrow(
+        "structural identifier (message or tool id, name, role, or part type) scans as sensitive",
+      );
       expect(JSON.stringify(event)).toBe(before);
     }
   });
@@ -470,8 +502,10 @@ describe("transparent outbound request snapshots", () => {
   it("does not retain failed-session state that would block later work", async () => {
     const { hook } = await arm();
     const bad = requestEvent("session-x");
-    (bad.messages as Array<{ id: string }>)[0].id = FOREIGN_TOKEN;
-    await expect(hook("session:context")(bad)).rejects.toThrow(PROTECT_FAILED);
+    // Genuine leak-risk refusal (sensitive structural id) — placeholder ids
+    // no longer fail (P1, 2026-10-06b).
+    (bad.messages as Array<{ id: string }>)[0].id = EMAIL;
+    await expect(hook("session:context")(bad)).rejects.toThrow("scans as sensitive");
 
     // The same session remains usable after a failed operation.
     const good = requestEvent("session-x");
@@ -635,13 +669,21 @@ describe("transparent tool execution gate", () => {
     expect(input).toEqual({ filePath: "/data/notes.txt" });
   });
 
-  it("refuses foreign tokens in tool inputs too", async () => {
+  it("degrades foreign tokens for read-only tools but refuses side-effecting ones", async () => {
     const { hook } = await arm();
+    // P1 (2026-10-06b): a read-only tool keeps the literal placeholder —
+    // its no-match output is the in-band signal — instead of refusing.
+    const readOnly = { filePath: `/x/${FOREIGN_TOKEN}` };
+    await expect(
+      hook("tool:execute.before")({ tool: "read", sessionID: "session-1", input: readOnly }),
+    ).resolves.toBeUndefined();
+    expect(readOnly.filePath).toBe(`/x/${FOREIGN_TOKEN}`);
+    // A side-effecting tool still refuses the affected invocation.
     await expect(
       hook("tool:execute.before")({
-        tool: "read",
+        tool: "write",
         sessionID: "session-1",
-        input: { filePath: `/x/${FOREIGN_TOKEN}` },
+        input: { filePath: `/x/${FOREIGN_TOKEN}`, content: "data" },
       }),
     ).rejects.toThrow("placeholder has no mapping in this session");
   });
@@ -829,17 +871,20 @@ describe("transparent http.request wire mask", () => {
     ).rejects.toThrow();
   });
 
-  it("refuses reserved tokens in headers but preserves authentication headers", async () => {
+  it("preserves judged-clean placeholders in headers and urls but preserves authentication headers", async () => {
     const { hook } = await arm();
+    // P1 (2026-10-06b): a placeholder in a header/query/url is judged, not
+    // refused — clean markers stay literal with a content-free WARN;
+    // sensitive content would still refuse (unmaskable position).
     const tokenHeader = chatRequest(
       { model: "g", messages: [{ role: "user", content: "safe" }] },
       { headers: { "x-custom": `value ${FOREIGN_TOKEN}` } },
     );
-    await expect(
-      hook("session:http.request")({ sessionID: "s", kind: "primary", request: tokenHeader }),
-    ).rejects.toThrow();
+    const headerEvent = { sessionID: "s", kind: "primary", request: tokenHeader };
+    await hook("session:http.request")(headerEvent);
+    expect((headerEvent.request as Request).headers.get("x-custom")).toContain(FOREIGN_TOKEN);
 
-    // A token in the query string is equally unrestorable.
+    // A token in the query string is equally preserved literally.
     const tokenQuery = new Request(
       `https://provider.example.com/v1/chat/completions?q=${encodeURIComponent(FOREIGN_TOKEN)}`,
       {
@@ -848,9 +893,9 @@ describe("transparent http.request wire mask", () => {
         body: JSON.stringify({ model: "g", messages: [{ role: "user", content: "safe" }] }),
       },
     );
-    await expect(
-      hook("session:http.request")({ sessionID: "s", kind: "primary", request: tokenQuery }),
-    ).rejects.toThrow();
+    const queryEvent = { sessionID: "s", kind: "primary", request: tokenQuery };
+    await hook("session:http.request")(queryEvent);
+    expect((queryEvent.request as Request).url).toContain(encodeURIComponent(FOREIGN_TOKEN));
 
     const clean = chatRequest({ model: "g", messages: [{ role: "user", content: "safe" }] });
     const event = { sessionID: "s", kind: "primary", request: clean };
@@ -1271,56 +1316,85 @@ describe("transparent http.response restore (JSON)", () => {
     await expect(dispatch(hook, models)).resolves.toBeUndefined();
   });
 
-  it("refuses token-bearing payloads it cannot place for restore", async () => {
+  it("keeps token-bearing payloads it cannot place literal (P1 degradation)", async () => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY);
     const noChoices = new Response(JSON.stringify({ result: token }), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
-    await expect(dispatch(hook, noChoices)).rejects.toThrow();
+    const event = { sessionID: "session-1", kind: "primary", request: chatRequest({ model: "g", messages: [] }), response: noChoices };
+    await hook("session:http.request")(event);
+    await hook("session:http.response")(event);
+    const body = await (event.response as Response).clone().text();
+    expect(body).toContain(token);
+    expect(body).not.toContain(KEY);
   });
 
-  it("refuses token-bearing unrestorable responses but passes token-free ones", async () => {
+  it("degrades token-bearing unrestorable responses and passes token-free ones", async () => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY);
 
-    // Unsupported content type carrying an owned token must not leak literally.
+    // Unsupported content type carrying an owned token degrades to a literal
+    // placeholder emit with a WARN (P1, 2026-10-06b) — never a refusal.
     const textPlain = new Response(`value ${token}`, {
       status: 200,
       headers: { "content-type": "text/plain" },
     });
-    await expect(dispatch(hook, textPlain)).rejects.toThrow();
+    const textEvent = { sessionID: "session-1", kind: "primary", request: chatRequest({ model: "g", messages: [] }), response: textPlain };
+    await hook("session:http.request")(textEvent);
+    await hook("session:http.response")(textEvent);
+    expect(await (textEvent.response as Response).text()).toBe(`value ${token}`);
 
     const cleanText = new Response("plain ok", {
       status: 200,
       headers: { "content-type": "text/plain" },
     });
-    await expect(dispatch(hook, cleanText)).resolves.toBeUndefined();
+    const cleanEvent = { sessionID: "session-1", kind: "primary", request: chatRequest({ model: "g", messages: [] }), response: cleanText };
+    await hook("session:http.request")(cleanEvent);
+    await hook("session:http.response")(cleanEvent);
+    expect(await (cleanEvent.response as Response).text()).toBe("plain ok");
 
-    // Error bodies are usually passed through, but not when they carry a token.
+    // Error bodies carrying a token degrade the same way.
     const errorWithToken = new Response(JSON.stringify({ error: token }), {
       status: 500,
       headers: { "content-type": "application/json" },
     });
-    await expect(dispatch(hook, errorWithToken)).rejects.toThrow();
+    const errorEvent = { sessionID: "session-1", kind: "primary", request: chatRequest({ model: "g", messages: [] }), response: errorWithToken };
+    await hook("session:http.request")(errorEvent);
+    await hook("session:http.response")(errorEvent);
+    const errorBody = await (errorEvent.response as Response).text();
+    expect(errorBody).toContain(token);
+    expect(errorBody).not.toContain(KEY);
   });
 
-  it("refuses reserved tokens outside display text and tool arguments", async () => {
+  it("keeps reserved tokens outside display text and tool arguments literal", async () => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY);
 
+    // A placeholder in an unplaceable field (refusal text) is degradation —
+    // literal emit with a WARN — not a refusal (P1, 2026-10-06b).
     const inRefusal = new Response(
       JSON.stringify({ choices: [{ message: { role: "assistant", content: "hi", refusal: token } }] }),
       { status: 200, headers: { "content-type": "application/json" } },
     );
-    await expect(dispatch(hook, inRefusal)).rejects.toThrow();
+    const refusalEvent = { sessionID: "session-1", kind: "primary", request: chatRequest({ model: "g", messages: [] }), response: inRefusal };
+    await hook("session:http.request")(refusalEvent);
+    await hook("session:http.response")(refusalEvent);
+    const refusalBody = await (refusalEvent.response as Response).text();
+    expect(refusalBody).toContain(token);
+    expect(refusalBody).not.toContain(KEY);
 
     const inMetadata = new Response(JSON.stringify({ choices: [], metadata: { note: token } }), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
-    await expect(dispatch(hook, inMetadata)).rejects.toThrow();
+    const metadataEvent = { sessionID: "session-1", kind: "primary", request: chatRequest({ model: "g", messages: [] }), response: inMetadata };
+    await hook("session:http.request")(metadataEvent);
+    await hook("session:http.response")(metadataEvent);
+    const metadataBody = await (metadataEvent.response as Response).text();
+    expect(metadataBody).toContain(token);
+    expect(metadataBody).not.toContain(KEY);
 
     // Intentional tool-argument tokens stay allowed (typed tool gate decides).
     const inToolArguments = new Response(
@@ -1339,10 +1413,16 @@ describe("transparent http.response restore (JSON)", () => {
       }),
       { status: 200, headers: { "content-type": "application/json" } },
     );
-    await expect(dispatch(hook, inToolArguments)).resolves.toBeUndefined();
+    const toolEvent = { sessionID: "session-1", kind: "primary", request: chatRequest({ model: "g", messages: [] }), response: inToolArguments };
+    await hook("session:http.request")(toolEvent);
+    await hook("session:http.response")(toolEvent);
+    const toolBody = await (toolEvent.response as Response).text();
+    // Display text restores; tool-argument tokens stay tokenized for the gate.
+    expect(toolBody).toContain(`x ${KEY} y`);
+    expect(toolBody).toMatch(TOKEN_RE);
   });
 
-  it("rejects metadata that imitates message or delta tool-call paths", async () => {
+  it("keeps metadata that imitates tool-call paths literal (never restores into it)", async () => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY);
     const forgedPaths = [
@@ -1357,36 +1437,46 @@ describe("transparent http.response restore (JSON)", () => {
         status: 200,
         headers: { "content-type": "application/json" },
       });
-      await expect(dispatch(hook, response)).rejects.toThrow();
+      const event = { sessionID: "session-1", kind: "primary", request: chatRequest({ model: "g", messages: [] }), response };
+      await hook("session:http.request")(event);
+      await hook("session:http.response")(event);
+      // P1 (2026-10-06b): imitated paths never restore — the placeholder
+      // stays literal with a WARN; the original is never emitted.
+      const body = await (event.response as Response).text();
+      expect(body).toContain(token);
+      expect(body).not.toContain(KEY);
     }
   });
 
-  it("rejects reserved tokens in response keys or non-tool argument fields", async () => {
+  it("keeps reserved tokens in response keys and non-tool fields literal; legacy tool calls still restore", async () => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY);
 
-    // A token in an object key is never an intentional argument string.
-    const keyToken = new Response(
-      JSON.stringify({ choices: [{ message: { role: "assistant", content: "hi", [token]: "x" } }] }),
-      { status: 200, headers: { "content-type": "application/json" } },
-    );
-    await expect(dispatch(hook, keyToken)).rejects.toThrow();
+    // P1 (2026-10-06b): each of these is a placeholder in an unplaceable
+    // position — kept literal with a WARN, never restored, never refused.
+    const literalCases = [
+      // A token in an object key is never an intentional argument string.
+      { choices: [{ message: { role: "assistant", content: "hi", [token]: "x" } }] },
+      // An `arguments` field that is not a tool-call function is not exempt.
+      { choices: [], metadata: { arguments: token } },
+      // A {name, arguments} metadata object is NOT a tool-call function.
+      { choices: [], metadata: { name: "not-a-tool-call", arguments: token } },
+    ];
+    for (const payload of literalCases) {
+      const response = new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+      const event = { sessionID: "session-1", kind: "primary", request: chatRequest({ model: "g", messages: [] }), response };
+      await hook("session:http.request")(event);
+      await hook("session:http.response")(event);
+      const body = await (event.response as Response).text();
+      expect(body).toContain(token);
+      expect(body).not.toContain(KEY);
+    }
 
-    // An `arguments` field that is not a tool-call function is not exempt.
-    const foreignArguments = new Response(
-      JSON.stringify({ choices: [], metadata: { arguments: token } }),
-      { status: 200, headers: { "content-type": "application/json" } },
-    );
-    await expect(dispatch(hook, foreignArguments)).rejects.toThrow();
-
-    // A {name, arguments} metadata object is NOT a tool-call function.
-    const functionShapedMetadata = new Response(
-      JSON.stringify({ choices: [], metadata: { name: "not-a-tool-call", arguments: token } }),
-      { status: 200, headers: { "content-type": "application/json" } },
-    );
-    await expect(dispatch(hook, functionShapedMetadata)).rejects.toThrow();
-
-    // Message-level legacy function_call.arguments IS a real tool-call path.
+    // Message-level legacy function_call.arguments IS a real tool-call path
+    // and stays tokenized for the typed tool gate.
     const legacyToolCall = new Response(
       JSON.stringify({
         choices: [
@@ -1554,21 +1644,30 @@ describe("transparent http.response restore (SSE)", () => {
     expect(upstreamCancelled).toBe(true);
   });
 
-  it("fails the stream when an unknown marker appears outside display text", async () => {
+  it("keeps an unknown marker outside display text literal with a WARN", async () => {
     const { hook } = await arm();
     const payload = { choices: [{ index: 0, delta: { content: "plain", refusal: FOREIGN_TOKEN } }] };
     const restored = await armSse(hook, sseBody([`data: ${JSON.stringify(payload)}\n\n`, "data: [DONE]\n\n"]));
-    await expect(readAll(restored)).rejects.toThrow();
+    // P1 (2026-10-06b): degradation, not stream failure.
+    const output = await readAll(restored);
+    expect(output).toContain(FOREIGN_TOKEN);
+    expect(output).toContain("data: [DONE]");
   });
 
-  it("fails the stream when a token stays incomplete at [DONE] or stream end", async () => {
+  it("degrades a token that stays incomplete at [DONE] or stream end", async () => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY);
+    // P1 (2026-10-06b): the held partial tail is dropped with a WARN at the
+    // boundary; the stream completes instead of failing (the 02:23 deadlock).
     const atDone = await armSse(hook, sseBody([sseChunk(`cut ${token.slice(0, 12)}`), "data: [DONE]\n\n"]));
-    await expect(readAll(atDone)).rejects.toThrow();
+    const doneOutput = await readAll(atDone);
+    expect(doneOutput).toContain("data: [DONE]");
+    expect(doneOutput).not.toContain(token);
 
     const atEnd = await armSse(hook, sseBody([sseChunk(`cut ${token.slice(0, 12)}`)]));
-    await expect(readAll(atEnd)).rejects.toThrow();
+    const endOutput = await readAll(atEnd);
+    expect(endOutput).toContain("cut");
+    expect(endOutput).not.toContain(token);
   });
 
   it("propagates upstream stream errors", async () => {
@@ -1739,7 +1838,7 @@ describe("transparent http.response restore (SSE)", () => {
     await expect(readAll(restored)).rejects.toThrow();
   });
 
-  it("rejects a reserved token in a non-choice SSE payload", async () => {
+  it("keeps a reserved token in a non-choice SSE payload literal", async () => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY);
     for (const payload of [
@@ -1750,11 +1849,14 @@ describe("transparent http.response restore (SSE)", () => {
         hook,
         sseBody([`data: ${JSON.stringify(payload)}\n\n`, "data: [DONE]\n\n"]),
       );
-      await expect(readAll(restored)).rejects.toThrow();
+      // P1 (2026-10-06b): degradation — literal emit with a WARN.
+      const output = await readAll(restored);
+      expect(output).toContain(token);
+      expect(output).toContain("data: [DONE]");
     }
   });
 
-  it("refuses a terminal choice with an unresolved token before its remainder", async () => {
+  it("refuses output after a terminal choice even when a token is still pending", async () => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY);
     const restored = await armSse(
@@ -2022,7 +2124,7 @@ describe("tool schema annotation prose masks instead of refusing", () => {
       },
     });
     const before = JSON.stringify(event);
-    await expect(hook("session:context")(event)).rejects.toThrow(PROTECT_FAILED);
+    await expect(hook("session:context")(event)).rejects.toThrow("scans as sensitive");
     expect(JSON.stringify(event)).toBe(before);
   });
 
@@ -2037,7 +2139,7 @@ describe("tool schema annotation prose masks instead of refusing", () => {
       },
     });
     const before = JSON.stringify(event);
-    await expect(hook("session:context")(event)).rejects.toThrow(PROTECT_FAILED);
+    await expect(hook("session:context")(event)).rejects.toThrow("scans as sensitive");
     expect(JSON.stringify(event)).toBe(before);
   });
 
@@ -2047,7 +2149,7 @@ describe("tool schema annotation prose masks instead of refusing", () => {
       secrets_scanner: { input: { type: "object", properties: {} } },
     });
     const before = JSON.stringify(event);
-    await expect(hook("session:context")(event)).rejects.toThrow(PROTECT_FAILED);
+    await expect(hook("session:context")(event)).rejects.toThrow("scans as sensitive");
     expect(JSON.stringify(event)).toBe(before);
   });
 });

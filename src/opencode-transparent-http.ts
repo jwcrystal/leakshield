@@ -9,9 +9,13 @@
  * Chat Completions, Anthropic Messages and OpenAI Responses — selected by URL
  * path shape; each has JSON / event-stream response restore.
  *
- * Fail-closed rules implemented here:
- * - Unsupported routes, unknown or mixed dialects, bodyless requests and
- *   reserved tokens in transport metadata are refused.
+ * Fail-closed rules implemented here (P1, 2026-10-06b — fail closed on leak
+ * risk, not on parse uncertainty):
+ * - Unsupported routes, unknown or mixed dialects and bodyless requests are
+ *   refused. A placeholder in transport metadata or the URL is judged
+ *   session-aware instead: clean markers are preserved verbatim with a
+ *   content-free WARN; sensitive content still refuses (unmaskable
+ *   position).
  * - Transport metadata is inspected: decoded non-auth headers and query
  *   parameters, and numeric body values, must not scan as sensitive;
  *   legitimate authentication headers are preserved.
@@ -20,14 +24,16 @@
  *   session capacity.
  * - Protocol metadata (model ids, tools, usage, numeric fields, envelopes) is
  *   never rewritten: structural identifiers (message ids, roles, part types,
- *   tool names and schema keys/enum constraints) are preserved and the request
- *   is refused rather than silently renamed.
+ *   tool names and schema keys/enum constraints) are preserved and a
+ *   sensitive one refuses the request rather than being silently renamed.
  * - Response restore touches assistant display text only: owned tokens are
- *   restored and unknown/malformed marker strings remain literal there. Tokens
- *   in metadata, keys or other unplaceable fields still refuse; actual tool
- *   arguments remain tokenized for the strict tool restoration gate.
- * - Streaming is pull-based with per-event, per-channel and aggregate bounds,
- *   and a terminal choice with an unresolved token refuses.
+ *   restored and unknown/malformed marker strings remain literal there. A
+ *   placeholder in an unplaceable response field is degradation — kept
+ *   literal with a WARN — never a refusal; actual tool arguments remain
+ *   tokenized for the typed tool gate.
+ * - Streaming is pull-based with per-event, per-channel and aggregate bounds;
+ *   a terminal choice with an unresolved tail degrades (literal emit + WARN)
+ *   instead of refusing.
  */
 
 import {
@@ -45,6 +51,13 @@ export interface TransportMaskingService {
   /** Non-committing sensitivity detection: no mapping, no mutation. */
   detectSensitive(text: string): boolean;
   /**
+   * Session-aware judgement for structural positions (identifiers, transport
+   * metadata): marker-shaped content is safe when clean (registered-marker
+   * interiors exempt, unregistered payloads scanned); unsafe on a finding,
+   * because the position cannot be masked without breaking the protocol.
+   */
+  isStructuralIdentifierSafe(sessionID: string, text: string): boolean;
+  /**
    * Attachment policy: "block" (default) refuses media/file parts at the
    * wire; "allow" tolerates them as opaque leaves that are substituted with a
    * sentinel around the masking transaction and restored verbatim after it,
@@ -54,6 +67,14 @@ export interface TransportMaskingService {
 }
 
 // ─── Static failure messages (no content ever included) ─────────────────────
+
+/**
+ * Content-free degradation notice for the host log (P1, 2026-10-06b): one
+ * WARN line with a fixed context word, never response/request content.
+ */
+const warnDegradation = (context: string): void => {
+  console.warn(`[sensitive-guard] degraded: ${context}`);
+};
 
 const UNSUPPORTED_REQUEST_BODY =
   "Sensitive Guard transparent mode blocked a model request with an unsupported or unidentifiable body.";
@@ -285,23 +306,43 @@ function strayTokenIn(value: unknown, path: readonly PathSegment[] = []): boolea
 // ─── Transport metadata inspection ──────────────────────────────────────────
 
 /**
- * Inspects decoded transport metadata: every non-authentication header and
- * query parameter must be token-free and non-sensitive, and a reserved token
- * in ANY header or query parameter is refused (it could never be restored).
- * Legitimate authentication headers are excluded from content scanning.
+ * Inspects decoded transport metadata. P1 (2026-10-06b): a placeholder in a
+ * header or query parameter is no longer refused per se — it is judged
+ * session-aware (registered-marker interiors exempt, unregistered payloads
+ * scanned); clean markers are preserved verbatim with a content-free WARN.
+ * A sensitive hit still refuses: transport metadata cannot be masked or
+ * renamed without breaking the protocol. Legitimate authentication headers
+ * are excluded from content scanning.
  */
-function inspectTransportMetadata(service: TransportMaskingService, request: Request): void {
+function inspectTransportMetadata(
+  service: TransportMaskingService,
+  sessionID: string,
+  request: Request,
+): void {
   const url = new URL(request.url);
   for (const [name, value] of url.searchParams) {
     if (name.includes(PSEUDONYM_TOKEN_PREFIX) || value.includes(PSEUDONYM_TOKEN_PREFIX)) {
-      throw new Error(UNSUPPORTED_REQUEST_BODY);
+      if (
+        !service.isStructuralIdentifierSafe(sessionID, name) ||
+        !service.isStructuralIdentifierSafe(sessionID, value)
+      ) {
+        throw new Error(UNSUPPORTED_REQUEST_BODY);
+      }
+      warnDegradation("transport metadata preserved with a literal placeholder");
+      continue;
     }
     if (service.detectSensitive(name) || service.detectSensitive(value)) {
       throw new Error(UNSUPPORTED_REQUEST_BODY);
     }
   }
   for (const [name, value] of request.headers) {
-    if (value.includes(PSEUDONYM_TOKEN_PREFIX)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+    if (value.includes(PSEUDONYM_TOKEN_PREFIX)) {
+      if (!service.isStructuralIdentifierSafe(sessionID, value)) {
+        throw new Error(UNSUPPORTED_REQUEST_BODY);
+      }
+      warnDegradation("transport metadata preserved with a literal placeholder");
+      continue;
+    }
     if (AUTH_HEADER_NAMES.has(name.toLowerCase())) continue;
     if (service.detectSensitive(name) || service.detectSensitive(value)) {
       throw new Error(UNSUPPORTED_REQUEST_BODY);
@@ -571,8 +612,15 @@ export async function remaskChatCompletionsRequest(
   request: Request,
 ): Promise<Request> {
   if (!isChatCompletionsUrl(request.url)) throw new Error(UNSUPPORTED_TRANSPORT);
-  if (urlCarriesToken(request.url)) throw new Error(UNSUPPORTED_REQUEST_BODY);
-  inspectTransportMetadata(service, request);
+  if (urlCarriesToken(request.url)) {
+    // P1 (2026-10-06b): a placeholder in the URL is judged, not auto-refused;
+    // sensitive content in a URL cannot be masked without changing the target.
+    if (!service.isStructuralIdentifierSafe(sessionID, request.url)) {
+      throw new Error(UNSUPPORTED_REQUEST_BODY);
+    }
+    warnDegradation("request url preserved with a literal placeholder");
+  }
+  inspectTransportMetadata(service, sessionID, request);
   // A body is required: transport metadata (query, headers) cannot be scanned
   // for arbitrary content, so a bodyless request has no verifiable boundary.
   if (request.body === null) throw new Error(UNSUPPORTED_REQUEST_BODY);
@@ -816,8 +864,15 @@ export async function remaskAnthropicMessagesRequest(
   request: Request,
 ): Promise<Request> {
   if (!isAnthropicMessagesUrl(request.url)) throw new Error(UNSUPPORTED_TRANSPORT);
-  if (urlCarriesToken(request.url)) throw new Error(UNSUPPORTED_REQUEST_BODY);
-  inspectTransportMetadata(service, request);
+  if (urlCarriesToken(request.url)) {
+    // P1 (2026-10-06b): a placeholder in the URL is judged, not auto-refused;
+    // sensitive content in a URL cannot be masked without changing the target.
+    if (!service.isStructuralIdentifierSafe(sessionID, request.url)) {
+      throw new Error(UNSUPPORTED_REQUEST_BODY);
+    }
+    warnDegradation("request url preserved with a literal placeholder");
+  }
+  inspectTransportMetadata(service, sessionID, request);
   if (request.body === null) throw new Error(UNSUPPORTED_REQUEST_BODY);
 
   const raw = await readCappedText(request, MAX_BODY_BYTES, UNSUPPORTED_REQUEST_BODY);
@@ -978,8 +1033,15 @@ export async function remaskResponsesRequest(
   request: Request,
 ): Promise<Request> {
   if (!isResponsesUrl(request.url)) throw new Error(UNSUPPORTED_TRANSPORT);
-  if (urlCarriesToken(request.url)) throw new Error(UNSUPPORTED_REQUEST_BODY);
-  inspectTransportMetadata(service, request);
+  if (urlCarriesToken(request.url)) {
+    // P1 (2026-10-06b): a placeholder in the URL is judged, not auto-refused;
+    // sensitive content in a URL cannot be masked without changing the target.
+    if (!service.isStructuralIdentifierSafe(sessionID, request.url)) {
+      throw new Error(UNSUPPORTED_REQUEST_BODY);
+    }
+    warnDegradation("request url preserved with a literal placeholder");
+  }
+  inspectTransportMetadata(service, sessionID, request);
   if (request.body === null) throw new Error(UNSUPPORTED_REQUEST_BODY);
 
   const raw = await readCappedText(request, MAX_BODY_BYTES, UNSUPPORTED_REQUEST_BODY);
@@ -1100,16 +1162,17 @@ export async function restoreChatCompletionsResponse(
   if (restorable && contentType.includes("text/event-stream")) {
     return restoreSseResponse(service, sessionID, response);
   }
-  // Explicit unsupported-response policy: never emit a literal placeholder we
-  // cannot place, but do not disturb token-free error/metadata bodies.
-  return refuseIfTokenBearing(response);
+  // P1 (2026-10-06b): an unplaceable placeholder in an unrestorable body is
+  // degradation — pass through with a WARN, never a refusal; token-free
+  // error/metadata bodies pass untouched.
+  return passThroughIfTokenBearing(response);
 }
 
-/** Passes an unrestorable response through only when it carries no token. */
-async function refuseIfTokenBearing(response: Response): Promise<Response> {
+/** Passes an unrestorable response through, degrading (WARN) when it carries a placeholder. */
+async function passThroughIfTokenBearing(response: Response): Promise<Response> {
   if (response.body === null) return response;
   const raw = await readCappedText(response, MAX_BODY_BYTES, UNSUPPORTED_RESPONSE);
-  if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) throw new Error(UNSUPPORTED_RESPONSE);
+  if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
   return response;
 }
 
@@ -1124,17 +1187,17 @@ async function restoreJsonResponse(
   try {
     body = JSON.parse(raw);
   } catch {
-    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) throw new Error(UNSUPPORTED_RESPONSE);
+    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
     return response;
   }
   if (!isRecord(body)) {
-    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) throw new Error(UNSUPPORTED_RESPONSE);
+    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
     return response;
   }
   if (body.choices === undefined) {
-    // Not a chat-completions payload; tokens we cannot place must not leak to
-    // display as literal placeholders.
-    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) throw new Error(UNSUPPORTED_RESPONSE);
+    // Not a chat-completions payload; an unplaceable placeholder degrades to
+    // a literal emit with a WARN (P1, 2026-10-06b).
+    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
     return response;
   }
   if (!Array.isArray(body.choices)) throw new Error(UNSUPPORTED_RESPONSE);
@@ -1149,9 +1212,10 @@ async function restoreJsonResponse(
     // message.tool_calls is deliberately untouched: tool arguments stay
     // tokenized until the typed tool gate decides execution.
   }
-  // A reserved token anywhere but an intentional tool-argument string is a
-  // placeholder we cannot place; refuse rather than emit it literally.
-  if (strayTokenIn(body)) throw new Error(UNSUPPORTED_RESPONSE);
+  // P1 (2026-10-06b): a reserved token outside intentional tool arguments is
+  // degradation, not failure — the placeholder stays literal with a WARN;
+  // mapping loss never refuses response delivery.
+  if (strayTokenIn(body)) warnDegradation("response carries an unplaceable placeholder; kept literal");
 
   if (!changed) return response;
   const next = JSON.stringify(body);
@@ -1229,7 +1293,8 @@ function restoreSseResponse(
  * longest suffix that is a proper prefix of the reserved namespace prefix
  * (e.g. `[SG`): emitting that suffix literally would make the token
  * unrestorable. Complete tokens in the emit portion are restored by the
- * caller through the core (never emitted as literal placeholders).
+ * caller through the core; a tail that never completes degrades to a
+ * literal emit with a WARN at the terminal boundary (P1, 2026-10-06b).
  */
 function splitRestorable(buffered: string): { emit: string; hold: string } {
   const at = buffered.lastIndexOf(PSEUDONYM_TOKEN_PREFIX);
@@ -1256,9 +1321,10 @@ function splitRestorable(buffered: string): { emit: string; hold: string } {
  * Bounds are explicit, measured in UTF-8 bytes and fail closed: the pending
  * line buffer, the accumulated (unterminated) event, each choice channel, the
  * aggregate channel state and the channel count are all capped, each charged
- * before the value is accumulated. A choice whose token is still
- * unresolved at a terminal `finish_reason` refuses, and a choice that keeps
- * producing output after it is terminal refuses. Reading is pull-based: one
+ * before the value is accumulated. A choice whose token is still unresolved
+ * at a terminal `finish_reason` degrades — the held tail is emitted literally
+ * with a WARN — and a choice that keeps producing output after it is terminal
+ * refuses. Reading is pull-based: one
  * bounded batch of upstream data is consumed per downstream pull, so an unread
  * consumer never builds an unbounded downstream queue. Errors from the
  * underlying stream propagate; downstream cancellation cancels the underlying
@@ -1284,8 +1350,17 @@ export function createSseRestoreStream(
   let eventBytes = 0;
   let finished = false;
 
+  /**
+   * P1 (2026-10-06b): leftover held tails at a boundary ([DONE] or stream
+   * close) are degradation, not stream failure — a partial prefix that never
+   * completed into a marker. WARN and drop (at most a few cosmetic
+   * characters) instead of failing the delivered response.
+   */
   const requireEmptyChannels = (): void => {
-    if (channels.size !== 0) throw new Error(MALFORMED_STREAM);
+    if (channels.size !== 0) {
+      warnDegradation("stream boundary reached with an incomplete placeholder tail; tail dropped");
+      for (const channel of [...channels.keys()]) deleteChannel(channel);
+    }
   };
   const setChannel = (channel: number, hold: string): void => {
     const previous = channels.get(channel) ?? "";
@@ -1372,23 +1447,41 @@ export function createSseRestoreStream(
                 else setChannel(channel, hold);
               }
             }
-            // A terminal choice must not leave an unresolved token behind or
-            // create unbounded per-choice state.
+            // P1 (2026-10-06b): a terminal choice holding an unresolved tail
+            // (split or never-completed placeholder) is degradation, not a
+            // stream failure — emit the held tail literally, WARN, and clear
+            // the channel so per-choice state stays bounded.
             if (terminal) {
-              if (channels.has(channel)) throw new Error(MALFORMED_STREAM);
+              const held = channels.get(channel);
+              if (held !== undefined) {
+                if (isRecord(delta) && typeof delta.content === "string") {
+                  delta.content += held;
+                } else if (isRecord(delta)) {
+                  delta.content = held;
+                } else {
+                  choice.delta = { content: held };
+                }
+                warnDegradation("terminal stream event emitted an incomplete placeholder tail literally");
+                deleteChannel(channel);
+              }
               if (!terminalChannels.has(channel) && terminalChannels.size >= MAX_CHANNELS) {
                 throw new Error(STREAM_BUFFER_LIMIT);
               }
               terminalChannels.add(channel);
             }
           }
-          // A reserved token outside intentional tool arguments cannot be placed.
-          if (strayTokenIn(chunk)) throw new Error(UNSUPPORTED_RESPONSE);
+          // A reserved token outside intentional tool arguments is degradation
+          // (P1, 2026-10-06b): re-emit literally with a WARN.
+          if (strayTokenIn(chunk)) {
+            warnDegradation("stream event carries an unplaceable placeholder; kept literal");
+          }
           outputLines = emitPayload(JSON.stringify(chunk));
         } else {
-          // Usage-only etc.: re-emit the original payload verbatim, but never
-          // emit a reserved token we cannot place.
-          if (strayTokenIn(chunk)) throw new Error(UNSUPPORTED_RESPONSE);
+          // Usage-only etc.: re-emit the original payload verbatim; an
+          // unplaceable placeholder stays literal with a WARN (P1).
+          if (strayTokenIn(chunk)) {
+            warnDegradation("stream event carries an unplaceable placeholder; kept literal");
+          }
           outputLines = emitPayload(joined);
         }
       }
@@ -1533,15 +1626,15 @@ async function restoreAnthropicJsonResponse(
   try {
     body = JSON.parse(raw);
   } catch {
-    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) throw new Error(UNSUPPORTED_RESPONSE);
+    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
     return response;
   }
   if (!isRecord(body)) {
-    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) throw new Error(UNSUPPORTED_RESPONSE);
+    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
     return response;
   }
   if (body.content === undefined) {
-    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) throw new Error(UNSUPPORTED_RESPONSE);
+    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
     return response;
   }
   if (!Array.isArray(body.content)) throw new Error(UNSUPPORTED_RESPONSE);
@@ -1699,7 +1792,12 @@ export function createAnthropicSseRestoreStream(
         case "content_block_stop": {
           const index = chunk.index;
           if (typeof index !== "number" || !Number.isInteger(index)) throw new Error(MALFORMED_STREAM);
-          if (channels.has(index)) throw new Error(MALFORMED_STREAM);
+          // P1 (2026-10-06b): an unresolved tail at block stop is degradation
+          // — WARN and drop the partial prefix instead of failing the stream.
+          if (channels.has(index)) {
+            warnDegradation("anthropic block stopped with an incomplete placeholder tail; tail dropped");
+            deleteChannel(index);
+          }
           if (!terminalBlocks.has(index) && terminalBlocks.size >= MAX_CHANNELS) {
             throw new Error(STREAM_BUFFER_LIMIT);
           }
@@ -1707,7 +1805,12 @@ export function createAnthropicSseRestoreStream(
           break;
         }
         case "message_stop": {
-          if (channels.size !== 0) throw new Error(MALFORMED_STREAM);
+          // P1 (2026-10-06b): leftover holds at message stop degrade — WARN
+          // and drop — instead of failing the delivered stream.
+          if (channels.size !== 0) {
+            warnDegradation("anthropic message stopped with incomplete placeholder tail(s); dropped");
+            for (const index of [...channels.keys()]) deleteChannel(index);
+          }
           messageStopped.value = true;
           break;
         }
@@ -1716,7 +1819,11 @@ export function createAnthropicSseRestoreStream(
           break;
       }
 
-      if (anthropicChunkStrayTokenIn(chunk, allowedFields)) throw new Error(UNSUPPORTED_RESPONSE);
+      // P1 (2026-10-06b): an unplaceable placeholder is degradation — WARN,
+      // emit literally; mapping loss never refuses response delivery.
+      if (anthropicChunkStrayTokenIn(chunk, allowedFields)) {
+        warnDegradation("anthropic stream event carries an unplaceable placeholder; kept literal");
+      }
       outputLines = emitPayload(JSON.stringify(chunk));
     }
     const text = outputLines.join("\n");
@@ -1748,7 +1855,11 @@ export function createAnthropicSseRestoreStream(
             }
             let out = "";
             if (eventLines.length > 0) out += processEvent(false);
-            if (channels.size !== 0) throw new Error(MALFORMED_STREAM);
+            // P1 (2026-10-06b): leftover holds at close degrade — WARN and drop.
+            if (channels.size !== 0) {
+              warnDegradation("stream closed with incomplete placeholder tail(s); dropped");
+              for (const key of [...channels.keys()]) deleteChannel(key);
+            }
             finished = true;
             if (out.length > 0) controller.enqueue(encoder.encode(out));
             controller.close();
@@ -1855,7 +1966,7 @@ export async function restoreAnthropicMessagesResponse(
   if (restorable && contentType.includes("text/event-stream")) {
     return restoreAnthropicSseResponse(service, sessionID, response);
   }
-  return refuseIfTokenBearing(response);
+  return passThroughIfTokenBearing(response);
 }
 
 /** Protocol dispatcher: restores a response using the SAME wire route the
@@ -1974,11 +2085,11 @@ async function restoreResponsesJsonResponse(
   try {
     body = JSON.parse(raw);
   } catch {
-    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) throw new Error(UNSUPPORTED_RESPONSE);
+    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
     return response;
   }
   if (!isRecord(body)) {
-    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) throw new Error(UNSUPPORTED_RESPONSE);
+    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
     return response;
   }
   const fields: ResponsesAllowedFields = new WeakMap();
@@ -2082,7 +2193,11 @@ export function createResponsesSseRestoreStream(
     } else {
       const joined = dataPayloads.join("\n");
       if (joined.trim() === "[DONE]") {
-        if (channels.size !== 0) throw new Error(MALFORMED_STREAM);
+        // P1 (2026-10-06b): leftover holds at [DONE] degrade — WARN and drop.
+        if (channels.size !== 0) {
+          warnDegradation("responses stream ended with incomplete placeholder tail(s); dropped");
+          for (const key of [...channels.keys()]) deleteChannel(key);
+        }
         emittedRawCounts.clear();
         terminal.value = true;
         outputLines = emitPayload("[DONE]");
@@ -2129,7 +2244,10 @@ export function createResponsesSseRestoreStream(
             chunk[field] = restoreDisplayText(service, sessionID, chunk[field]);
             allowResponsesField(fields, chunk, field);
           } else if (channels.has(channelKey())) {
-            throw new Error(MALFORMED_STREAM);
+            // P1 (2026-10-06b): a done event without text but with a held
+            // partial tail degrades — WARN and drop the tail.
+            warnDegradation("responses text done with an incomplete placeholder tail; tail dropped");
+            deleteChannel(channelKey());
           } else {
             emittedRawCounts.delete(channelKey());
           }
@@ -2162,7 +2280,13 @@ export function createResponsesSseRestoreStream(
           eventType === "response.failed" ||
           eventType === "response.incomplete"
         ) {
-          if (channels.size !== 0) throw new Error(MALFORMED_STREAM);
+          // P1 (2026-10-06b): terminal events (completed/failed/incomplete)
+          // with leftover holds degrade — WARN and drop — instead of failing
+          // the delivered stream.
+          if (channels.size !== 0) {
+            warnDegradation("responses terminal event with incomplete placeholder tail(s); dropped");
+            for (const key of [...channels.keys()]) deleteChannel(key);
+          }
           emittedRawCounts.clear();
           terminal.value = true;
           const response = chunk.response;
@@ -2182,7 +2306,11 @@ export function createResponsesSseRestoreStream(
           if (typeof chunk[field] === "string") allowResponsesField(fields, chunk, field);
         }
 
-        if (responsesStrayTokenIn(chunk, fields)) throw new Error(UNSUPPORTED_RESPONSE);
+        // P1 (2026-10-06b): an unplaceable placeholder is degradation — WARN
+        // and emit literally; mapping loss never refuses response delivery.
+        if (responsesStrayTokenIn(chunk, fields)) {
+          warnDegradation("responses stream event carries an unplaceable placeholder; kept literal");
+        }
         outputLines = emitPayload(JSON.stringify(chunk));
       }
     }
@@ -2215,7 +2343,11 @@ export function createResponsesSseRestoreStream(
             }
             let out = "";
             if (eventLines.length > 0) out += processEvent(false);
-            if (channels.size !== 0) throw new Error(MALFORMED_STREAM);
+            // P1 (2026-10-06b): leftover holds at close degrade — WARN and drop.
+            if (channels.size !== 0) {
+              warnDegradation("stream closed with incomplete placeholder tail(s); dropped");
+              for (const key of [...channels.keys()]) deleteChannel(key);
+            }
             finished = true;
             if (out.length > 0) controller.enqueue(encoder.encode(out));
             controller.close();
@@ -2284,5 +2416,5 @@ export async function restoreResponsesResponse(
     const stream = createResponsesSseRestoreStream(service, sessionID, response.body);
     return new Response(stream, { status: response.status, statusText: response.statusText, headers });
   }
-  return refuseIfTokenBearing(response);
+  return passThroughIfTokenBearing(response);
 }

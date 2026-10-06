@@ -57,7 +57,9 @@
 
 ## Phase 1：安裝流程 + 啟用狀態顯示（優先項 1）
 
-> **2026-10-05 狀態**：1a 完成（`--doctor` 安裝健檢 + README 邊界聲明 + copy-paste 註冊 snippet，16 項單元測試）。1b（預設值遷移：新裝機預設 transparent、隱式用戶遷移通知、block 降為 fallback）**依閘門暫緩**——需 oracle 再審通過 + 真實 provider E2E 後才可翻轉預設。
+> **2026-10-05 狀態**：1a 完成（`--doctor` 安裝健檢 + README 邊界聲明 + copy-paste 註冊 snippet，16 項單元測試）。1b（預設值遷移：新裝機預設 transparent、隱式用戶遷移通知、block 降為 fallback）**依閘門暫緩**。
+>
+> **2026-10-06b 更新**：閘門條件已修訂——「oracle 再審＋真實 provider E2E」改為 **P1 拒絕政策落地（T1）＋ C-matrix 全綠＋最低真實 provider smoke＋owner re-review**（spec `2026-10-06b` item 4；同日 review 修訂，owner 核可）。T1 已落地（本 repo commit），C1–C19 全綠；待最低 smoke 與 owner re-review。
 
 **問題**：須手動建置、手動確認入口與載入；插件未載入時無任何警示。
 

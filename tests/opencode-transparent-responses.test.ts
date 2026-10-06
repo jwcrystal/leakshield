@@ -243,13 +243,17 @@ describe("openai responses http.response restore", () => {
     expect(output).not.toMatch(TOKEN_RE);
   });
 
-  it("still refuses metadata that imitates a display part", async () => {
+  it("keeps metadata that imitates a display part literal instead of restoring it", async () => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY);
     const restored = await dispatch(hook, streamResponse([
       { type: "response.created", response: { id: "resp_1", metadata: { type: "output_text", text: token } } },
     ]));
-    await expect(restored.text()).rejects.toThrow("cannot restore safely");
+    // P1 (2026-10-06b): never restored into an imitated path — kept literal
+    // with a WARN; the original stays absent.
+    const output = await restored.text();
+    expect(output).toContain(token);
+    expect(output).not.toContain(KEY);
   });
 
   it.each([
@@ -308,22 +312,26 @@ describe("openai responses http.response restore", () => {
     expect(output).not.toContain(KEY);
   });
 
-  it("still refuses token-bearing response metadata", async () => {
+  it("keeps token-bearing response metadata literal (id fields never restore)", async () => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY);
     const restored = await dispatch(hook, streamResponse([
       { type: "response.created", response: { id: token } },
     ]));
-    await expect(restored.text()).rejects.toThrow("cannot restore safely");
+    const output = await restored.text();
+    expect(output).toContain(token);
+    expect(output).not.toContain(KEY);
   });
 
-  it.each(["delta", "arguments", "output", "output_text"])("still refuses token-bearing %s outside a supported event field", async (field) => {
+  it.each(["delta", "arguments", "output", "output_text"])("keeps token-bearing %s outside a supported event field literal", async (field) => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY);
     const restored = await dispatch(hook, streamResponse([
       { type: "response.created", [field]: token, response: { id: "resp_1" } },
     ]));
-    await expect(restored.text()).rejects.toThrow("cannot restore safely");
+    const output = await restored.text();
+    expect(output).toContain(token);
+    expect(output).not.toContain(KEY);
   });
 
   it.each(["response.output_text.delta", "response.reasoning_summary_text.delta"])("isolates interleaved indexes for %s", async (type) => {
@@ -364,13 +372,18 @@ describe("openai responses http.response restore", () => {
     await expect(restored.text()).rejects.toThrow("malformed or incomplete");
   });
 
-  it("still refuses a truncated token instead of passing partial content through", async () => {
+  it("degrades a truncated tail at stream end instead of failing the stream", async () => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY);
     const restored = await dispatch(hook, streamResponse([
       { type: "response.output_text.delta", item_id: "msg_1", delta: token.slice(0, 12) },
     ]));
-    await expect(restored.text()).rejects.toThrow("malformed or incomplete");
+    // P1 (2026-10-06b): the held partial tail is dropped with a WARN at
+    // close; the stream completes and the original never appears.
+    const output = await restored.text();
+    expect(output).toContain("response.output_text.delta");
+    expect(output).not.toContain(token);
+    expect(output).not.toContain(KEY);
   });
 
   it("restores a token split across output_text.delta events; completed drains", async () => {

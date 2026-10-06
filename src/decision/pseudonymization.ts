@@ -56,7 +56,6 @@ export type PseudonymFailureReason =
   | "truncated_content"
   | "encoded_content"
   | "invalid_finding_span"
-  | "overlapping_findings"
   | "token_overlap"
   | "malformed_token"
   | "unknown_token"
@@ -109,6 +108,14 @@ export interface PseudonymLimits {
 
 export interface PseudonymizerService {
   isTextSafe(text: string): boolean;
+  /**
+   * Session-aware safety check for structural positions (identifiers,
+   * transport metadata). Marker-shaped content is never unsafe per se:
+   * registered markers are exempt from interior scanning; unregistered
+   * payloads scan as ordinary text. Unsafe only on a scanner finding (the
+   * position cannot be masked or renamed) or a scanning failure.
+   */
+  isStructuralIdentifierSafe(sessionId: string, text: string): boolean;
   protectText(sessionId: string, text: string): PseudonymTextResult;
   protectTextForModel(sessionId: string, text: string): PseudonymTextResult;
   restoreText(sessionId: string, text: string): PseudonymTextResult;
@@ -272,14 +279,18 @@ interface Transaction {
 
 /**
  * Finds registered token spans. Strict callers reject every malformed or
- * unowned marker; model-text callers may leave those occurrences literal.
+ * unowned marker; model-text callers may leave those occurrences literal —
+ * well-shaped unregistered markers are additionally reported in `preserved`
+ * so callers can mask a whole marker (one unit, never nested) when a finding
+ * touches its payload.
  */
 function scanOwnedTokenSpans(
   text: string,
   isOwned: (token: string) => boolean,
   preserveUnknown = false,
-): { ok: true; spans: Span[] } | PseudonymFailure {
+): { ok: true; spans: Span[]; preserved: Span[] } | PseudonymFailure {
   const spans: Span[] = [];
+  const preserved: Span[] = [];
   let at = text.indexOf(PSEUDONYM_TOKEN_PREFIX);
   while (at !== -1) {
     TOKEN_SHAPE.lastIndex = at;
@@ -296,13 +307,14 @@ function scanOwnedTokenSpans(
     const end = at + match[0].length;
     if (!isOwned(match[0])) {
       if (!preserveUnknown) return fail("unknown_token");
+      preserved.push({ start: at, end });
       at = text.indexOf(PSEUDONYM_TOKEN_PREFIX, end);
       continue;
     }
     spans.push({ start: at, end });
     at = text.indexOf(PSEUDONYM_TOKEN_PREFIX, end);
   }
-  return { ok: true, spans };
+  return { ok: true, spans, preserved };
 }
 
 // ─── Scanner plumbing ────────────────────────────────────────────────────────
@@ -526,8 +538,8 @@ function scanForModelBoundary(
  * spans from different rules are deduplicated. Overlap rejection is
  * deliberately NOT performed here: callers must first exempt findings
  * wholly inside strictly validated owned tokens (an issued token's interior
- * may legitimately contain overlapping custom-rule matches), and only then
- * reject every remaining overlap.
+ * may legitimately contain overlapping custom-rule matches), and every
+ * remaining overlap is then resolved by union masking (P1, 2026-10-06b).
  */
 function validateFindingSpans(
   text: string,
@@ -614,23 +626,59 @@ function protectStringTx(
   const collected = validateFindingSpans(text, scanned.original.findings);
   if (!collected.ok) return collected;
 
-  const actionable: Array<Span & { value: string }> = [];
+  // P1 (2026-10-06b): parse uncertainty degrades to best-effort masking.
+  // (1) Findings wholly inside a validated owned token are that token's own
+  //     interior: already pseudonymized, exempt (unchanged).
+  // (2) A finding touching a preserved (unregistered) marker extends to the
+  //     WHOLE marker span — the marker is replaced as one unit, never nested
+  //     (a prefix is not proof of trust; payloads are scanned as text).
+  // (3) Remaining overlaps merge to their union: containment keeps the outer
+  //     span, identical spans deduplicate, transitive chains merge through
+  //     sort + iteration. Every actionable finding is fully covered instead
+  //     of failing the request.
+  // (4) A merged span that still crosses a validated owned token cannot be
+  //     masked without corrupting restoration: safe refusal (token_overlap).
+  const candidates: Array<Span & { value: string }> = [];
   for (const span of collected.spans) {
-    // Findings wholly inside a previously validated owned token are that
-    // token's own interior (e.g. overlapping custom rules matching the
-    // counter digits): already pseudonymized. Exempt them BEFORE overlap
-    // rejection — substituting inside a token would corrupt it — exactly
-    // like the output-side check below.
     if (containedInAnySpan(span, owned.spans)) continue;
-    const previous = actionable[actionable.length - 1];
-    if (previous && span.start < previous.end) return fail("overlapping_findings");
-    // Crossing matches (partially overlapping a token) stay fail-closed.
+    candidates.push(span);
+  }
+  const extended: Span[] = [];
+  for (const span of candidates) {
+    let bounds: Span = span;
+    for (const marker of owned.preserved) {
+      if (spansOverlap(span, marker)) {
+        bounds = {
+          start: Math.min(bounds.start, marker.start),
+          end: Math.max(bounds.end, marker.end),
+        };
+      }
+    }
+    extended.push(bounds);
+  }
+  extended.sort((a, b) => a.start - b.start || a.end - b.end);
+  const actionable: Array<Span & { value: string }> = [];
+  for (const bounds of extended) {
+    const last = actionable[actionable.length - 1];
+    if (last !== undefined && bounds.start < last.end) {
+      if (bounds.end > last.end) {
+        actionable[actionable.length - 1] = {
+          start: last.start,
+          end: bounds.end,
+          value: text.slice(last.start, bounds.end),
+        };
+      }
+      continue;
+    }
+    actionable.push({ start: bounds.start, end: bounds.end, value: text.slice(bounds.start, bounds.end) });
+  }
+  for (const span of actionable) {
     if (owned.spans.some((tokenSpan) => spansOverlap(span, tokenSpan))) {
       return fail("token_overlap");
     }
-    tx.detectedOriginals.add(span.value);
-    actionable.push(span);
   }
+  for (const finding of candidates) tx.detectedOriginals.add(finding.value);
+  for (const span of actionable) tx.detectedOriginals.add(span.value);
 
   // Stage every mapping first (charging all budgets), then substitute.
   const stagedSpans: Array<Span & { token: string }> = [];
@@ -997,6 +1045,33 @@ function buildService(config: GuardConfig, limits: PseudonymLimits): Pseudonymiz
     }
   };
 
+  /**
+   * Structural positions (identifiers, transport metadata) are never masked
+   * or renamed, so marker-shaped content is judged, not rejected: registered
+   * markers are exempt from interior scanning (their digits are issued, not
+   * user content), unregistered well-shaped markers and malformed/bare
+   * prefixes scan as ordinary text. Unsafe only on a real finding (the
+   * position cannot be protected without breaking the protocol) or a
+   * scanning failure — P1, 2026-10-06b.
+   */
+  const isStructuralIdentifierSafe = (sessionId: string, text: string): boolean => {
+    if (typeof text !== "string" || text.length > limits.maxUnitsPerOperation) return false;
+    if (!isValidSessionId(sessionId)) return false;
+    try {
+      const session = registry.sessions.get(sessionId);
+      const owned = scanOwnedTokenSpans(
+        text,
+        (token) => session?.reverse.get(token) !== undefined,
+        true,
+      );
+      if (!owned.ok) return false;
+      const scanned = scanForModelBoundary(text, config, owned.spans);
+      return scanned.ok && scanned.original.safe;
+    } catch {
+      return false;
+    }
+  };
+
   const protectTextWithPolicy = (
     sessionId: string,
     text: string,
@@ -1113,6 +1188,7 @@ function buildService(config: GuardConfig, limits: PseudonymLimits): Pseudonymiz
 
   return {
     isTextSafe,
+    isStructuralIdentifierSafe,
     protectText,
     protectTextForModel,
     restoreText,

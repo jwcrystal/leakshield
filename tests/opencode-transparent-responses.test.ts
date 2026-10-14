@@ -22,7 +22,7 @@ const baseConfig: GuardConfig = {
 
 const KEY = "sk-QwertyuiopAsdfghjklZx";
 const EMAIL = "alice@example.com";
-const TOKEN_RE = /\[SGP1:[0-9a-f]{32}-\d{8,12}\]/;
+const TOKEN_RE = /\[SGP1:[0-9a-f]{32}-\d{8,12}\]|\[SGP2:[A-Z][A-Z_]{0,31}-[a-z]{4}-[a-z]{4}-[a-z]{4}\]/;
 
 interface RecordedHook {
   domain: string;
@@ -30,7 +30,7 @@ interface RecordedHook {
   callback: (event: unknown) => unknown;
 }
 
-async function arm(config: GuardConfig = baseConfig, attachmentsPolicy: "block" | "allow" = "block") {
+async function arm(config: GuardConfig = baseConfig, attachmentsPolicy: "block" | "allow" = "block", wireProtection = true) {
   const registered: RecordedHook[] = [];
   const hookFor = (domain: string) => {
     return async (name: string, callback: unknown) => {
@@ -43,10 +43,11 @@ async function arm(config: GuardConfig = baseConfig, attachmentsPolicy: "block" 
     aisdk: { hook: hookFor("aisdk") },
     tool: { hook: hookFor("tool") },
   };
-  const guard = createTransparentSessionGuard(config, attachmentsPolicy);
+  const guard = createTransparentSessionGuard(config, attachmentsPolicy, wireProtection);
   await guard.setup(ctx as never);
   const hook = (name: string) => {
     const record = registered.find((r) => `${r.domain}:${r.name}` === name);
+    if (!record && !wireProtection && name === "session:http.request") return async () => undefined;
     if (!record) throw new Error(`hook ${name} not registered`);
     return async (event: unknown) => record.callback(event);
   };
@@ -60,6 +61,7 @@ async function mintToken(
 ): Promise<string> {
   const event = {
     sessionID,
+    model: { providerID: "openai", id: "gpt-test" },
     system: [{ type: "text", text: `x ${secret} y` }],
     messages: [],
     options: {},
@@ -110,17 +112,54 @@ describe("openai responses http.request wire mask", () => {
     JSON.parse(body.input[1].arguments);
   });
 
-  it("refuses reasoning items and mixed dialects", async () => {
+  it("masks reasoning summaries, passes encrypted reasoning verbatim, refuses malformed/unknown items", async () => {
     const { hook } = await arm();
-    const reasoning = {
+    // The blob deliberately embeds a detector-matching `sk-` pattern: an
+    // opaque encrypted payload must cross verbatim even when its base64
+    // happens to contain a finding-shaped substring.
+    const ENCRYPTED = `gAAAA${KEY}b64padding==`;
+    const event = {
       sessionID: "s",
       kind: "primary",
       request: responsesRequest({
         model: "gpt-response",
-        input: [{ type: "reasoning", id: "r_1", summary: [] }],
+        input: [
+          {
+            type: "reasoning",
+            id: "rs_1",
+            summary: [{ type: "summary_text", text: `thought about ${EMAIL}` }],
+            encrypted_content: ENCRYPTED,
+          },
+        ],
       }),
     };
-    await expect(hook("session:http.request")(reasoning)).rejects.toThrow();
+    await hook("session:http.request")(event);
+    const body = JSON.parse(await (event.request as Request).clone().text());
+    expect(body.input[0].summary[0].text).toMatch(TOKEN_RE);
+    expect(body.input[0].summary[0].text).not.toContain(EMAIL);
+    expect(body.input[0].encrypted_content).toBe(ENCRYPTED);
+    expect(body.input[0].id).toBe("rs_1");
+
+    const malformed = {
+      sessionID: "s",
+      kind: "primary",
+      request: responsesRequest({
+        model: "gpt-response",
+        input: [{ type: "reasoning", id: "rs_2", summary: "not-an-array" }],
+      }),
+    };
+    await expect(hook("session:http.request")(malformed)).rejects.toThrow("[responses-reasoning-shape]");
+
+    const reference = {
+      sessionID: "s",
+      kind: "primary",
+      request: responsesRequest({
+        model: "gpt-response",
+        input: [{ type: "item_reference", id: "rs_3" }],
+      }),
+    };
+    await expect(hook("session:http.request")(reference)).rejects.toThrow("[responses-item-type]");
+
     const mixed = {
       sessionID: "s",
       kind: "primary",
@@ -129,11 +168,32 @@ describe("openai responses http.request wire mask", () => {
         messages: [{ role: "user", content: "hi" }],
       }),
     };
-    await expect(hook("session:http.request")(mixed)).rejects.toThrow();
+    await expect(hook("session:http.request")(mixed)).rejects.toThrow("[responses-mixed-dialect]");
   });
 });
 
 describe("openai responses http.response restore", () => {
+  it.each([true, false])("retains assistant and reasoning-summary restoration with wireProtection=%s", async (wireProtection) => {
+    const { hook } = await arm(baseConfig, "block", wireProtection);
+    const token = await mintToken(hook, KEY);
+    const requestEvent = {
+      sessionID: "session-1", kind: "primary", model: { providerID: "openai", id: "gpt-test" },
+      request: responsesRequest({ model: "gpt-test", input: token }),
+    };
+    await hook("session:http.request")(requestEvent);
+    const event = {
+      ...requestEvent,
+      response: new Response(JSON.stringify({ output: [
+        { type: "message", role: "assistant", content: [{ type: "output_text", text: token }] },
+        { type: "reasoning", summary: [{ type: "summary_text", text: token }] },
+      ] }), { headers: { "content-type": "application/json" } }),
+    };
+    await hook("session:http.response")(event);
+    const body = await event.response.json();
+    expect(body.output[0].content[0].text).toBe(KEY);
+    expect(body.output[1].summary[0].text).toBe(KEY);
+  });
+
   async function dispatch(
     hook: (name: string) => (event: unknown) => Promise<unknown> | unknown,
     response: Response,
@@ -362,14 +422,18 @@ describe("openai responses http.response restore", () => {
     expect(await restored.text()).toContain(`"text":"${KEY}"`);
   });
 
-  it("still refuses events appended after the DONE sentinel", async () => {
+  it("keeps events appended after the DONE sentinel literal, without restoring them", async () => {
     const { hook } = await arm();
+    const token = await mintToken(hook, KEY);
     const restored = await dispatch(hook, streamResponse([
       { type: "response.completed", response: { output: [] } },
       "[DONE]",
-      { type: "response.output_text.delta", item_id: "msg_1", delta: "late" },
+      { type: "response.output_text.delta", item_id: "msg_1", delta: token },
     ]));
-    await expect(restored.text()).rejects.toThrow("malformed or incomplete");
+    const output = await restored.text();
+    expect(output).toContain(token);
+    expect(output).not.toContain(KEY);
+    expect(output.indexOf("[DONE]")).toBeLessThan(output.indexOf(token));
   });
 
   it("degrades a truncated tail at stream end instead of failing the stream", async () => {
@@ -378,10 +442,10 @@ describe("openai responses http.response restore", () => {
     const restored = await dispatch(hook, streamResponse([
       { type: "response.output_text.delta", item_id: "msg_1", delta: token.slice(0, 12) },
     ]));
-    // P1 (2026-10-06b): the held partial tail is dropped with a WARN at
-    // close; the stream completes and the original never appears.
+    // Ingress recovery releases the undelivered original delta at EOF.
     const output = await restored.text();
     expect(output).toContain("response.output_text.delta");
+    expect(output).toContain(token.slice(0, 12));
     expect(output).not.toContain(token);
     expect(output).not.toContain(KEY);
   });
@@ -487,5 +551,153 @@ describe("responses attachments allow: wire image format", () => {
     const { hook } = await arm(baseConfig, "block");
     const event = { sessionID: "session-1", kind: "primary", request: responsesRequest(imageBody) };
     await expect(hook("session:http.request")(event)).rejects.toThrow();
+  });
+
+  it.each(["input_image", "input_file"])(
+    "allow preserves %s in tool output arrays while masking text",
+    async (type) => {
+      const { hook } = await arm(baseConfig, "allow");
+      const attachment = type === "input_image"
+        ? { type, image_url: "data:image/png;base64,aGVsbG8=" }
+        : { type, filename: "picture.png", file_data: "data:image/png;base64,aGVsbG8=" };
+      const event = {
+        sessionID: "session-1",
+        kind: "primary",
+        request: responsesRequest({
+          model: "gpt-test",
+          input: [{ type: "function_call_output", call_id: "call_read", output: [
+            { type: "input_text", text: `image for ${EMAIL} with key ${KEY}` },
+            attachment,
+          ] }],
+        }),
+      };
+      await hook("session:http.request")(event);
+      const body = JSON.parse(await event.request.clone().text());
+      expect(body.input[0].type).toBe("function_call_output");
+      expect(body.input[0].call_id).toBe("call_read");
+      expect(body.input[0].output[0].type).toBe("input_text");
+      expect(body.input[0].output[0].text).toMatch(TOKEN_RE);
+      expect(body.input[0].output[0].text).not.toContain(KEY);
+      expect(body.input[0].output[0].text).not.toContain(EMAIL);
+      expect(body.input[0].output[1]).toEqual(attachment);
+      // Retrying an already-masked request must not alter the image or tokens.
+      await hook("session:http.request")(event);
+      expect(JSON.parse(await event.request.clone().text())).toEqual(body);
+    },
+  );
+
+  it("masks text-only tool output arrays under the default block policy", async () => {
+    const { hook } = await arm();
+    const event = {
+      sessionID: "session-1",
+      kind: "primary",
+      request: responsesRequest({ model: "gpt-test", input: [{
+        type: "function_call_output", call_id: "call_read",
+        output: [{ type: "input_text", text: KEY }],
+      }] }),
+    };
+    await hook("session:http.request")(event);
+    const body = JSON.parse(await event.request.clone().text());
+    expect(body.input[0].output[0].text).toMatch(TOKEN_RE);
+    expect(body.input[0].output[0].text).not.toContain(KEY);
+  });
+
+  it("block still refuses images inside tool output arrays without publishing changes", async () => {
+    const { hook } = await arm();
+    const request = responsesRequest({ model: "gpt-test", input: [{
+      type: "function_call_output", call_id: "call_read",
+      output: [{ type: "input_text", text: KEY }, imageBody.input[0].content[1]],
+    }] });
+    const original = await request.clone().text();
+    const event = { sessionID: "session-1", kind: "primary", request };
+    await expect(hook("session:http.request")(event)).rejects.toThrow();
+    expect(event.request).toBe(request);
+    expect(await event.request.clone().text()).toBe(original);
+  });
+
+  it.each([null, {}, 42, [{ type: "unknown", text: KEY }], [{ type: "input_text" }]])(
+    "allow still refuses malformed tool output %#",
+    async (output) => {
+      const { hook } = await arm(baseConfig, "allow");
+      const event = {
+        sessionID: "session-1", kind: "primary",
+        request: responsesRequest({ model: "gpt-test", input: [{
+          type: "function_call_output", call_id: "call_read", output,
+        }] }),
+      };
+      await expect(hook("session:http.request")(event)).rejects.toThrow();
+    },
+  );
+});
+
+describe("responses function_call_output content arrays", () => {
+  function toolOutputRequest(output: unknown) {
+    return responsesRequest({
+      model: "gpt-test",
+      input: [{ type: "function_call_output", call_id: "call_read_image", output }],
+    });
+  }
+
+  it.each(["block", "allow"] as const)("masks text-only tool output arrays with policy %s", async (policy) => {
+    const { hook } = await arm(baseConfig, policy);
+    const text = `tool found ${KEY} for ${EMAIL}`;
+    const event = {
+      sessionID: "session-1", kind: "primary",
+      request: toolOutputRequest([{ type: "input_text", text }]),
+    };
+    await hook("session:http.request")(event);
+    const body = JSON.parse(await event.request.clone().text());
+    expect(body.input[0].type).toBe("function_call_output");
+    expect(body.input[0].call_id).toBe("call_read_image");
+    expect(body.input[0].output[0].type).toBe("input_text");
+    const masked = body.input[0].output[0].text;
+    expect(masked).not.toContain(KEY);
+    expect(masked).not.toContain(EMAIL);
+    expect(masked).toMatch(TOKEN_RE);
+    const restore = { sessionID: "session-1", tool: "read", input: { filePath: masked } };
+    await hook("tool:execute.before")(restore);
+    expect(restore.input.filePath).toBe(text);
+  });
+
+  it.each([
+    { type: "input_image", image_url: `data:image/png;base64,${Buffer.from(KEY).toString("base64")}` },
+    { type: "input_file", filename: "fixture.pdf", file_data: "data:application/pdf;base64,aGVsbG8=" },
+  ])("allow preserves tool-result attachment bytes while masking nearby text %#", async (attachment) => {
+    const { hook } = await arm(baseConfig, "allow");
+    const event = {
+      sessionID: "session-1", kind: "primary",
+      request: toolOutputRequest([{ type: "input_text", text: `image for ${EMAIL}: ${KEY}` }, attachment]),
+    };
+    await hook("session:http.request")(event);
+    const body = JSON.parse(await event.request.clone().text());
+    expect(body.input[0].call_id).toBe("call_read_image");
+    expect(body.input[0].output).toHaveLength(2);
+    expect(body.input[0].output[1]).toEqual(attachment);
+    expect(body.input[0].output[0].text).not.toContain(KEY);
+    expect(body.input[0].output[0].text).not.toContain(EMAIL);
+    expect(body.input[0].output[0].text).toMatch(TOKEN_RE);
+  });
+
+  it("block refuses attachment arrays without changing the request", async () => {
+    const { hook } = await arm(baseConfig, "block");
+    const request = toolOutputRequest([{ type: "input_image", image_url: "data:image/png;base64,aGVsbG8=" }]);
+    const original = await request.clone().text();
+    const event = { sessionID: "session-1", kind: "primary", request };
+    await expect(hook("session:http.request")(event)).rejects.toThrow();
+    expect(event.request).toBe(request);
+    expect(await request.clone().text()).toBe(original);
+  });
+
+  it.each([
+    null, {}, 42,
+    [{ type: "input_text" }],
+    [{ type: "unknown", text: KEY }],
+    [{ type: "input_text", text: "ok" }, { type: "input_video", video_url: "data:video/mp4;base64,aGVsbG8=" }],
+  ])("still refuses malformed or unsupported tool outputs %#", async (output) => {
+    const { hook } = await arm(baseConfig, "allow");
+    const request = toolOutputRequest(output);
+    const event = { sessionID: "session-1", kind: "primary", request };
+    await expect(hook("session:http.request")(event)).rejects.toThrow();
+    expect(event.request).toBe(request);
   });
 });

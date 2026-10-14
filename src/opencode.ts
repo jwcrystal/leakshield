@@ -2,6 +2,7 @@ import type { Plugin as PluginNamespace } from "@opencode/plugin";
 import type { PluginModule } from "@opencode-ai/plugin";
 import { findConfigPath, loadConfigWithFingerprint, type LoadedGuardConfig } from "./config/loader.js";
 import { createSessionKey } from "./decision/deidentify.js";
+import { defaultStorePath } from "./decision/mapping-key.js";
 import { EnvQueryService } from "./env-queries.js";
 import { createFailClosedHooks, createHooks } from "./opencode-hooks.js";
 import { createV1EnvTools } from "./opencode-env-tools.js";
@@ -70,23 +71,65 @@ const v2Setup = async (ctx: V2PluginContext): Promise<PluginNamespace.Cleanup | 
     if (options.mode === "transparent") {
       // Transparent pseudonymization arms its own bounded session service,
       // transport hooks, and disposal; deidentify/envQueries combos were
-      // already rejected at the option schema. The guard's dispose is returned
-      // so the host can clean up registrations and mappings on unload.
-      const guard = createTransparentSessionGuard(config, options.attachments);
+      // already rejected at the option schema. W2: persistence options flow
+      // into the guard only when explicitly enabled (default memory-only,
+      // zero behavior change).
+      const persistence = options.persistence.enabled
+        ? {
+            ttlDays: options.persistence.ttlDays,
+            path: options.persistence.path ?? defaultStorePath(),
+            keyFile: options.persistence.keyFile,
+            keyfilePath: options.persistence.keyfilePath,
+          }
+        : undefined;
+      const guard = createTransparentSessionGuard(
+        config,
+        options.attachments,
+        options.wireProtection ?? true,
+        persistence,
+      );
       await guard.setup(ctx);
-      return guard.dispose;
+      // Hook-only must leave provider routing/transport preferences untouched.
+      if (options.wireProtection === false) return () => guard.dispose();
+      try {
+        // Native OpenAI defaults to WebSocket in OpenCode v2. HTTP uses the
+        // same Responses protocol, but passes through our final wire hooks.
+        // This registration is replayed on provider reload and removed on
+        // unload; no persisted config, endpoint or credential is changed.
+        // Explicit provider config is applied later by the host and can
+        // override this compatibility preference; supported Responses-family
+        // WS routes now have independent frame masking/restoration hooks.
+        const registration = await ctx.provider.transform((editor) => {
+          for (const { provider } of editor.list()) {
+            if (provider.package !== "@opencode/ai/providers/openai") continue;
+            editor.update(provider.id, (draft) => {
+              draft.settings = { ...draft.settings, transport: "http" };
+            });
+          }
+        });
+        return async () => {
+          try {
+            await registration.dispose();
+          } finally {
+            await guard.dispose();
+          }
+        };
+      } catch (error) {
+        await guard.dispose();
+        throw error;
+      }
     }
     const deidentify = options.deidentify ? { sessionKey: createSessionKey() } : undefined;
     const envQueries = createEnvQueryService(options, ctx.location.directory, loaded);
     await createV2Setup(config, options.mode, deidentify, envQueries)(ctx);
   } catch {
-    // Fail closed. In transparent mode the fallback must cover the transport
-    // routes (http/ws/aisdk) too, not only the redact-mode hooks — otherwise a
-    // failed initialization would leave those routes unprotected. The raw
+    // Fail closed at the selected layer. Wire mode covers transport routes
+    // too; explicit hook-only refuses content/tool dispatch without adding
+    // transport gates or requiring the SDK API. The raw
     // option is inspected because a schema/refine failure leaves `options`
     // unset. The fallback's dispose is returned for host-triggered cleanup.
     if (rawModeIsTransparent(ctx.options)) {
-      const guard = createFailClosedTransparentGuard();
+      const guard = createFailClosedTransparentGuard(ctx.options?.wireProtection !== false);
       await guard.setup(ctx);
       return guard.dispose;
     }

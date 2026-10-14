@@ -35,7 +35,7 @@ const KEY2 = "sk-QwertyuiopAsdfghjklZx";
 const KEY1_LOWER = "sk-abcdef1234567890abcdef";
 const EMAIL1 = "alice@example.com";
 
-const TOKEN_RE = /\[SGP1:[0-9a-f]{32}-\d{8,12}\]/g;
+const TOKEN_RE = /\[SGP1:[0-9a-f]{32}-\d{8,12}\]|\[SGP2:[A-Z][A-Z_]{0,31}-[a-z]{4}-[a-z]{4}-[a-z]{4}\]/g;
 const FOREIGN_TOKEN = `[SGP1:${"deadbeef".repeat(4)}-00000001]`;
 const MALFORMED_TOKEN = "[SGP1:zz-1]";
 
@@ -289,7 +289,10 @@ describe("issued-token epochs and interior overlaps (deterministic crypto)", () 
     ({ createPseudonymizer: createWithEpoch } = await import("../src/decision/pseudonymization.js"));
   });
 
-  it("never decodes an issued token epoch as user content (epoch hex decodes to a marker)", () => {
+  it("maps adversarial draw bytes into inert payload letters (bytes decode to a marker)", () => {
+    // v2 (W1, 2026-10-07): the minted token carries a letter-only payload, so
+    // draw bytes that would URL-decode to a marker are folded into the
+    // alphabet and can never re-form percent runs inside the token.
     epochHex = EPOCH_HEX_DECODES_TO_MARKER;
     const qRule = { description: "q-marker", pattern: "Q", severity: "HIGH" as const };
     const created = createWithEpoch(configWith({}, [qRule]));
@@ -299,7 +302,7 @@ describe("issued-token epochs and interior overlaps (deterministic crypto)", () 
     expect(first).toEqual({ ok: true, text: expect.any(String) });
     if (!first.ok) return;
     expect(tokensIn(first.text)).toHaveLength(1);
-    expect(first.text).toContain(EPOCH_HEX_DECODES_TO_MARKER);
+    expect(tokensIn(first.text)[0]).toMatch(/^\[SGP2:CUSTOM-[a-z]{4}-[a-z]{4}-[a-z]{4}\]$/);
     // Re-protecting the token-bearing output is a no-op.
     expect(created.protectText("s", first.text)).toEqual({ ok: true, text: first.text });
     expect(created.restoreText("s", first.text)).toEqual({ ok: true, text: "Q" });
@@ -323,13 +326,14 @@ describe("issued-token epochs and interior overlaps (deterministic crypto)", () 
   });
 
   it("exempts overlapping interior findings inside owned tokens before overlap rejection", () => {
-    epochHex = EPOCH_HEX_INERT;
-    // "00000001" (span 39..47) and "000001" (41..47) overlap wholly inside
+    // Draw bytes 0x78 fold to "q" (120 % 26 = 16), so the deterministic
+    // payload is "qqqq-qqqq-qqqq". "qqqq" and "qqq" overlap wholly inside
     // the issued token: exemption must precede overlap rejection on both
     // the input scan and the output verification rescan.
+    epochHex = "78".repeat(16);
     const rules = [
-      { description: "counter-digits", pattern: "00000001", severity: "LOW" as const },
-      { description: "counter-tail", pattern: "000001", severity: "LOW" as const },
+      { description: "payload-run", pattern: "qqqq", severity: "LOW" as const },
+      { description: "payload-tail", pattern: "qqq", severity: "LOW" as const },
     ];
     const created = createWithEpoch(configWith({}, rules));
     expect(created.ok).toBe(true);
@@ -339,13 +343,16 @@ describe("issued-token epochs and interior overlaps (deterministic crypto)", () 
     if (!first.ok) return;
     // Re-protecting the token with BOTH overlapping interior matches is a no-op.
     expect(created.protectText("s", first.text)).toEqual({ ok: true, text: first.text });
-    // Neighbors are still scanned and tokenized next to the token.
-    const neighbor = created.protectText("s", `${first.text} plus ${KEY2}`);
+    // Neighbors are still scanned next to the token. The mocked draw is
+    // constant, so a second distinct secret would mint a colliding payload
+    // (v1 uniqueness came from the per-session counter); reuse KEY1 — the
+    // interior-exemption seam under test is unaffected.
+    const neighbor = created.protectText("s", `${first.text} again ${KEY1}`);
     expect(neighbor.ok).toBe(true);
     if (!neighbor.ok) return;
     expect(neighbor.text).toContain(first.text);
-    expect(neighbor.text).not.toContain(KEY2);
-    expect(created.restoreText("s", neighbor.text)).toEqual({ ok: true, text: `${KEY1} plus ${KEY2}` });
+    expect(neighbor.text).not.toContain(KEY1);
+    expect(created.restoreText("s", neighbor.text)).toEqual({ ok: true, text: `${KEY1} again ${KEY1}` });
   });
 
   it("keeps rejecting genuine encoded content adjacent to an owned token", () => {
@@ -411,12 +418,12 @@ describe("issued-token epochs and interior overlaps (deterministic crypto)", () 
     // On the INPUT the M{80} marker clips out of the %51 window (only 40 of
     // 80 Ms fit), so no URL hazard fires and M{80} stages a token. The
     // substituted output places that token INSIDE the same window, where
-    // Q.*\[SGP1: crosses from the decoded Q into the retained token
+    // Q.*\[SGP2: crosses from the decoded Q into the retained token
     // fragment: the output rescan must refuse encoded_content and roll the
     // whole staged transaction back.
     const rules = [
       { description: "m-marker", pattern: "M{80}", severity: "HIGH" as const },
-      { description: "q-to-token", pattern: "Q.*\\[SGP1:", severity: "HIGH" as const },
+      { description: "q-to-token", pattern: "Q.*\\[SGP2:", severity: "HIGH" as const },
     ];
     const created = createWithEpoch(configWith({}, rules), {
       maxUnitsPerOperation: 1000,
@@ -426,27 +433,27 @@ describe("issued-token epochs and interior overlaps (deterministic crypto)", () 
     if (!created.ok) return;
     const payload = `%51${"x".repeat(10)}${"M".repeat(80)}`;
     expect(created.protectText("a", payload)).toEqual({ ok: false, reason: "encoded_content" });
-    // Rollback proof: with maxSessions 1, session "a" never committed, and
-    // the first issued counter is still 00000001 (the refused staging had
-    // advanced it).
+    // Rollback proof: with maxSessions 1, session "a" never committed (a
+    // committed "a" would refuse "b" with session_limit instead).
     const fresh = created.protectText("b", "M".repeat(80));
     expect(fresh.ok).toBe(true);
     if (!fresh.ok) return;
     expect(tokensIn(fresh.text)).toHaveLength(1);
-    expect(tokensIn(fresh.text)[0].endsWith("-00000001]")).toBe(true);
+    expect(tokensIn(fresh.text)[0]).toMatch(/^\[SGP2:CUSTOM-[a-z]{4}-[a-z]{4}-[a-z]{4}\]$/);
     expect(created.restoreText("b", fresh.text)).toEqual({ ok: true, text: "M".repeat(80) });
   });
 
   it("keeps safe URL windows with clipped owned fragments exempt for overlapping interiors", () => {
-    epochHex = EPOCH_HEX_AA;
-    // The window around the %41 run clips the token's first character; the
-    // retained fragment still carries the counter digits, where the two
-    // counter rules overlap. Both findings sit wholly inside the validated
-    // owned fragment and must be exempt BEFORE overlap handling; the
-    // trailing decoded piece adds no finding, so protection succeeds.
+    // Draw bytes 0x78 fold to "q": the deterministic payload tail is
+    // "qqqq", where the two payload rules overlap. The window around the
+    // %41 run clips the token's first character; both findings sit wholly
+    // inside the validated owned fragment and must be exempt BEFORE overlap
+    // handling; the trailing decoded piece adds no finding, so protection
+    // succeeds.
+    epochHex = "78".repeat(16);
     const rules = [
-      { description: "counter-digits", pattern: "00000001", severity: "LOW" as const },
-      { description: "counter-tail", pattern: "000001", severity: "LOW" as const },
+      { description: "payload-run", pattern: "qqqq", severity: "LOW" as const },
+      { description: "payload-tail", pattern: "qqq", severity: "LOW" as const },
     ];
     const created = createWithEpoch(configWith({}, rules));
     expect(created.ok).toBe(true);
@@ -670,15 +677,13 @@ describe("budgets and atomicity", () => {
     if (!created.ok) return;
     const oversized = Array.from({ length: 40 }, () => "Q").join(" ");
     expect(created.protectText("a", oversized)).toEqual({ ok: false, reason: "operation_limit" });
-    // The refused operation must not commit its staged session, counter,
-    // capacity or epoch: with maxSessions 1 a fresh session still fits,
-    // and the first issued counter is still 00000001 (the refused staging
-    // had advanced the staged counter to 40).
+    // The refused operation must not commit its staged session or
+    // capacity: with maxSessions 1 a fresh session still fits.
     const fresh = created.protectText("b", "Q");
     expect(fresh.ok).toBe(true);
     if (!fresh.ok) return;
     expect(tokensIn(fresh.text)).toHaveLength(1);
-    expect(tokensIn(fresh.text)[0].endsWith("-00000001]")).toBe(true);
+    expect(tokensIn(fresh.text)[0]).toMatch(/^\[SGP2:CUSTOM-[a-z]{4}-[a-z]{4}-[a-z]{4}\]$/);
     expect(created.restoreText("b", fresh.text)).toEqual({ ok: true, text: "Q" });
   });
 
@@ -708,11 +713,11 @@ describe("budgets and atomicity", () => {
     if (!created.ok) return;
     expect(created.protectJson("a", ["x".repeat(35), "Q"]))
       .toEqual({ ok: false, reason: "operation_limit" });
-    // "a" never committed (maxSessions 1) and the counter never advanced.
+    // "a" never committed (maxSessions 1).
     const fresh = created.protectJson("b", "Q");
     expect(fresh.ok).toBe(true);
     if (!fresh.ok) return;
-    expect(String(fresh.value).endsWith("-00000001]")).toBe(true);
+    expect(String(fresh.value)).toMatch(/^\[SGP2:CUSTOM-[a-z]{4}-[a-z]{4}-[a-z]{4}\]$/);
     expect(created.restoreJson("b", fresh.value)).toEqual({ ok: true, value: "Q" });
   });
 
@@ -822,26 +827,36 @@ describe("budgets and atomicity", () => {
   });
 
   it("restores a shrinking marker at the exact combined text budget", () => {
-    // Oracle repro: an 8-unit exact marker becomes a 48-unit token. The
-    // combined protect AND restore budget is exactly 56 (8+48 / 48+8).
-    // Charging the unchanged input length as output would demand 96.
+    // Oracle: an 8-unit exact marker becomes a category-labelled v2 token
+    // whose length varies with the label, so the exact combined budget is
+    // derived from a probe mint (the label is deterministic). Charging the
+    // unchanged input length as output would demand marker+token both ways.
     const MARKER = "MarkerXY";
     const detector = () => new ExactValueDetector([MARKER]);
+    const probe = createPseudonymizer({ ...baseConfig, exact_value_detector: detector() });
+    expect(probe.ok).toBe(true);
+    if (!probe.ok) return;
+    const probed = probe.protectText("probe", MARKER);
+    expect(probed.ok).toBe(true);
+    if (!probed.ok) return;
+    expect(probed.text).toMatch(/^\[SGP2:/);
+    const tokenUnits = probed.text.length; // the whole output is the token
+    const exact = MARKER.length + tokenUnits;
     const created = createPseudonymizer(
       { ...baseConfig, exact_value_detector: detector() },
-      { maxUnitsPerOperation: 56 },
+      { maxUnitsPerOperation: exact },
     );
     expect(created.ok).toBe(true);
     if (!created.ok) return;
     const protectedText = created.protectText("s", MARKER);
     expect(protectedText.ok).toBe(true);
     if (!protectedText.ok) return;
-    expect(protectedText.text).toHaveLength(48);
+    expect(protectedText.text).toHaveLength(tokenUnits);
     expect(created.restoreText("s", protectedText.text)).toEqual({ ok: true, text: MARKER });
     // One unit below the boundary the same protection is refused.
     const below = createPseudonymizer(
       { ...baseConfig, exact_value_detector: detector() },
-      { maxUnitsPerOperation: 55 },
+      { maxUnitsPerOperation: exact - 1 },
     );
     expect(below.ok).toBe(true);
     if (!below.ok) return;
@@ -849,25 +864,36 @@ describe("budgets and atomicity", () => {
   });
 
   it("roundtrips a shrinking scalar JSON string at the exact aggregate budget", () => {
-    // Scalar root: 8 (node overhead) + 48 (token input) leaves exactly the
-    // 8-unit original within budget 64. Charging the unchanged token
-    // length as output would demand 104.
+    // Scalar root: 8 (node overhead) + token input leaves exactly the
+    // 8-unit original within the derived budget. The v2 token length varies
+    // with its category label, so the exact budget comes from a probe mint.
     const MARKER = "MarkerXY";
+    const probe = createPseudonymizer({
+      ...baseConfig,
+      exact_value_detector: new ExactValueDetector([MARKER]),
+    });
+    expect(probe.ok).toBe(true);
+    if (!probe.ok) return;
+    const probed = probe.protectText("probe", MARKER);
+    expect(probed.ok).toBe(true);
+    if (!probed.ok) return;
+    const tokenUnits = probed.text.length;
+    const exact = 8 + tokenUnits + MARKER.length;
     const created = createPseudonymizer(
       { ...baseConfig, exact_value_detector: new ExactValueDetector([MARKER]) },
-      { maxUnitsPerOperation: 64 },
+      { maxUnitsPerOperation: exact },
     );
     expect(created.ok).toBe(true);
     if (!created.ok) return;
     const protectedScalar = created.protectJson("s", MARKER);
     expect(protectedScalar.ok).toBe(true);
     if (!protectedScalar.ok) return;
-    expect(String(protectedScalar.value)).toMatch(/^\[SGP1:[0-9a-f]{32}-\d{8}\]$/);
+    expect(String(protectedScalar.value)).toMatch(/^\[SGP2:/);
     expect(created.restoreJson("s", protectedScalar.value)).toEqual({ ok: true, value: MARKER });
     // One unit lower, the same scalar protection is refused.
     const below = createPseudonymizer(
       { ...baseConfig, exact_value_detector: new ExactValueDetector([MARKER]) },
-      { maxUnitsPerOperation: 63 },
+      { maxUnitsPerOperation: exact - 1 },
     );
     expect(below.ok).toBe(true);
     if (!below.ok) return;

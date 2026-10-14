@@ -1,6 +1,5 @@
 /**
- * OpenCode v2 transparent pseudonymization session guard (issue #22, stage 1
- * — offline mocks only).
+ * OpenCode v2 transparent pseudonymization session guard (issue #22).
  *
  * One guard owns exactly ONE pseudonymizer service (bounded per setup, no
  * session fallback, no TTL, no eviction) and its own hook registrations and
@@ -10,21 +9,22 @@
  *   `title`) protect an atomic snapshot (system, messages, options, tools
  *   schema) with `protectJson` and publish it back only after the whole
  *   transaction succeeds — never piecewise in place, never partial.
- * - `http.request` performs the final wire mask (see
- *   ./opencode-transparent-http.js) and records a private correlation
- *   (request identity ↔ session + kind). `http.response` restores assistant
- *   display text only, and refuses responses whose attribution is missing or
- *   mismatched.
- * - WebSocket routes (`experimental.ws.*`) and AI SDK routes (`aisdk:sdk`,
- *   `aisdk:language`) fail closed: transparent mode cannot guarantee a final
- *   scan on those paths.
+ * - Wire protection registers outbound HTTP/WS and SDK admission hooks.
+ *   Explicit false is hook-only: none of those outbound hooks is registered.
+ *   Inbound HTTP/WS restoration is best-effort in both modes; hook-only uses
+ *   the host's session/kind/model and successful content preparation, not an
+ *   outgoing transport registration, to select the local mapping.
+ * - Native Responses-family WebSocket routes restore display frames; the same
+ *   wireProtection switch controls outbound admission and masking. Unknown
+ *   inbound protocols stay literal. SDKs honoring injected HTTP fetch reuse
+ *   the wire-protected HTTP hooks; hook-only makes no transport guarantee.
  * - `tool:execute.before` restores registered tokens in tool arguments so local
  *   tools run with the real values (the model never sees them). Restoration is
- *   deep over the argument tree and keeps keys/types; a foreign, unknown or
- *   malformed token refuses the whole call. Shell-like tools accept tokens
- *   only as unquoted arguments in a single simple command with no expansion,
- *   redirection, or control syntax; every other shell command containing a
- *   token is refused. Token-free calls pass through unchanged.
+ *   deep over the argument tree and keeps keys/types. Shell-like tools accept
+ *   complete literal argument words in a single simple command; POSIX quoting
+ *   and one static trailing output redirect are supported. Expansion, control
+ *   syntax, unsafe quote-breaking originals and tokenized redirect targets
+ *   refuse the affected call. Token-free calls pass through unchanged.
  *
  * Deliberately NOT registered in transparent mode: `session:prompt` (prompt
  * admission and local persistence keep originals by design — protection is at
@@ -32,26 +32,42 @@
  * content is exposed there to scan), `tool:execute.after` (local tool results
  * stay original; their outbound replay is protected by the request kinds).
  *
- * No session-deletion event is guessed or inferred; mappings are cleared only
- * by the explicit `dispose()` of this guard.
+ * The public V2 `session.deleted` event releases that session's memory and
+ * response attribution. Idle/completed sessions retain mappings for resume;
+ * there is no TTL or LRU eviction of live mappings. Disposal clears all RAM.
  */
 
 import { types } from "node:util";
 import type { Plugin as PluginNamespace } from "@opencode/plugin";
 import {
+  containsTokenPrefix,
   createPseudonymizer,
-  PSEUDONYM_TOKEN_PREFIX,
   type PseudonymFailureReason,
   type PseudonymizerService,
 } from "./decision/pseudonymization.js";
+import {
+  MappingForgottenError,
+  MappingKeyMismatchError,
+  MappingSnapshotTooLargeError,
+  MappingStoreConflictError,
+  openMappingStore,
+  type LoadedSession,
+  type MappingKeyProvider,
+  type MappingStore,
+} from "./decision/mapping-store.js";
+import { resolveMappingKey } from "./decision/mapping-key.js";
 import { walkSchemaStrings } from "./decision/schema-strings.js";
 import {
+  classifyModelRoute,
   remaskModelRequest,
   restoreModelResponse,
   withOpaqueAttachments,
   type TransportMaskingService,
 } from "./opencode-transparent-http.js";
 import type { GuardConfig } from "./types.js";
+import { createResponsesWebSocketAdapter } from "./opencode-transparent-ws.js";
+import { createAISDKTransportAdmission } from "./opencode-transparent-aisdk.js";
+import { BUILTIN_RULES } from "./rules/builtin.js";
 
 type V2Plugin = PluginNamespace.Plugin;
 type PluginContext = PluginNamespace.Context;
@@ -67,7 +83,7 @@ const PROTECT_FAILED_ERROR =
 const ATTRIBUTION_ERROR =
   "Sensitive Guard transparent mode blocked a response without verified request attribution.";
 const UNSUPPORTED_ROUTE_ERROR =
-  "Sensitive Guard transparent mode blocked an unsupported model transport route (WebSocket and AI SDK routes are not supported).";
+  "Sensitive Guard transparent mode blocked an unsupported model transport route.";
 const TOOL_REFUSAL_ERROR =
   "Sensitive Guard transparent mode blocked this tool call because its arguments could not be safely restored. Refresh the affected arguments and retry.";
 const TOOL_UNKNOWN_MAPPING_ERROR =
@@ -87,22 +103,59 @@ function toolRestoreError(reason: PseudonymFailureReason): string {
   return TOOL_REFUSAL_ERROR;
 }
 
-/**
- * Characters that may safely PRECEDE a restored token inside a shell command.
- * `$`, backtick, `{` and `(` are deliberately absent: a token there sits inside
- * a parameter expansion, command substitution or grouping where substituting
- * the plain value changes the command's meaning (e.g. `$TOKEN` would become a
- * variable reference). Whitespace and simple separators keep the token an
- * ordinary operand word.
- */
-/** Shell syntax excluded from the supported unquoted simple-command subset. */
+/** Shell syntax excluded from unquoted literal words. Known tokens are
+ * removed before this check; a token-shaped prefix alone grants no exemption. */
 const UNSUPPORTED_SHELL_SYNTAX = /[\x00-\x1f\x7f'"`\\$;|&<>(){}*?\[\]!~#]/;
 
-/**
- * True only for an unquoted argument word in a single simple command. Rejecting
- * all other shell syntax avoids context-dependent substitution in expansions,
- * heredocs, command position, and compound commands.
- */
+type ShellQuote = "none" | "single" | "double";
+interface LiteralShellWord {
+  start: number;
+  end: number;
+  value: string;
+  quote: ShellQuote;
+  redirect: boolean;
+}
+
+/** A deliberately small literal-word lexer, not a general shell parser.
+ * Quotes must enclose the entire word. No escape decoding, expansions, quote
+ * concatenation or control characters are accepted. Decode command/flag
+ * quotes too, so `'sh' '-c' TOKEN` cannot bypass the interpreter gate. */
+function parseLiteralShellWords(text: string): LiteralShellWord[] | null {
+  if (/[\x00-\x1f\x7f]/.test(text)) return null;
+  // The new quote/redirection subset is POSIX-specific. Keep the previous
+  // conservative behavior on Windows, where the host may launch cmd.exe.
+  if (process.platform === "win32" && /['">]/.test(text)) return null;
+  const words: LiteralShellWord[] = [];
+  let at = 0;
+  while (at < text.length) {
+    if (text[at] === " ") {
+      at += 1;
+      continue;
+    }
+    const start = at;
+    if (text[at] === ">") {
+      at += text[at + 1] === ">" ? 2 : 1;
+      words.push({ start, end: at, value: text.slice(start, at), quote: "none", redirect: true });
+    } else if (text[at] === "'" || text[at] === '"') {
+      const delimiter = text[at++];
+      const valueStart = at;
+      while (at < text.length && text[at] !== delimiter) at += 1;
+      if (at === text.length) return null;
+      const value = text.slice(valueStart, at++);
+      const quote = delimiter === "'" ? "single" : "double";
+      if (quote === "double" && /[`\\$!]/.test(value)) return null;
+      words.push({ start, end: at, value, quote, redirect: false });
+    } else {
+      while (at < text.length && text[at] !== " ") at += 1;
+      const value = text.slice(start, at);
+      if (UNSUPPORTED_SHELL_SYNTAX.test(value.replace(TOKEN_SCAN, "TOKEN")) || value.includes(">")) return null;
+      words.push({ start, end: at, value, quote: "none", redirect: false });
+    }
+    if (at < text.length && text[at] !== " ") return null;
+  }
+  return words;
+}
+
 const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const SHELL_COMMAND_WRAPPERS = new Set([
   "builtin",
@@ -124,16 +177,6 @@ const SHELL_COMMAND_WRAPPERS = new Set([
   "xargs",
 ]);
 
-function tokenIsStandaloneArgument(text: string, start: number, end: number): boolean {
-  if (start === 0 || text[start - 1] !== " ") return false;
-  if (end < text.length && text[end] !== " ") return false;
-  const wordsBefore = text.slice(0, start).split(" ").filter(Boolean);
-  const commandWord = wordsBefore.find((word) => !ASSIGNMENT_WORD.test(word));
-  if (commandWord === undefined) return false;
-  const commandName = commandWord.split("/").at(-1)?.toLowerCase() ?? "";
-  return !SHELL_COMMAND_WRAPPERS.has(commandName);
-}
-
 const INLINE_SCRIPT_FLAGS = new Map<string, Set<string>>([
   ["python", new Set(["-c"])],
   ["python3", new Set(["-c"])],
@@ -150,22 +193,33 @@ const INLINE_SCRIPT_FLAGS = new Map<string, Set<string>>([
 const SCRIPT_ARGUMENT_INTERPRETERS = new Set(["awk", "sed", "jq"]);
 const SHELL_INTERPRETERS = new Set(["sh", "bash", "dash", "zsh", "ksh", "ash", "csh", "tcsh", "fish"]);
 
-function isSupportedSimpleShellCommand(text: string): boolean {
-  const withoutTokens = text.replace(TOKEN_SCAN, "TOKEN");
-  if (UNSUPPORTED_SHELL_SYNTAX.test(withoutTokens)) return false;
-  const words = withoutTokens.split(" ").filter(Boolean);
-  const commandIndex = words.findIndex((word) => !ASSIGNMENT_WORD.test(word));
-  if (commandIndex === -1) return false;
-  const commandName = words[commandIndex].split("/").at(-1)?.toLowerCase() ?? "";
-  if (SHELL_COMMAND_WRAPPERS.has(commandName) || SCRIPT_ARGUMENT_INTERPRETERS.has(commandName)) return false;
+/** Returns only ordinary arguments, never command/assignment/redirect words. */
+function parseSupportedShellArguments(text: string): LiteralShellWord[] | null {
+  const parsed = parseLiteralShellWords(text);
+  if (parsed === null) return null;
+  const redirectIndex = parsed.findIndex((word) => word.redirect);
+  if (redirectIndex !== -1) {
+    const target = parsed[redirectIndex + 1];
+    if (
+      redirectIndex === 0 || redirectIndex !== parsed.length - 2 ||
+      target.redirect || target.value.length === 0 || containsTokenPrefix(target.value)
+    ) return null;
+  }
+  const words = redirectIndex === -1 ? parsed : parsed.slice(0, redirectIndex);
+  const commandIndex = words.findIndex((word) => word.quote !== "none" || !ASSIGNMENT_WORD.test(word.value));
+  if (commandIndex === -1) return null;
+  const commandName = words[commandIndex].value.split("/").at(-1)?.toLowerCase() ?? "";
+  if (SHELL_COMMAND_WRAPPERS.has(commandName) || SCRIPT_ARGUMENT_INTERPRETERS.has(commandName)) return null;
+  const argumentsOnly = words.slice(commandIndex + 1);
   if (SHELL_INTERPRETERS.has(commandName)) {
-    if (words.slice(commandIndex + 1).some((argument) => /^-[A-Za-z]*c[A-Za-z]*$/.test(argument))) return false;
+    if (argumentsOnly.some((argument) => /^-[A-Za-z]*c[A-Za-z]*$/.test(argument.value))) return null;
   }
   const inlineFlags =
     INLINE_SCRIPT_FLAGS.get(commandName) ??
     (/^python(?:\d+(?:\.\d+)*)?$/.test(commandName) ? INLINE_SCRIPT_FLAGS.get("python") : undefined);
-  if (inlineFlags && words.slice(commandIndex + 1).some((argument) => inlineFlags.has(argument.toLowerCase()))) return false;
-  return !(commandName === "deno" && words.slice(commandIndex + 1).includes("eval"));
+  if (inlineFlags && argumentsOnly.some((argument) => inlineFlags.has(argument.value.toLowerCase()))) return null;
+  if (commandName === "deno" && argumentsOnly.some((argument) => argument.value === "eval")) return null;
+  return argumentsOnly;
 }
 
 /** Characters forbidden inside restored shell argument words. */
@@ -229,13 +283,18 @@ const READ_ONLY_TOOLS = new Set([
 const warnDegradation = (context: string): void => {
   console.warn(`[sensitive-guard] degraded: ${context}`);
 };
-/** A value is shell-safe when it is non-empty, does not start with "-", and
- * contains no shell-significant character. */
-function isShellSafeOriginal(text: string): boolean {
-  return text.length > 0 && !text.startsWith("-") && !SHELL_UNSAFE.test(text);
+/** Preserve the existing quote context; never add quoting or reinterpret the
+ * original as code. Leading '-' stays forbidden even when quoted (options are
+ * interpreted after quote removal). Controls are forbidden in every context. */
+function isShellSafeOriginal(text: string, quote: ShellQuote): boolean {
+  if (text.length === 0 || text.startsWith("-") || /[\x00-\x1f\x7f]/.test(text)) return false;
+  if (quote === "single") return !text.includes("'");
+  if (quote === "double") return !/["`\\$!]/.test(text);
+  return !SHELL_UNSAFE.test(text);
 }
-/** Matches a fully formed reserved token, for per-token shell safety checks. */
-const TOKEN_SCAN = /\[SGP1:[0-9a-f]{32}-\d{8,12}\]/g;
+/** Matches a fully formed reserved token (either version), for per-token shell safety checks. */
+const TOKEN_SCAN =
+  /\[SGP1:[0-9a-f]{32}-\d{8,12}\]|\[SGP2:[A-Z][A-Z_]{0,31}-[a-z]{4}-[a-z]{4}-[a-z]{4}\]/g;
 
 /**
  * Bound on distinct session identities retained for disposal. The core already
@@ -244,6 +303,19 @@ const TOKEN_SCAN = /\[SGP1:[0-9a-f]{32}-\d{8,12}\]/g;
  * it, a new session fails closed.
  */
 const MAX_TRACKED_SESSIONS = 4096;
+/**
+ * The core's small standalone defaults are not a whole model-history budget.
+ * Match its mapping-session ceiling to the guard's existing bookkeeping cap.
+ * HTTP bodies and WS frames are already capped at 4 MiB; allow 8 Mi UTF-16
+ * units of combined input/output work for assembled requests. The node cap
+ * bounds schema-heavy histories independently. Per-string scanner bounds,
+ * depth and aggregate mapping-byte/entry caps remain unchanged.
+ */
+const TRANSPARENT_LIMITS = {
+  maxSessions: MAX_TRACKED_SESSIONS,
+  maxNodes: 100000,
+  maxUnitsPerOperation: 8 * 1024 * 1024,
+};
 
 // ─── Structural validation ───────────────────────────────────────────────────
 
@@ -505,7 +577,7 @@ function hasAttachmentPart(value: unknown, seen: WeakSet<object>): boolean {
  * refusal gate.
  */
 function inputCarriesToken(value: unknown, seen: WeakSet<object>): boolean {
-  if (typeof value === "string") return value.includes(PSEUDONYM_TOKEN_PREFIX);
+  if (typeof value === "string") return containsTokenPrefix(value);
   if (value === null || typeof value !== "object") return false;
   if (types.isProxy(value)) return true;
   if (seen.has(value)) return true;
@@ -514,7 +586,7 @@ function inputCarriesToken(value: unknown, seen: WeakSet<object>): boolean {
   const descriptors = Object.getOwnPropertyDescriptors(value);
   for (const key of Object.keys(descriptors)) {
     if (Array.isArray(value) && key === "length") continue;
-    if (key.includes(PSEUDONYM_TOKEN_PREFIX)) return true;
+    if (containsTokenPrefix(key)) return true;
     const descriptor = descriptors[key];
     if (!("value" in descriptor)) return true;
     if (inputCarriesToken(descriptor.value, seen)) return true;
@@ -550,9 +622,10 @@ async function runDisposals(disposals: Array<() => Promise<void>>): Promise<void
  * Creates a fail-closed guard whose every hook refuses all operations. Exported
  * so the plugin entry can arm it for transparent mode when setup fails before
  * (or during) guard construction: a transparent fallback must cover the
- * transport routes (http/ws/aisdk), not only the redact-mode hooks.
+ * transport routes (http/ws/aisdk) in wire mode. Hook-only failures refuse
+ * content/tool dispatch without introducing new transport registrations.
  */
-export function createFailClosedTransparentGuard(): TransparentSessionGuard {
+export function createFailClosedTransparentGuard(wireProtection = true): TransparentSessionGuard {
   const disposals: Array<() => Promise<void>> = [];
   const refuse = (): never => {
     throw new Error(INITIALIZATION_ERROR);
@@ -560,21 +633,21 @@ export function createFailClosedTransparentGuard(): TransparentSessionGuard {
   return {
     setup: async (ctx: PluginContext) => {
       try {
-        for (const name of [
-          "context",
-          "compaction",
-          "generate",
-          "title",
+        const contentHooks = ["context", "compaction", "generate", "title"] as const;
+        const wireHooks = [
           "http.request",
           "http.response",
           "experimental.ws.handshake",
           "experimental.ws.send",
           "experimental.ws.receive",
-        ] as const) {
+        ] as const;
+        for (const name of [...contentHooks, ...(wireProtection ? wireHooks : [])]) {
           disposals.push((await ctx.session.hook(name, refuse)).dispose);
         }
-        disposals.push((await ctx.aisdk.hook("sdk", refuse)).dispose);
-        disposals.push((await ctx.aisdk.hook("language", refuse)).dispose);
+        if (wireProtection) {
+          disposals.push((await ctx.aisdk.hook("sdk", refuse)).dispose);
+          disposals.push((await ctx.aisdk.hook("language", refuse)).dispose);
+        }
         disposals.push((await ctx.tool.hook("execute.before", refuse)).dispose);
       } catch (error) {
         await runDisposals(disposals);
@@ -585,17 +658,35 @@ export function createFailClosedTransparentGuard(): TransparentSessionGuard {
   };
 }
 
+/** Persistence wiring options (W2/B4 + R-round), mapped from
+ * PluginOptions.persistence. `keyProvider` is a test/CI injection seam —
+ * production callers leave it unset and the OS keychain ladder resolves;
+ * an explicit null forces the ladder-bottom memory-only path deterministically. */
+export interface GuardPersistenceOptions {
+  ttlDays: number;
+  path: string;
+  keyFile: boolean;
+  keyfilePath?: string;
+  keyProvider?: MappingKeyProvider | null;
+}
+
 /**
  * Creates the transparent session guard for one plugin setup (= one OpenCode
  * process): a single bounded pseudonymizer, exact-session mapping, private
- * request attribution, and its own registrations.
+ * request attribution, and its own registrations. With persistence options
+ * the guard additionally hydrates sessions from the encrypted store on
+ * first touch and writes committed mappings back (decision §4: dispose
+ * unloads hooks but never deletes persisted mappings — forget is the only
+ * erasure path).
  */
 export function createTransparentSessionGuard(
   config: GuardConfig,
   attachmentsPolicy: "block" | "allow" = "block",
+  wireProtection = true,
+  persistence?: GuardPersistenceOptions,
 ): TransparentSessionGuard {
-  const created = createPseudonymizer(config);
-  if (!created.ok) return createFailClosedTransparentGuard();
+  const created = createPseudonymizer(config, TRANSPARENT_LIMITS);
+  if (!created.ok) return createFailClosedTransparentGuard(wireProtection);
   const pseudonymizer: PseudonymizerService = created;
 
   const disposals: Array<() => Promise<void>> = [];
@@ -603,7 +694,7 @@ export function createTransparentSessionGuard(
   /** Fails closed on a new session once the tracked-session budget is full. */
   const assertTrackable = (sessionID: string): void => {
     if (!sessions.has(sessionID) && sessions.size >= MAX_TRACKED_SESSIONS) {
-      throw new Error(PROTECT_FAILED_ERROR);
+      throw new Error(`${PROTECT_FAILED_ERROR} [stage=session.track reason=session_limit]`);
     }
   };
   /**
@@ -613,8 +704,200 @@ export function createTransparentSessionGuard(
   const track = (sessionID: string): void => {
     sessions.add(sessionID);
   };
-  /** Private correlation of a dispatched request to its session and kind. */
-  const attributions = new WeakMap<Request, { sessionID: string; kind: string }>();
+  /** Private correlation of a dispatched request to its session/kind/model. */
+  const attributions = new WeakMap<Request, { sessionID: string; kind: string; model?: string }>();
+  // Latest successful host preparation, scoped to session/kind/model. This
+  // proves hook coverage, NOT that an opaque final body has been inspected.
+  const protectedContexts = new Map<string, string>();
+  const notices = new Set<string>();
+  const noticeOnce = (message: string): void => {
+    if (notices.has(message)) return;
+    notices.add(message);
+    warnDegradation(message);
+  };
+  const contextScope = (event: RecordLike, kind = event.kind): string => JSON.stringify([event.sessionID, kind]);
+  const contextModel = (event: RecordLike): string | undefined => {
+    if (!isRecordLike(event.model) || typeof event.model.providerID !== "string" || !event.model.providerID || typeof event.model.id !== "string" || !event.model.id) return undefined;
+    const key = JSON.stringify([event.model.providerID, event.model.id]);
+    return Buffer.byteLength(key, "utf8") <= 4096 ? key : undefined;
+  };
+  const hasProtectedContext = (event: RecordLike): boolean => {
+    const model = contextModel(event);
+    return model !== undefined && protectedContexts.get(contextScope(event)) === model;
+  };
+
+// ─── W2/B4 + R-round persistence wiring (all no-ops when store is null) ───
+  let store: MappingStore | null = null;
+  /** Bounded (F4.4): insertion-ordered attempt log, evicting the oldest. */
+  const seedAttempts = new Map<string, true>();
+  const MAX_SEED_ATTEMPTS = 1024;
+  const persistedEntries = new Map<string, number>();
+  /** R-round F3.2: the row version observed at seed/write time (CAS token).
+   * Absent looks encode -(generation+1); row looks carry the version. */
+  const persistVersions = new Map<string, number>();
+  /** F4.2: sessions whose seed was rejected must never overwrite their
+   * previously persisted (good) snapshot with a partial re-protect. */
+  const noPersist = new Set<string>();
+  /** R3-F7: bounded per-session bookkeeping. Live sessions (bounded by
+   * MAX_TRACKED_SESSIONS) always keep their state; only departed ids go. */
+  const MAX_BOOKKEEPING = 1024;
+  const evictStaleBookkeeping = <V>(map: Map<string, V> | Set<string>): void => {
+    if (map.size <= MAX_BOOKKEEPING) return;
+    for (const key of map.keys()) {
+      if (map.size <= MAX_BOOKKEEPING) break;
+      if (!sessions.has(key)) map.delete(key);
+    }
+  };
+
+  if (persistence !== undefined) {
+    // Test/CI seam: an injected provider skips the OS keychain ladder so
+    // integration tests never touch the developer's real keychain (F6.1);
+    // explicit null forces the memory-only bottom of the ladder.
+    const keyProvider =
+      persistence.keyProvider !== undefined
+        ? persistence.keyProvider
+        : resolveMappingKey({
+            keyFile: persistence.keyFile,
+            keyfilePath: persistence.keyfilePath,
+            warn: warnDegradation,
+          });
+    if (keyProvider !== null) {
+      try {
+        store = openMappingStore({
+          path: persistence.path,
+          keyProvider,
+          ttlDays: persistence.ttlDays,
+        });
+        console.info(`[sensitive-guard] persistence: active; key=${keyProvider.source ?? "injected"}; ttl=${persistence.ttlDays}d; cleanup=on-store-open`);
+      } catch (error) {
+        store = null;
+        warnDegradation(
+          error instanceof MappingKeyMismatchError
+            ? "persistence: resolved key does not match this store's pinned key identity; operating memory-only (forget --all resets)"
+            : "persistence: mapping store unavailable, operating memory-only",
+        );
+      }
+    } else {
+      warnDegradation("persistence: no key provider, operating memory-only");
+    }
+  }
+
+  /** R2-8: degradation must close the handle before dropping the reference. */
+  const disableStore = (message: string): void => {
+    if (store !== null) {
+      try {
+        store.close();
+      } catch {
+        // Already-broken handle: nothing further to release.
+      }
+    }
+    store = null;
+    warnDegradation(message);
+  };
+
+  /**
+   * Lazy hydration on a session's first touch: seed the core from the store
+   * before any protect/restore so replayed history and tool calls resolve.
+   * A rejected seed (static reason only) degrades to memory-only for that
+   * session — never blocks the conversation. A store that THROWS mid-flight
+   * (F4.1) disables persistence for this process; the conversation continues
+   * memory-only.
+   */
+  const ensureSeeded = (sessionID: string): void => {
+    // R2-9: a session already LIVE in this process's registry needs no seed —
+    // and re-seeding would fail invalid_session and mis-fire noPersist. This
+    // also makes FIFO eviction of an active session's attempt harmless: its
+    // CAS state (persistVersions) is retained either way.
+    if (store === null || seedAttempts.has(sessionID) || pseudonymizer.hasSession(sessionID)) return;
+    if (seedAttempts.size >= MAX_SEED_ATTEMPTS) {
+      const oldest = seedAttempts.keys().next().value;
+      if (oldest !== undefined) seedAttempts.delete(oldest);
+    }
+    seedAttempts.set(sessionID, true);
+    let seed: LoadedSession | null;
+    try {
+      seed = store.loadSession(sessionID);
+    } catch (error) {
+      disableStore("persistence: store read failed; disabled for this process, memory-only");
+      return;
+    }
+    if (seed === null) {
+      // R3-F2: the absent look carries the session's tombstone generation —
+      // a delete that happens since (create→forget, sweep, eviction) must
+      // make this handle's insert a conflict, never a resurrection.
+      persistVersions.set(sessionID, -(store.absentGeneration(sessionID) + 1));
+      return;
+    }
+    if (seed.entries.length === 0) {
+      // Row exists (possibly with undecryptable entries): remember ITS
+      // version so write-behind CASes against the real lineage.
+      persistVersions.set(sessionID, seed.version);
+      return;
+    }
+    const result = pseudonymizer.seedSession(sessionID, {
+      epoch: seed.epoch,
+      entries: seed.entries,
+    });
+    if (!result.ok) {
+      noPersist.add(sessionID);
+      evictStaleBookkeeping(noPersist);
+      warnDegradation(`persistence: session seed rejected (${result.reason}); memory-only for this session`);
+      return;
+    }
+    // F4.3: a session hydrated only via tool:execute.before also holds core
+    // state — retain it for disposal like any tracked session.
+    sessions.add(sessionID);
+    persistedEntries.set(sessionID, seed.entries.length);
+    persistVersions.set(sessionID, seed.version);
+  };
+
+  /** Write-behind after successful protects; skips no-op writes. */
+  const persistIfChanged = (sessionID: string): void => {
+    if (store === null || noPersist.has(sessionID)) return;
+    const snapshot = pseudonymizer.exportSession(sessionID);
+    if (snapshot === null) return;
+    if (persistedEntries.get(sessionID) === snapshot.entries.length) return;
+    try {
+      const storedVersion = store.putSession(
+        {
+          sessionId: sessionID,
+          epoch: snapshot.epoch,
+          entries: snapshot.entries.map((entry) => ({ ...entry })),
+        },
+        persistVersions.get(sessionID) ?? 0,
+      );
+      persistedEntries.set(sessionID, snapshot.entries.length);
+      persistVersions.set(sessionID, storedVersion);
+      evictStaleBookkeeping(persistedEntries);
+      evictStaleBookkeeping(persistVersions);
+      evictStaleBookkeeping(noPersist);
+    } catch (error) {
+      if (error instanceof MappingStoreConflictError) {
+        // Another process holds a newer snapshot for this session; ours is
+        // stale. Never overwrite — keep serving in-memory mappings and stop
+        // write-behind for the session (the next process seeds the newer set).
+        noPersist.add(sessionID);
+        warnDegradation("persistence: concurrent writer holds a newer snapshot for this session; write-behind stopped");
+        return;
+      }
+      if (error instanceof MappingForgottenError) {
+        // Explicit erasure raced this handle: persisting now would resurrect
+        // forgotten data. Close and disable the store for this process (the
+        // in-memory copy remains until this process exits — documented RAM
+        // residue).
+        disableStore("persistence: mappings were forgotten while this process was running; persistence disabled (in-memory copy remains until restart)");
+        return;
+      }
+      if (error instanceof MappingSnapshotTooLargeError) {
+        // R2-10: this single session exceeds the store-wide cap; evicting
+        // others can never fix it. Stop trying — memory-only persistence.
+        noPersist.add(sessionID);
+        warnDegradation(`persistence: ${error.message}`);
+        return;
+      }
+      warnDegradation("persistence: write-behind failed; in-session mappings remain valid");
+    }
+  };
 
   const kindOf = (event: RecordLike): string =>
     typeof event.kind === "string" ? event.kind : "";
@@ -629,7 +912,7 @@ export function createTransparentSessionGuard(
    */
   const detectSensitive = (text: string): boolean => !pseudonymizer.isTextSafe(text);
   const assertStructuralSafe = (text: string, sessionID: string): void => {
-    if (text.includes(PSEUDONYM_TOKEN_PREFIX)) {
+    if (containsTokenPrefix(text)) {
       if (!pseudonymizer.isStructuralIdentifierSafe(sessionID, text)) {
         throw new Error(STRUCTURAL_SENSITIVE_ERROR);
       }
@@ -652,14 +935,57 @@ export function createTransparentSessionGuard(
     for (const item of Object.values(value as RecordLike)) assertNumbersSafe(item);
   };
 
+  /**
+   * Field-aware transport exemption for the opt-in URL rule. Transport
+   * positions (request URL, query values, header values) are infrastructure:
+   * masking or refusing an endpoint URL would break every request once the
+   * URL rule is enabled. Neutralizing URL matches BEFORE the strict checks
+   * removes both the direct findings and the percent-decoding hazard windows
+   * that would otherwise re-surface the URL text — while non-URL secrets
+   * (e.g. an API key encoded in a query value outside a URL match) still
+   * refuse. Only active when the URL rule itself is enabled; body-content
+   * URLs are unaffected (they are masked like any other finding).
+   */
+  const urlRule = BUILTIN_RULES.find((rule) => rule.id === "url");
+  const urlRuleId = urlRule?.id;
+  const urlRuleOptIn = urlRule?.optIn === true;
+  const urlRuleActive =
+    urlRuleId !== undefined &&
+    (urlRuleId in (config.settings.rule_overrides ?? {})
+      ? config.settings.rule_overrides?.[urlRuleId] === true
+      : !urlRuleOptIn);
+  const neutralizeTransportUrls = (text: string): string => {
+    if (!urlRuleActive || urlRule === undefined) return text;
+    // Fresh RegExp per call: the shared rule pattern is stateful (/g).
+    return text.replace(new RegExp(urlRule.pattern.source, urlRule.pattern.flags), "url");
+  };
+
   const transportService: TransportMaskingService = {
     protectJsonForModel: (sid, value) => pseudonymizer.protectJsonForModel(sid, value),
     restoreText: (sid, text) => pseudonymizer.restoreText(sid, text),
     restoreTextForDisplay: (sid, text) => pseudonymizer.restoreTextForDisplay(sid, text),
     detectSensitive,
     isStructuralIdentifierSafe: (sid, text) => pseudonymizer.isStructuralIdentifierSafe(sid, text),
+    transportDetectSensitive: (text) => detectSensitive(neutralizeTransportUrls(text)),
+    isTransportIdentifierSafe: (sid, text) =>
+      pseudonymizer.isStructuralIdentifierSafe(sid, neutralizeTransportUrls(text)),
     attachmentsPolicy,
   };
+  const webSocket = createResponsesWebSocketAdapter(transportService, wireProtection, hasProtectedContext);
+  /** Release only an explicitly deleted session; persisted rows keep their TTL. */
+  const releaseSession = (sessionID: string): void => {
+    if (!sessions.delete(sessionID)) return;
+    pseudonymizer.clearSession(sessionID);
+    webSocket.clearSession(sessionID);
+    for (const kind of ["primary", "compaction", "generate", "title"]) {
+      protectedContexts.delete(JSON.stringify([sessionID, kind]));
+    }
+    seedAttempts.delete(sessionID);
+    persistedEntries.delete(sessionID);
+    persistVersions.delete(sessionID);
+    noPersist.delete(sessionID);
+  };
+  const aiSDK = createAISDKTransportAdmission(wireProtection);
 
   /**
    * Publishes protected string leaves back into the live event in place. The
@@ -758,9 +1084,16 @@ export function createTransparentSessionGuard(
     }
   };
 
-  const protectRequestKind = (event: RecordLike): void => {
+  const protectRequestKind = (event: RecordLike, kind: "primary" | "title" | "compaction" | "generate"): void => {
     const sessionID = requireSessionID(event);
+    // Host preparation events omit kind; the registered hook is the authority.
+    // Do not mutate the event or infer a primary scope from a title/generate.
+    protectedContexts.delete(contextScope(event, kind));
+    if (!wireProtection && contextModel(event) !== undefined) {
+      webSocket.resetRequest({ sessionID, kind, model: event.model });
+    }
     assertTrackable(sessionID);
+    ensureSeeded(sessionID);
     if (types.isProxy(event)) throw new Error(PROTECT_FAILED_ERROR);
     for (const field of ["system", "messages", "options", "tools"] as const) {
       if (field in event) {
@@ -808,7 +1141,7 @@ export function createTransparentSessionGuard(
     // encoded-content detection.
     const protectTree = (input: RecordLike): RecordLike => {
       const masked = pseudonymizer.protectJsonForModel(sessionID, input);
-      if (!masked.ok) throw new Error(PROTECT_FAILED_ERROR);
+      if (!masked.ok) throw new Error(`${PROTECT_FAILED_ERROR} [stage=prepare.mask reason=${masked.reason}]`);
       if (!isRecordLike(masked.value)) throw new Error(PROTECT_FAILED_ERROR);
       return masked.value as RecordLike;
     };
@@ -839,45 +1172,61 @@ export function createTransparentSessionGuard(
       throw new Error(PROTECT_FAILED_ERROR);
     }
     track(sessionID);
+    persistIfChanged(sessionID);
+    const model = contextModel(event);
+    if (model !== undefined) {
+      protectedContexts.set(contextScope(event, kind), model);
+    }
   };
 
   const onHttpRequest = async (event: RecordLike): Promise<void> => {
     const sessionID = requireSessionID(event);
     assertTrackable(sessionID);
+    ensureSeeded(sessionID);
     if (types.isProxy(event)) throw new Error(PROTECT_FAILED_ERROR);
     assertWritableDataProperty(event, "request");
     if (!(event.request instanceof Request)) throw new Error(PROTECT_FAILED_ERROR);
+    // HTTP fallback must not leave a previous WS request eligible to receive.
+    if (event.model !== undefined) webSocket.resetRequest(event);
+    // Registered only with wire protection; hook-only has no request gate.
     const request = await remaskModelRequest(transportService, sessionID, event.request);
     event.request = request;
-    attributions.set(request, { sessionID, kind: kindOf(event) });
+    attributions.set(request, { sessionID, kind: kindOf(event), model: contextModel(event) });
     track(sessionID);
+    persistIfChanged(sessionID);
   };
 
   const onHttpResponse = async (event: RecordLike): Promise<void> => {
-    const sessionID = requireSessionID(event);
-    assertTrackable(sessionID);
-    if (!(event.request instanceof Request) || !(event.response instanceof Response)) {
-      throw new Error(ATTRIBUTION_ERROR);
+    try {
+      const sessionID = requireSessionID(event);
+      assertTrackable(sessionID);
+      if (!sessions.has(sessionID)) throw new Error(ATTRIBUTION_ERROR);
+      if (!(event.request instanceof Request) || !(event.response instanceof Response)) throw new Error(ATTRIBUTION_ERROR);
+      if (wireProtection) {
+        const attribution = attributions.get(event.request);
+        if (attribution === undefined || attribution.sessionID !== sessionID || attribution.kind !== kindOf(event) || attribution.model !== contextModel(event)) {
+          throw new Error(ATTRIBUTION_ERROR);
+        }
+      } else if (!hasProtectedContext(event)) {
+        throw new Error(ATTRIBUTION_ERROR);
+      }
+      ensureSeeded(sessionID);
+      // Hook-only routes have no response adapter. Do not guess their dialect.
+      if (classifyModelRoute(event.request.url) === null) return;
+      event.response = await restoreModelResponse(transportService, sessionID, event.request, event.response);
+      track(sessionID);
+    } catch {
+      // Restoration is optional on ingress. Keep the original one-shot body;
+      // upstream failures will still surface when the host reads that body.
+      noticeOnce("HTTP reply kept original after attribution or restoration failure; placeholders may remain literal");
     }
-    const attribution = attributions.get(event.request);
-    if (
-      attribution === undefined ||
-      attribution.sessionID !== sessionID ||
-      attribution.kind !== kindOf(event)
-    ) {
-      throw new Error(ATTRIBUTION_ERROR);
-    }
-    event.response = await restoreModelResponse(transportService, sessionID, event.request, event.response);
-    track(sessionID);
   };
 
   /**
    * Restores registered tokens in a tool input leaf. For shell-like tools the
-   * token must occupy a standalone word AND the substituted value must be free
-   * of shell-significant characters and must not start with "-": otherwise the
-   * substitution could change the command's meaning (variable expansion,
-   * word splitting, globbing, option injection). Anything not provably safe
-   * refuses the whole call.
+   * token must occupy a complete argument word AND its original must be safe
+   * in that word's existing quote context. Command/assignment/redirect tokens,
+   * expansion, quote-breaking and option injection refuse the whole call.
    *
    * P1 (2026-10-06b) limited best-effort: when `allowDegraded` is set (the
    * call is a proven read-only tool, not shell-like) a mapping failure
@@ -893,16 +1242,17 @@ export function createTransparentSessionGuard(
     allowDegraded: boolean,
     degraded: { count: number },
   ): string => {
-    if (!text.includes(PSEUDONYM_TOKEN_PREFIX)) return text;
+    if (!containsTokenPrefix(text)) return text;
     if (shellLike) {
-      if (!isSupportedSimpleShellCommand(text)) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
-      TOKEN_SCAN.lastIndex = 0;
-      for (let match = TOKEN_SCAN.exec(text); match !== null; match = TOKEN_SCAN.exec(text)) {
+      const argumentsOnly = parseSupportedShellArguments(text);
+      if (argumentsOnly === null) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
+      for (const match of text.matchAll(TOKEN_SCAN)) {
         const end = match.index + match[0].length;
-        if (!tokenIsStandaloneArgument(text, match.index, end)) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
+        const argument = argumentsOnly.find((word) => word.value === match[0] && word.start <= match.index && word.end >= end);
+        if (argument === undefined) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
         const restoredToken = transportService.restoreText(sessionID, match[0]);
         if (!restoredToken.ok) throw new Error(toolRestoreError(restoredToken.reason));
-        if (!isShellSafeOriginal(restoredToken.text)) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
+        if (!isShellSafeOriginal(restoredToken.text, argument.quote)) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
       }
     }
     const restored = transportService.restoreText(sessionID, text);
@@ -961,7 +1311,7 @@ export function createTransparentSessionGuard(
     if (prototype !== Object.prototype && prototype !== null) throw new Error(TOOL_INPUT_SHAPE_ERROR);
     const record = value as RecordLike;
     for (const key of Object.keys(record)) {
-      if (key.includes(PSEUDONYM_TOKEN_PREFIX)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
+      if (containsTokenPrefix(key)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
       const descriptor = Object.getOwnPropertyDescriptor(record, key);
       if (descriptor === undefined || !("value" in descriptor)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
       const item = descriptor.value;
@@ -996,6 +1346,7 @@ export function createTransparentSessionGuard(
   const onToolBefore = (event: RecordLike): void => {
     if (!inputCarriesToken(event.input, new WeakSet())) return;
     const sessionID = requireSessionID(event);
+    ensureSeeded(sessionID);
     const tool = typeof event.tool === "string" ? event.tool.toLowerCase() : "";
     const shellLike =
       !NON_SHELL_TOOLS.has(tool) ||
@@ -1031,52 +1382,89 @@ export function createTransparentSessionGuard(
           disposals.push(
             (
               await ctx.session.hook(kind, (event) => {
-                protectRequestKind(event as unknown as RecordLike);
+                protectRequestKind(event as unknown as RecordLike, kind === "context" ? "primary" : kind);
               })
             ).dispose,
           );
         }
-        disposals.push(
-          (
-            await ctx.session.hook("http.request", (event) => {
-              return onHttpRequest(event as unknown as RecordLike);
-            })
-          ).dispose,
-        );
-        disposals.push(
-          (
-            await ctx.session.hook("http.response", (event) => {
-              return onHttpResponse(event as unknown as RecordLike);
-            })
-          ).dispose,
-        );
-        for (const name of [
-          "experimental.ws.handshake",
-          "experimental.ws.send",
-          "experimental.ws.receive",
-        ] as const) {
+        if (wireProtection) {
           disposals.push(
             (
-              await ctx.session.hook(name, () => {
-                throw new Error(UNSUPPORTED_ROUTE_ERROR);
+              await ctx.session.hook("http.request", (event) => {
+                return onHttpRequest(event as unknown as RecordLike);
               })
             ).dispose,
           );
         }
-        disposals.push(
-          (
-            await ctx.aisdk.hook("sdk", () => {
-              throw new Error(UNSUPPORTED_ROUTE_ERROR);
-            })
-          ).dispose,
-        );
-        disposals.push(
-          (
-            await ctx.aisdk.hook("language", () => {
-              throw new Error(UNSUPPORTED_ROUTE_ERROR);
-            })
-          ).dispose,
-        );
+        try {
+          disposals.push(
+            (
+              await ctx.session.hook("http.response", (event) => {
+                return onHttpResponse(event as unknown as RecordLike);
+              })
+            ).dispose,
+          );
+        } catch (error) {
+          if (wireProtection) throw error;
+          noticeOnce("HTTP reply restoration hook unavailable; content and tool hooks remain active");
+        }
+        const socketHooks = wireProtection
+          ? ["experimental.ws.handshake", "experimental.ws.send", "experimental.ws.receive"] as const
+          : ["experimental.ws.receive"] as const;
+        for (const name of socketHooks) {
+          try {
+            disposals.push(
+              (
+              await ctx.session.hook(name, async (input) => {
+                const event = input as unknown as RecordLike;
+                try {
+                  const sessionID = requireSessionID(event);
+                  assertTrackable(sessionID);
+                  if (name === "experimental.ws.receive" && !sessions.has(sessionID)) throw new Error(ATTRIBUTION_ERROR);
+                  ensureSeeded(sessionID);
+                  if (types.isProxy(event)) throw new Error(PROTECT_FAILED_ERROR);
+                  if (name === "experimental.ws.handshake") webSocket.handshake(event);
+                  else {
+                    assertWritableDataProperty(event, "frame");
+                    event.frame = name === "experimental.ws.send" ? await webSocket.send(event)
+                      : wireProtection ? webSocket.receive(event) : webSocket.receiveOnly(event);
+                  }
+                  track(sessionID);
+                  if (name === "experimental.ws.send") persistIfChanged(sessionID);
+                } catch (error) {
+                  if (name === "experimental.ws.receive") {
+                    try {
+                      const frame = webSocket.abandonResponse(event);
+                      if (frame !== undefined) event.frame = frame;
+                    } catch { /* Unwritable or invalid input stays untouched. */ }
+                    noticeOnce("WS reply kept original after attribution or restoration failure; placeholders may remain literal");
+                    return;
+                  }
+                  try { webSocket.reset(event); } catch { /* Invalid attribution has no lane to reset. */ }
+                  // Adapter diagnostics are static. Do not surface native URL/
+                  // Headers errors, which may embed a credential or raw value.
+                  const message = error instanceof Error && error.message.startsWith("Sensitive Guard ")
+                    ? error.message : PROTECT_FAILED_ERROR;
+                  throw new Error(`${message} [hook=${name}]`);
+                }
+              })
+              ).dispose,
+            );
+          } catch (error) {
+            if (wireProtection) throw error;
+            noticeOnce("WS reply restoration hook unavailable; content and tool hooks remain active");
+          }
+        }
+        for (const name of wireProtection ? ["sdk", "language"] as const : []) {
+          disposals.push(
+            (await ctx.aisdk.hook(name, (event) => {
+              try { aiSDK.admit(event as unknown as RecordLike); }
+              catch {
+                throw new Error(`${UNSUPPORTED_ROUTE_ERROR} AI SDK providers must honor OpenCode's injected HTTP fetch. [hook=aisdk.${name}]`);
+              }
+            })).dispose,
+          );
+        }
         disposals.push(
           (
             await ctx.tool.hook("execute.before", (event) => {
@@ -1084,17 +1472,52 @@ export function createTransparentSessionGuard(
             })
           ).dispose,
         );
+        // Public V2 events are an optional reclamation optimization: an absent
+        // or failed stream retains mappings rather than evicting live state.
+        // Subscribe only after all protection hooks have been armed.
+        if (ctx.event?.subscribe) {
+          const controller = new AbortController();
+          disposals.push(async () => { controller.abort(); });
+          void (async () => {
+            try {
+              for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+                if (controller.signal.aborted) break;
+                if (event.type === "session.deleted") releaseSession(event.data.sessionID);
+              }
+              if (!controller.signal.aborted) noticeOnce("session lifecycle stream ended; mappings retained until unload");
+            } catch {
+              if (!controller.signal.aborted) noticeOnce("session lifecycle stream unavailable; mappings retained until unload");
+            }
+          })();
+        }
       } catch (error) {
         // Registration failed partway: undo what was armed, then surface the
         // failure so the caller can fall back to its fail-closed setup.
+        // R-round (F4.5): the store handle must not leak on this path.
         await runDisposals(disposals);
+        webSocket.dispose();
+        aiSDK.dispose();
+        store?.close();
+        store = null;
         throw error;
       }
     },
     dispose: async () => {
       await runDisposals(disposals);
+      webSocket.dispose();
+      aiSDK.dispose();
       for (const sessionID of sessions) pseudonymizer.clearSession(sessionID);
       sessions.clear();
+      protectedContexts.clear();
+      notices.clear();
+      seedAttempts.clear();
+      persistedEntries.clear();
+      persistVersions.clear();
+      noPersist.clear();
+      // W2 (decision §4.4): dispose unloads hooks and in-memory state only —
+      // persisted mappings survive until TTL expiry or an explicit forget.
+      store?.close();
+      store = null;
     },
   };
 }

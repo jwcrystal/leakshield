@@ -25,7 +25,7 @@ const baseConfig: GuardConfig = {
 // Letters-only credential (digit runs can nest phone findings the core rejects).
 const KEY = "sk-QwertyuiopAsdfghjklZx";
 const EMAIL = "alice@example.com";
-const TOKEN_RE = /\[SGP1:[0-9a-f]{32}-\d{8,12}\]/;
+const TOKEN_RE = /\[SGP1:[0-9a-f]{32}-\d{8,12}\]|\[SGP2:[A-Z][A-Z_]{0,31}-[a-z]{4}-[a-z]{4}-[a-z]{4}\]/;
 
 interface RecordedHook {
   domain: string;
@@ -264,22 +264,24 @@ describe("anthropic messages http.response restore", () => {
     expect(body.content[0].text).toBe(`docs say ${foreign} is literal`);
   });
 
-  it("still refuses a token outside display text (response id)", async () => {
+  it("keeps a token outside display text literal without blocking the JSON response", async () => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY);
-    await expect(
-      dispatch(
-        hook,
-        new Response(
-          JSON.stringify({
-            id: token,
-            content: [{ type: "text", text: "clean" }],
-            stop_reason: "end_turn",
-          }),
-          { headers: { "content-type": "application/json" } },
-        ),
+    const restored = await dispatch(
+      hook,
+      new Response(
+        JSON.stringify({
+          id: token,
+          content: [{ type: "text", text: "clean" }],
+          stop_reason: "end_turn",
+        }),
+        { headers: { "content-type": "application/json" } },
       ),
-    ).rejects.toThrow(/Sensitive Guard/);
+    );
+    const body = await restored.json();
+    expect(body.id).toBe(token);
+    expect(body.content[0].text).toBe("clean");
+    expect(JSON.stringify(body)).not.toContain(KEY);
   });
 
   it("SSE: keeps a foreign literal marker in text_delta instead of refusing", async () => {

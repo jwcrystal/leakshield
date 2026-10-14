@@ -23,7 +23,7 @@ const baseConfig: GuardConfig = {
   },
 };
 
-const TOKEN_RE = /\[SGP1:[0-9a-f]{32}-\d{8,12}\]/;
+const TOKEN_RE = /\[SGP1:[0-9a-f]{32}-\d{8,12}\]|\[SGP2:[A-Z][A-Z_]{0,31}-[a-z]{4}-[a-z]{4}-[a-z]{4}\]/;
 const UNSUPPORTED_REQUEST_BODY =
   "Sensitive Guard transparent mode blocked a model request with an unsupported or unidentifiable body.";
 

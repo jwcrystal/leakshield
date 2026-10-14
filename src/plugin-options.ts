@@ -28,6 +28,34 @@ export const PluginOptionsSchema = z
      * (DLP-standard action names: block / allow.)
      */
     attachments: z.enum(["block", "allow"]).default("block"),
+    /** Transparent mode only. False is hook-only: no outbound HTTP/WS/SDK
+     * admission, metadata inspection, final body scan, or provider transform.
+     * Content/tool hooks remain, with optional best-effort ingress restoration
+     * for successfully prepared session/kind/model scopes. Unknown replies
+     * stay literal. Omission preserves the full wire-protection layer. */
+    wireProtection: z.boolean().optional(),
+    /**
+     * W2 (2026-10-07): opt-in encrypted mapping persistence for transparent
+     * mode. Default off — with persistence disabled every existing behavior
+     * and guarantee is unchanged (memory-only, process-lifetime mappings).
+     * Enabled: mappings persist encrypted (per-entry AES-256-GCM) in a
+     * SQLite store and rehydrate after restarts. Key custody resolves down
+     * the ladder OS keychain → explicit keyfile → memory-only degrade;
+     * conversations are never blocked by a missing key.
+     */
+    persistence: z
+      .object({
+        enabled: z.boolean().default(false),
+        /** Session TTL in days; 0 = never expire (manual forget only). */
+        ttlDays: z.number().int().min(0).max(3650).default(7),
+        /** Store path. Default: ~/.local/share/sensitive-guard/SGP.db */
+        path: z.string().min(1).optional(),
+        /** Opt-in weaker fallback when no OS keychain is available. */
+        keyFile: z.boolean().default(false),
+        /** Overrides the default keyfile location. */
+        keyfilePath: z.string().min(1).optional(),
+      })
+      .default({}),
   })
   .refine((options) => !options.deidentify || options.mode === "redact", {
     message: "deidentify requires mode 'redact'",
@@ -37,6 +65,12 @@ export const PluginOptionsSchema = z
   })
   .refine((options) => options.attachments === "block" || options.mode === "transparent", {
     message: 'attachments "allow" requires mode "transparent"',
+  })
+  .refine((options) => options.wireProtection === undefined || options.mode === "transparent", {
+    message: 'wireProtection requires mode "transparent"',
+  })
+  .refine((options) => !options.persistence.enabled || options.mode === "transparent", {
+    message: 'persistence requires mode "transparent"',
   })
   .default({});
 

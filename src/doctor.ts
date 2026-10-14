@@ -23,7 +23,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { loadConfig } from "./config/loader.js";
-import { validatePluginOptions } from "./plugin-options.js";
+import { defaultKeyfilePath, defaultStorePath } from "./decision/mapping-key.js";
+import { InMemoryMappingKeyProvider, openMappingStore } from "./decision/mapping-store.js";
+import { validatePluginOptions, type PluginOptions } from "./plugin-options.js";
 import { scanText } from "./scanner/engine.js";
 import type { GuardConfig } from "./types.js";
 
@@ -51,6 +53,9 @@ export interface DoctorDeps {
   readIfExists(filePath: string): string | null;
   existsDir(p: string): boolean;
   existsFile(p: string): boolean;
+  /** W2/B5: optional store-health probe (session count only). Defaults to a
+   * throwaway-key open — counting needs no decryption. */
+  openStoreProbe?(storePath: string, ttlDays: number): { sessions: number } | { error: string };
   loadGuardConfig(overridePath: string | undefined, workspaceRoot: string): GuardConfig;
   smokeScan(text: string, config: GuardConfig): { findings: number };
   cwd: string;
@@ -204,6 +209,80 @@ function candidateConfigPaths(deps: DoctorDeps): string[] {
   return [...workspace, ...global];
 }
 
+/**
+ * W2 (B5) persistence status — a warn/ok/skip check, never a status flip:
+ * a degraded store weakens nothing (the plugin degrades to memory-only);
+ * the check exists so "enabled but silently not working" is visible here
+ * instead of only as a setup-time console WARN (decision §4.6).
+ */
+export function persistenceCheck(
+  options: PluginOptions,
+  deps: DoctorDeps,
+): DoctorCheck {
+  const persistence = options.persistence;
+  if (!persistence.enabled) {
+    return {
+      id: "persistence",
+      state: "skip",
+      detail: "OFF (default) — mappings are memory-only, per process lifetime.",
+    };
+  }
+  const storePath = persistence.path ?? defaultStorePath();
+  const keySource = persistence.keyFile
+    ? `OS keychain first; keyfile fallback allowed (${persistence.keyfilePath ?? defaultKeyfilePath()})`
+    : "OS keychain";
+  const base = `CONFIGURED (not runtime-verified); store=${storePath} ttl=${persistence.ttlDays}d cleanup=on-store-open key=${keySource}`;
+  if (!deps.existsFile(storePath)) {
+    return {
+      id: "persistence",
+      state: "warn",
+      detail: `${base}; store not created yet; activation and key availability are unverified.`,
+      fix: "Check the running plugin's persistence active/memory-only log and test restart restoration with synthetic data.",
+    };
+  }
+  const probe =
+    deps.openStoreProbe?.(storePath, persistence.ttlDays) ??
+    defaultOpenStoreProbe(storePath, persistence.ttlDays);
+  if ("error" in probe) {
+    return {
+      id: "persistence",
+      state: "warn",
+      detail: `${base}; store unreadable (${probe.error}) — the plugin degrades to memory-only; conversations are not blocked.`,
+      fix: "Run `sensitive-guard --forget --all` to reset the store (erases persisted mappings), or restore the file.",
+    };
+  }
+  return {
+    id: "persistence",
+    state: "warn",
+    // Honesty (R-round F6.2): the doctor counts sessions with a throwaway
+    // key — it cannot and does not verify keychain health or decryptability.
+    // Runtime setup logs remain the authoritative degradation signal.
+    detail: `${base}; ${probe.sessions} persisted session(s) — runtime activation and decryptability not verified from doctor.`,
+    fix: "Check the running plugin's persistence active/memory-only log and test restart restoration with synthetic data.",
+  };
+}
+
+function defaultOpenStoreProbe(
+  storePath: string,
+  ttlDays: number,
+): { sessions: number } | { error: string } {
+  try {
+    // Throwaway key + readOnly: counting sessions never decrypts rows, and
+    // the doctor must never read the user's real keychain (it could prompt).
+    const store = openMappingStore({
+      path: storePath,
+      keyProvider: new InMemoryMappingKeyProvider(),
+      ttlDays,
+      readOnly: true,
+    });
+    const sessions = store.sessionCount();
+    store.close();
+    return { sessions };
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
+}
+
 export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   const checks: DoctorCheck[] = [];
   const host = parseHostVersion(deps.opencodeVersion());
@@ -322,8 +401,9 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   checks.push({
     id: "options",
     state: "ok",
-    detail: `mode=${options.mode}${options.attachments === "allow" ? " attachments=allow" : ""}${options.deidentify ? " +deidentify" : ""}${options.envQueries ? " +envQueries" : ""}${options.configPath ? ` configPath=${options.configPath}` : ""}`,
+    detail: `mode=${options.mode}${options.mode === "transparent" ? ` wireProtection=${options.wireProtection ?? true}` : ""}${options.attachments === "allow" ? " attachments=allow" : ""}${options.deidentify ? " +deidentify" : ""}${options.envQueries ? " +envQueries" : ""}${options.configPath ? ` configPath=${options.configPath}` : ""}`,
   });
+  checks.push(persistenceCheck(options, deps));
 
   // Guard config load
   let guardConfig: GuardConfig;
@@ -371,7 +451,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     checks.push({
       id: "coverage",
       state: "warn",
-      detail: `transparent mode protects the three OpenCode API protocols by wire shape (Chat Completions, Anthropic Messages, OpenAI Responses); built-in aisdk provider packages, WebSocket, and unknown shapes are refused (fail-closed), not passed. Attachments policy: ${options.attachments === "allow" ? "ALLOW — attachments pass through unscanned with a visible notice (you vouch for their content)" : "block — replaced with an omission notice, never sent"}.`,
+      detail: `${options.wireProtection === false ? "transparent hook-only: content hooks protect their snapshots; no outbound HTTP/WS/SDK admission, transport metadata checks, injected-fetch requirement or provider transport transform. Final bodies/frames are not inspected or remasked. Unknown routes, including /alpha/generate, are not gated. Optional incoming HTTP/WS hooks restore known display protocols after successful scoped host preparation for the same session/kind/model; unsupported or unverified replies remain literal. Tool safety remains. Content added after hooks may be unmasked, including late-added attachments." : "transparent mode protects three HTTP protocols by wire shape (Chat Completions, Anthropic Messages, Responses) and native Responses-family WS frames; unknown outbound dialects and intercepted routes, including /alpha/generate, are refused (fail-closed), not passed. AI SDK providers must honor OpenCode's injected HTTP fetch; missing or unsafe fetch options refuse. Bypass transports are outside coverage, not a proven blocked transport."} Both levels stop rewriting on reply-side SG failures and keep literal originals; provider errors and cancellation still propagate. Content-hook masking failures still refuse the affected model call with a safe reason/stage, never silently send raw content. Attachments policy at content hooks: ${options.attachments === "allow" ? "ALLOW — attachments pass through unscanned with a visible notice (you vouch for their content)" : "block — replaced with an omission notice"}. Complete original-history/restart restoration is not verified.`,
     });
   }
 
@@ -381,7 +461,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     detail: "Install-level checks pass. Live-session proof: run the README smoke test or scripts/e2e/run-boundary.mjs.",
   });
 
-  return { status: "PROTECTED", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
+  return { status: options.mode === "transparent" && options.wireProtection === false ? "PARTIAL" : "PROTECTED", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
 }
 
 export function formatDoctorReport(report: DoctorReport): string {
@@ -402,7 +482,9 @@ export function formatDoctorReport(report: DoctorReport): string {
     report.status === "PROTECTED"
       ? "PROTECTED — install-level checks pass."
       : report.status === "PARTIAL"
-        ? "PARTIAL — protected within the v1 boundary (session hooks only)."
+        ? report.hostGeneration === "v1"
+          ? "PARTIAL — protected within the v1 boundary (session hooks only)."
+          : "PARTIAL — hook-first protection; final outbound HTTP bodies are not inspected."
         : report.status === "BROKEN"
           ? "BROKEN — registered but would not protect; fix the [FAIL] items above."
           : report.status === "NOT_REGISTERED"

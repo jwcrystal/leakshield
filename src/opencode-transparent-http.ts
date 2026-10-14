@@ -1,6 +1,6 @@
 /**
  * Transport-boundary helpers for OpenCode v2 transparent pseudonymization
- * (issue #22, stage 1 — offline mocks only).
+ * (issue #22; protocol selection is not provider-brand selection).
  *
  * Source-verified against the installed @opencode/plugin 2.0.19 declarations:
  * `session:http.request` / `session:http.response` expose native `Request` /
@@ -9,10 +9,11 @@
  * Chat Completions, Anthropic Messages and OpenAI Responses — selected by URL
  * path shape; each has JSON / event-stream response restore.
  *
- * Fail-closed rules implemented here (P1, 2026-10-06b — fail closed on leak
- * risk, not on parse uncertainty):
- * - Unsupported routes, unknown or mixed dialects and bodyless requests are
- *   refused. A placeholder in transport metadata or the URL is judged
+ * Outbound enforcement and ingress restoration:
+ * - Final-wire masking refuses unsupported routes, mixed dialects and
+ *   bodyless requests. Explicit false admission may accept an unknown route
+ *   with scoped host preparation proof; its opaque body is not inspected.
+ *   A placeholder in transport metadata or the URL is judged
  *   session-aware instead: clean markers are preserved verbatim with a
  *   content-free WARN; sensitive content still refuses (unmaskable
  *   position).
@@ -31,17 +32,20 @@
  *   placeholder in an unplaceable response field is degradation — kept
  *   literal with a WARN — never a refusal; actual tool arguments remain
  *   tokenized for the typed tool gate.
- * - Streaming is pull-based with per-event, per-channel and aggregate bounds;
- *   a terminal choice with an unresolved tail degrades (literal emit + WARN)
- *   instead of refusing.
+ * - Streaming is pull-based with bounded original-event transactions and
+ *   channel state. SG parser/restore failures replay undelivered originals,
+ *   then bypass rewriting; source errors and cancellation remain failures.
+ *   Non-stream restoration failures are recovered by the session hook.
  */
 
 import {
-  PSEUDONYM_TOKEN_PREFIX,
+  containsTokenPrefix,
+  PSEUDONYM_TOKEN_PREFIXES,
   type PseudonymJsonResult,
   type PseudonymTextResult,
 } from "./decision/pseudonymization.js";
 import { walkSchemaStrings } from "./decision/schema-strings.js";
+import { createRecoveringSseStream } from "./opencode-transparent-stream.js";
 
 /** The masking/detection subset of the pseudonymization core this module needs. */
 export interface TransportMaskingService {
@@ -57,6 +61,17 @@ export interface TransportMaskingService {
    * because the position cannot be masked without breaking the protocol.
    */
   isStructuralIdentifierSafe(sessionID: string, text: string): boolean;
+  /**
+   * Field-aware transport variants: identical to the strict checks except
+   * that PII_URL findings are exempt. The request URL, query values, and
+   * header values are infrastructure positions — masking or refusing an
+   * endpoint URL would break every request once the opt-in URL rule is
+   * enabled, so URL findings are ignored there. User-content URLs inside
+   * the request body are unaffected (still masked).
+   */
+  transportDetectSensitive(text: string): boolean;
+  /** Transport variant of {@link isStructuralIdentifierSafe} (PII_URL exempt). */
+  isTransportIdentifierSafe(sessionID: string, text: string): boolean;
   /**
    * Attachment policy: "block" (default) refuses media/file parts at the
    * wire; "allow" tolerates them as opaque leaves that are substituted with a
@@ -92,15 +107,26 @@ const STREAM_BUFFER_LIMIT =
   "Sensitive Guard transparent mode blocked an oversized streaming buffer.";
 
 /**
+ * Content-free refusal classification (2026-10-08): every request refusal
+ * appends a fixed code naming WHICH check failed — the refusal-policy spec
+ * requires refusals to name the cause. Codes are static labels, never
+ * request/response content, so the full message stays safe for host logs
+ * and user-facing errors. Existing substring assertions keep passing: the
+ * base sentence is unchanged and the code is appended in brackets.
+ */
+function refusal(code: string): string {
+  return `${UNSUPPORTED_REQUEST_BODY} [${code}]`;
+}
+
+
+/**
  * All byte caps are UTF-8 bytes (not UTF-16 code units): the bound is a memory
  * bound, and a code-unit cap would allow up to ~4× the stated bytes for
  * multi-byte text. Each cap is charged BEFORE the value is accumulated.
  */
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
-/** Unparsed bytes held between newlines. */
-const MAX_PENDING_BYTES = 1_048_576;
-/** One accumulated (not yet terminated) SSE event. */
-const MAX_EVENT_BYTES = 1_048_576;
+// SSE framing and original-event retention caps live in the shared recovery
+// stream; protocol adapters only own their bounded text/channel state.
 /** A single choice's held-back content channel. */
 const MAX_CHANNEL_BYTES = 65_536;
 /** The aggregate held-back content across all channels. */
@@ -176,9 +202,9 @@ export function classifyModelRoute(url: string): ModelWireRoute | null {
 
 /** Whether a URL carries a reserved token, raw or percent-encoded. */
 function urlCarriesToken(url: string): boolean {
-  if (url.includes(PSEUDONYM_TOKEN_PREFIX)) return true;
+  if (containsTokenPrefix(url)) return true;
   try {
-    return decodeURIComponent(url).includes(PSEUDONYM_TOKEN_PREFIX);
+    return containsTokenPrefix(decodeURIComponent(url));
   } catch {
     return false; // malformed escapes: the raw check already covered them
   }
@@ -287,7 +313,7 @@ function isAssistantDisplayPath(path: readonly PathSegment[]): boolean {
 function strayTokenIn(value: unknown, path: readonly PathSegment[] = []): boolean {
   if (typeof value === "string") {
     return (
-      value.includes(PSEUDONYM_TOKEN_PREFIX) &&
+      containsTokenPrefix(value) &&
       !isIntentionalToolArgumentsPath(path) &&
       !isAssistantDisplayPath(path)
     );
@@ -298,7 +324,7 @@ function strayTokenIn(value: unknown, path: readonly PathSegment[] = []): boolea
   }
   const record = value as Record<string, unknown>;
   for (const key of Object.keys(record)) {
-    if (key.includes(PSEUDONYM_TOKEN_PREFIX) || strayTokenIn(record[key], [...path, key])) return true;
+    if (containsTokenPrefix(key) || strayTokenIn(record[key], [...path, key])) return true;
   }
   return false;
 }
@@ -321,31 +347,31 @@ function inspectTransportMetadata(
 ): void {
   const url = new URL(request.url);
   for (const [name, value] of url.searchParams) {
-    if (name.includes(PSEUDONYM_TOKEN_PREFIX) || value.includes(PSEUDONYM_TOKEN_PREFIX)) {
+    if (containsTokenPrefix(name) || containsTokenPrefix(value)) {
       if (
         !service.isStructuralIdentifierSafe(sessionID, name) ||
-        !service.isStructuralIdentifierSafe(sessionID, value)
+        !service.isTransportIdentifierSafe(sessionID, value)
       ) {
-        throw new Error(UNSUPPORTED_REQUEST_BODY);
+        throw new Error(refusal("metadata-query-token"));
       }
       warnDegradation("transport metadata preserved with a literal placeholder");
       continue;
     }
-    if (service.detectSensitive(name) || service.detectSensitive(value)) {
-      throw new Error(UNSUPPORTED_REQUEST_BODY);
+    if (service.detectSensitive(name) || service.transportDetectSensitive(value)) {
+      throw new Error(refusal("metadata-query-sensitive"));
     }
   }
   for (const [name, value] of request.headers) {
-    if (value.includes(PSEUDONYM_TOKEN_PREFIX)) {
-      if (!service.isStructuralIdentifierSafe(sessionID, value)) {
-        throw new Error(UNSUPPORTED_REQUEST_BODY);
+    if (containsTokenPrefix(value)) {
+      if (!service.isTransportIdentifierSafe(sessionID, value)) {
+        throw new Error(refusal("metadata-header-token"));
       }
       warnDegradation("transport metadata preserved with a literal placeholder");
       continue;
     }
     if (AUTH_HEADER_NAMES.has(name.toLowerCase())) continue;
-    if (service.detectSensitive(name) || service.detectSensitive(value)) {
-      throw new Error(UNSUPPORTED_REQUEST_BODY);
+    if (service.detectSensitive(name) || service.transportDetectSensitive(value)) {
+      throw new Error(refusal("metadata-header-sensitive"));
     }
   }
 }
@@ -447,31 +473,75 @@ function attachmentsAllowed(service: TransportMaskingService): boolean {
   return service.attachmentsPolicy === "allow";
 }
 
+const OPAQUE_REASONING_SENTINEL = "__sg_opaque_reasoning";
+
+/**
+ * Stashes every reasoning item's `encrypted_content` string around the
+ * masking transaction: the payload is provider-opaque, so it is neither
+ * scanned nor masked — a false-positive detector hit (an `sk-` substring
+ * inside base64, say) would corrupt the blob and break the protocol — and
+ * it crosses the boundary verbatim while the same item's plaintext
+ * summary/content parts are masked normally. Same sentinel contract as
+ * withOpaqueAttachments: substitute, protect, restore, verify counts.
+ */
+function withOpaqueReasoningContent(
+  body: Record<string, unknown>,
+  fn: (input: Record<string, unknown>) => Record<string, unknown>,
+): Record<string, unknown> {
+  const input = body.input;
+  if (!Array.isArray(input)) return fn(body);
+  const originals: string[] = [];
+  for (const item of input) {
+    if (isRecord(item) && item.type === "reasoning" && typeof item.encrypted_content === "string") {
+      originals.push(item.encrypted_content);
+      item.encrypted_content = `${OPAQUE_REASONING_SENTINEL}_${originals.length - 1}`;
+    }
+  }
+  if (originals.length === 0) return fn(body);
+  const result = fn(body);
+  const sentinelRe = new RegExp(`^${OPAQUE_REASONING_SENTINEL}_\\d+$`);
+  const resultInput = (result as Record<string, unknown>).input;
+  if (!Array.isArray(resultInput)) throw new Error(MASK_FAILURE);
+  let index = 0;
+  for (const item of resultInput) {
+    if (
+      isRecord(item) &&
+      typeof item.encrypted_content === "string" &&
+      sentinelRe.test(item.encrypted_content)
+    ) {
+      if (index >= originals.length) throw new Error(MASK_FAILURE);
+      item.encrypted_content = originals[index++];
+    }
+  }
+  if (index !== originals.length) throw new Error(MASK_FAILURE);
+  return result;
+}
+
 // ─── Request validation (runs before any issuance) ──────────────────────────
 
 function validateDialect(body: Record<string, unknown>): void {
   // An Anthropic-shaped /v1/messages body carries a top-level system prompt
   // and input_schema tools this OpenAI-specific masker cannot place.
-  if (body.system !== undefined) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  if (body.system !== undefined) throw new Error(refusal("chatcompletions-system-field"));
   if (body.tools !== undefined) {
-    if (!Array.isArray(body.tools)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+    if (!Array.isArray(body.tools)) throw new Error(refusal("chatcompletions-tools-shape"));
     for (const tool of body.tools) {
       if (!isRecord(tool) || !isRecord(tool.function) || typeof tool.function.name !== "string") {
-        throw new Error(UNSUPPORTED_REQUEST_BODY);
+        throw new Error(refusal("chatcompletions-tool-shape"));
       }
     }
   }
 }
 
 function validateMessages(body: Record<string, unknown>, allowAttachments: boolean): void {
-  if (!Array.isArray(body.messages)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  if (!Array.isArray(body.messages)) throw new Error(refusal("chatcompletions-messages-shape"));
   for (const message of body.messages) {
     if (!isRecord(message) || typeof message.role !== "string") {
-      throw new Error(UNSUPPORTED_REQUEST_BODY);
+      throw new Error(refusal("chatcompletions-message-shape"));
     }
     const content = message.content;
     if (content !== undefined && content !== null && typeof content !== "string") {
-      if (!Array.isArray(content)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+      if (!Array.isArray(content)) throw new Error(refusal("chatcompletions-content-shape"));
       for (const part of content) {
         // Attachments and foreign part types must refuse, never pass tokenized
         // or unscanned content through the wire boundary — unless the user
@@ -480,13 +550,13 @@ function validateMessages(body: Record<string, unknown>, allowAttachments: boole
           continue;
         }
         if (!isRecord(part) || part.type !== "text" || typeof part.text !== "string") {
-          throw new Error(UNSUPPORTED_REQUEST_BODY);
+          throw new Error(refusal("chatcompletions-content-part"));
         }
       }
     }
     const toolCalls = message.tool_calls;
     if (toolCalls !== undefined && toolCalls !== null) {
-      if (!Array.isArray(toolCalls)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+      if (!Array.isArray(toolCalls)) throw new Error(refusal("chatcompletions-tool-calls-shape"));
       for (const call of toolCalls) {
         if (
           !isRecord(call) ||
@@ -494,24 +564,24 @@ function validateMessages(body: Record<string, unknown>, allowAttachments: boole
           typeof call.function.name !== "string" ||
           typeof call.function.arguments !== "string"
         ) {
-          throw new Error(UNSUPPORTED_REQUEST_BODY);
+          throw new Error(refusal("chatcompletions-tool-call-shape"));
         }
         try {
           JSON.parse(call.function.arguments);
         } catch {
-          throw new Error(UNSUPPORTED_REQUEST_BODY);
+          throw new Error(refusal("chatcompletions-tool-call-arguments"));
         }
       }
     }
     const functionCall = message.function_call;
     if (functionCall !== undefined && functionCall !== null) {
       if (!isRecord(functionCall) || typeof functionCall.name !== "string" || typeof functionCall.arguments !== "string") {
-        throw new Error(UNSUPPORTED_REQUEST_BODY);
+        throw new Error(refusal("chatcompletions-function-call-shape"));
       }
       try {
         JSON.parse(functionCall.arguments);
       } catch {
-        throw new Error(UNSUPPORTED_REQUEST_BODY);
+        throw new Error(refusal("chatcompletions-function-call-arguments"));
       }
     }
   }
@@ -615,26 +685,26 @@ export async function remaskChatCompletionsRequest(
   if (urlCarriesToken(request.url)) {
     // P1 (2026-10-06b): a placeholder in the URL is judged, not auto-refused;
     // sensitive content in a URL cannot be masked without changing the target.
-    if (!service.isStructuralIdentifierSafe(sessionID, request.url)) {
-      throw new Error(UNSUPPORTED_REQUEST_BODY);
+    if (!service.isTransportIdentifierSafe(sessionID, request.url)) {
+      throw new Error(refusal("url-token"));
     }
     warnDegradation("request url preserved with a literal placeholder");
   }
   inspectTransportMetadata(service, sessionID, request);
   // A body is required: transport metadata (query, headers) cannot be scanned
   // for arbitrary content, so a bodyless request has no verifiable boundary.
-  if (request.body === null) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  if (request.body === null) throw new Error(refusal("body-missing"));
 
-  const raw = await readCappedText(request, MAX_BODY_BYTES, UNSUPPORTED_REQUEST_BODY);
-  if (raw.length === 0) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  const raw = await readCappedText(request, MAX_BODY_BYTES, refusal("body-cap"));
+  if (raw.length === 0) throw new Error(refusal("body-empty"));
 
   let body: unknown;
   try {
     body = JSON.parse(raw);
   } catch {
-    throw new Error(UNSUPPORTED_REQUEST_BODY);
+    throw new Error(refusal("body-json"));
   }
-  if (!isRecord(body)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  if (!isRecord(body)) throw new Error(refusal("body-shape"));
 
   validateDialect(body);
   validateMessages(body, attachmentsAllowed(service));
@@ -663,7 +733,7 @@ export async function remaskChatCompletionsRequest(
         try {
           call.function.arguments = JSON.parse(call.function.arguments as string);
         } catch {
-          throw new Error(UNSUPPORTED_REQUEST_BODY);
+          throw new Error(refusal("chatcompletions-tool-call-arguments"));
         }
         transformedArguments.push({ message: messageIndex, call: callIndex });
       }
@@ -672,7 +742,7 @@ export async function remaskChatCompletionsRequest(
       try {
         message.function_call.arguments = JSON.parse(message.function_call.arguments as string);
       } catch {
-        throw new Error(UNSUPPORTED_REQUEST_BODY);
+        throw new Error(refusal("chatcompletions-function-call-arguments"));
       }
       transformedArguments.push({ message: messageIndex });
     }
@@ -683,15 +753,15 @@ export async function remaskChatCompletionsRequest(
   // content we are about to refuse.
   const structuralBefore = collectWireStructuralStrings(body);
   for (const identifier of structuralBefore) {
-    if (identifier.includes(PSEUDONYM_TOKEN_PREFIX) || service.detectSensitive(identifier)) {
-      throw new Error(UNSUPPORTED_REQUEST_BODY);
+    if (containsTokenPrefix(identifier) || service.detectSensitive(identifier)) {
+      throw new Error(refusal("structural-identifier"));
     }
   }
   let unsafeNumber = false;
   walkNumbers(body, (value) => {
     if (service.detectSensitive(String(value))) unsafeNumber = true;
   });
-  if (unsafeNumber) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  if (unsafeNumber) throw new Error(refusal("number-sensitive"));
 
   // Atomic protection: one transaction over the whole body.
   const next = withOpaqueAttachments(service.attachmentsPolicy ?? "block", body, (input) => {
@@ -708,7 +778,7 @@ export async function remaskChatCompletionsRequest(
     structuralAfter.length !== structuralBefore.length ||
     structuralAfter.some((identifier, index) => identifier !== structuralBefore[index])
   ) {
-    throw new Error(UNSUPPORTED_REQUEST_BODY);
+    throw new Error(refusal("structural-drift"));
   }
 
   // Re-serialize every transformed argument: a parsed value re-encodes as
@@ -748,23 +818,23 @@ export async function remaskChatCompletionsRequest(
  */
 function validateAnthropicSystem(system: unknown): void {
   if (system === undefined || system === null || typeof system === "string") return;
-  if (!Array.isArray(system)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  if (!Array.isArray(system)) throw new Error(refusal("anthropic-system-shape"));
   for (const block of system) {
     if (!isRecord(block) || block.type !== "text" || typeof block.text !== "string") {
-      throw new Error(UNSUPPORTED_REQUEST_BODY);
+      throw new Error(refusal("anthropic-system-block"));
     }
   }
 }
 
 function validateAnthropicContent(content: unknown, allowAttachments: boolean): void {
   if (content === undefined || content === null || typeof content === "string") return;
-  if (!Array.isArray(content)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  if (!Array.isArray(content)) throw new Error(refusal("anthropic-content-shape"));
   for (const block of content) {
-    if (!isRecord(block)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+    if (!isRecord(block)) throw new Error(refusal("anthropic-content-block"));
     if (allowAttachments && isAttachmentRecord(block)) continue;
     switch (block.type) {
       case "text":
-        if (typeof block.text !== "string") throw new Error(UNSUPPORTED_REQUEST_BODY);
+        if (typeof block.text !== "string") throw new Error(refusal("anthropic-text-block"));
         break;
       case "tool_use":
         if (
@@ -772,14 +842,14 @@ function validateAnthropicContent(content: unknown, allowAttachments: boolean): 
           typeof block.name !== "string" ||
           !isRecord(block.input)
         ) {
-          throw new Error(UNSUPPORTED_REQUEST_BODY);
+          throw new Error(refusal("anthropic-tool-use-block"));
         }
         break;
       case "tool_result": {
-        if (typeof block.tool_use_id !== "string") throw new Error(UNSUPPORTED_REQUEST_BODY);
+        if (typeof block.tool_use_id !== "string") throw new Error(refusal("anthropic-tool-result-block"));
         const inner = block.content;
         if (inner === undefined || inner === null || typeof inner === "string") break;
-        if (!Array.isArray(inner)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+        if (!Array.isArray(inner)) throw new Error(refusal("anthropic-tool-result-content"));
         for (const part of inner) {
           // Images/documents inside tool results refuse like top-level ones,
           // unless the user explicitly chose the "allow" policy.
@@ -787,13 +857,13 @@ function validateAnthropicContent(content: unknown, allowAttachments: boolean): 
             continue;
           }
           if (!isRecord(part) || part.type !== "text" || typeof part.text !== "string") {
-            throw new Error(UNSUPPORTED_REQUEST_BODY);
+            throw new Error(refusal("anthropic-tool-result-part"));
           }
         }
         break;
       }
       default:
-        throw new Error(UNSUPPORTED_REQUEST_BODY);
+        throw new Error(refusal("anthropic-content-block-type"));
     }
   }
 }
@@ -801,18 +871,18 @@ function validateAnthropicContent(content: unknown, allowAttachments: boolean): 
 function validateAnthropicDialect(body: Record<string, unknown>, allowAttachments: boolean): void {
   validateAnthropicSystem(body.system);
   if (body.tools !== undefined) {
-    if (!Array.isArray(body.tools)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+    if (!Array.isArray(body.tools)) throw new Error(refusal("anthropic-tools-shape"));
     for (const tool of body.tools) {
-      if (!isRecord(tool) || typeof tool.name !== "string") throw new Error(UNSUPPORTED_REQUEST_BODY);
+      if (!isRecord(tool) || typeof tool.name !== "string") throw new Error(refusal("anthropic-tool-shape"));
       if (tool.input_schema !== undefined && !isRecord(tool.input_schema)) {
-        throw new Error(UNSUPPORTED_REQUEST_BODY);
+        throw new Error(refusal("anthropic-tool-schema"));
       }
     }
   }
-  if (!Array.isArray(body.messages)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  if (!Array.isArray(body.messages)) throw new Error(refusal("anthropic-messages-shape"));
   for (const message of body.messages) {
     if (!isRecord(message) || typeof message.role !== "string") {
-      throw new Error(UNSUPPORTED_REQUEST_BODY);
+      throw new Error(refusal("anthropic-message-shape"));
     }
     validateAnthropicContent(message.content, allowAttachments);
   }
@@ -867,24 +937,24 @@ export async function remaskAnthropicMessagesRequest(
   if (urlCarriesToken(request.url)) {
     // P1 (2026-10-06b): a placeholder in the URL is judged, not auto-refused;
     // sensitive content in a URL cannot be masked without changing the target.
-    if (!service.isStructuralIdentifierSafe(sessionID, request.url)) {
-      throw new Error(UNSUPPORTED_REQUEST_BODY);
+    if (!service.isTransportIdentifierSafe(sessionID, request.url)) {
+      throw new Error(refusal("url-token"));
     }
     warnDegradation("request url preserved with a literal placeholder");
   }
   inspectTransportMetadata(service, sessionID, request);
-  if (request.body === null) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  if (request.body === null) throw new Error(refusal("body-missing"));
 
-  const raw = await readCappedText(request, MAX_BODY_BYTES, UNSUPPORTED_REQUEST_BODY);
-  if (raw.length === 0) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  const raw = await readCappedText(request, MAX_BODY_BYTES, refusal("body-cap"));
+  if (raw.length === 0) throw new Error(refusal("body-empty"));
 
   let body: unknown;
   try {
     body = JSON.parse(raw);
   } catch {
-    throw new Error(UNSUPPORTED_REQUEST_BODY);
+    throw new Error(refusal("body-json"));
   }
-  if (!isRecord(body)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  if (!isRecord(body)) throw new Error(refusal("body-shape"));
 
   validateAnthropicDialect(body, attachmentsAllowed(service));
 
@@ -892,15 +962,15 @@ export async function remaskAnthropicMessagesRequest(
 
   const structuralBefore = collectAnthropicStructuralStrings(body);
   for (const identifier of structuralBefore) {
-    if (identifier.includes(PSEUDONYM_TOKEN_PREFIX) || service.detectSensitive(identifier)) {
-      throw new Error(UNSUPPORTED_REQUEST_BODY);
+    if (containsTokenPrefix(identifier) || service.detectSensitive(identifier)) {
+      throw new Error(refusal("structural-identifier"));
     }
   }
   let unsafeNumber = false;
   walkNumbers(body, (value) => {
     if (service.detectSensitive(String(value))) unsafeNumber = true;
   });
-  if (unsafeNumber) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  if (unsafeNumber) throw new Error(refusal("number-sensitive"));
 
   const next = withOpaqueAttachments(service.attachmentsPolicy ?? "block", body, (input) => {
     const masked = service.protectJsonForModel(sessionID, input);
@@ -915,7 +985,7 @@ export async function remaskAnthropicMessagesRequest(
     structuralAfter.length !== structuralBefore.length ||
     structuralAfter.some((identifier, index) => identifier !== structuralBefore[index])
   ) {
-    throw new Error(UNSUPPORTED_REQUEST_BODY);
+    throw new Error(refusal("structural-drift"));
   }
 
   const serialized = JSON.stringify(next);
@@ -930,13 +1000,15 @@ export async function remaskAnthropicMessagesRequest(
 
 /**
  * Validates an OpenAI Responses request body: `instructions` string, `input`
- * (string or item array: message | function_call | function_call_output),
- * flat `tools` ({type:"function", name, parameters}). Reasoning items,
- * item references, and unknown types refuse.
+ * (string or item array: message | function_call | function_call_output |
+ * reasoning), flat `tools` ({type:"function", name, parameters}). Reasoning
+ * items pass with their encrypted payload opaque (unscanned, verbatim) and
+ * their summary/content text masked; item references and unknown types
+ * refuse.
  */
 function validateResponsesContentParts(content: unknown, allowAttachments: boolean): void {
   if (content === undefined || content === null || typeof content === "string") return;
-  if (!Array.isArray(content)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  if (!Array.isArray(content)) throw new Error(refusal("responses-content-shape"));
   for (const part of content) {
     if (allowAttachments && isAttachmentRecord(part)) {
       continue;
@@ -946,30 +1018,75 @@ function validateResponsesContentParts(content: unknown, allowAttachments: boole
       (part.type !== "input_text" && part.type !== "output_text") ||
       typeof part.text !== "string"
     ) {
-      throw new Error(UNSUPPORTED_REQUEST_BODY);
+      throw new Error(refusal("responses-content-part"));
+    }
+  }
+}
+
+/** Text-part kinds the restore side recognizes on reasoning items. */
+const REASONING_TEXT_PART_TYPES = new Set(["summary_text", "reasoning_text"]);
+
+function validateResponsesReasoningParts(parts: unknown): void {
+  if (parts === undefined || parts === null) return;
+  if (!Array.isArray(parts)) throw new Error(refusal("responses-reasoning-shape"));
+  for (const part of parts) {
+    if (
+      !isRecord(part) ||
+      typeof part.type !== "string" ||
+      !REASONING_TEXT_PART_TYPES.has(part.type) ||
+      typeof part.text !== "string"
+    ) {
+      throw new Error(refusal("responses-reasoning-shape"));
     }
   }
 }
 
 function validateResponsesInputItem(item: unknown, allowAttachments: boolean): void {
   if (typeof item === "string") return;
-  if (!isRecord(item)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  if (!isRecord(item)) throw new Error(refusal("responses-input-item"));
+  // Responses EasyInputMessage permits omitted type. AI SDK's Responses
+  // lowering emits this form for system/developer/user/assistant messages.
+  // Do not normalize the wire body or infer arbitrary type-less records:
+  // require a recognized role plus actual supported content before masking.
+  if (item.type === undefined && typeof item.role === "string" && ["system", "developer", "user", "assistant"].includes(item.role)) {
+    if (item.content === undefined || item.content === null) throw new Error(refusal("responses-content-shape"));
+    validateResponsesContentParts(item.content, allowAttachments);
+    return;
+  }
   switch (item.type) {
     case "message":
-      if (typeof item.role !== "string") throw new Error(UNSUPPORTED_REQUEST_BODY);
+      if (typeof item.role !== "string") throw new Error(refusal("responses-message-role"));
       validateResponsesContentParts(item.content, allowAttachments);
       return;
     case "function_call":
       if (typeof item.name !== "string" || typeof item.arguments !== "string") {
-        throw new Error(UNSUPPORTED_REQUEST_BODY);
+        throw new Error(refusal("responses-function-call-shape"));
       }
       return;
     case "function_call_output":
-      if (typeof item.output !== "string") throw new Error(UNSUPPORTED_REQUEST_BODY);
+      if (typeof item.output !== "string") {
+        if (!Array.isArray(item.output)) throw new Error(refusal("responses-function-output"));
+        validateResponsesContentParts(item.output, allowAttachments);
+      }
       return;
+    case "reasoning": {
+      // Encrypted reasoning payloads are provider-opaque: they cannot be
+      // scanned, and masking them is impossible without corrupting the blob
+      // (a false-positive finding — e.g. an `sk-` substring inside base64 —
+      // would break the protocol). They are derived from earlier masked
+      // traffic and return to the same provider, disclosing nothing new.
+      // The plaintext channels (summary / content parts) are masked like
+      // ordinary text; the id survives verbatim as a structural identifier.
+      if (item.encrypted_content !== undefined && typeof item.encrypted_content !== "string") {
+        throw new Error(refusal("responses-reasoning-shape"));
+      }
+      validateResponsesReasoningParts(item.summary);
+      validateResponsesReasoningParts(item.content);
+      return;
+    }
     default:
-      // reasoning / item_reference / unknown: cannot verify or place.
-      throw new Error(UNSUPPORTED_REQUEST_BODY);
+      // item_reference / unknown: cannot verify or place.
+      throw new Error(refusal("responses-item-type"));
   }
 }
 
@@ -977,23 +1094,23 @@ function validateResponsesDialect(body: Record<string, unknown>, allowAttachment
   // A chat-completions/anthropic-shaped body on a /responses route is a
   // mixed dialect this masker cannot place; refuse it explicitly.
   if (body.messages !== undefined || body.system !== undefined) {
-    throw new Error(UNSUPPORTED_REQUEST_BODY);
+    throw new Error(refusal("responses-mixed-dialect"));
   }
   if (body.instructions !== undefined && typeof body.instructions !== "string") {
-    throw new Error(UNSUPPORTED_REQUEST_BODY);
+    throw new Error(refusal("responses-instructions"));
   }
   if (body.tools !== undefined) {
-    if (!Array.isArray(body.tools)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+    if (!Array.isArray(body.tools)) throw new Error(refusal("responses-tools-shape"));
     for (const tool of body.tools) {
-      if (!isRecord(tool) || typeof tool.name !== "string") throw new Error(UNSUPPORTED_REQUEST_BODY);
+      if (!isRecord(tool) || typeof tool.name !== "string") throw new Error(refusal("responses-tool-shape"));
       if (tool.parameters !== undefined && !isRecord(tool.parameters)) {
-        throw new Error(UNSUPPORTED_REQUEST_BODY);
+        throw new Error(refusal("responses-tool-schema"));
       }
     }
   }
   if (body.input !== undefined) {
     if (typeof body.input !== "string") {
-      if (!Array.isArray(body.input)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+      if (!Array.isArray(body.input)) throw new Error(refusal("responses-input-shape"));
       for (const item of body.input) validateResponsesInputItem(item, allowAttachments);
     }
   }
@@ -1010,6 +1127,7 @@ function collectResponsesStructuralStrings(body: Record<string, unknown>): strin
       pushString(out, item.role);
       pushString(out, item.call_id);
       if (item.type === "function_call") pushString(out, item.name);
+      if (item.type === "reasoning") pushString(out, item.id);
     }
   }
   if (Array.isArray(body.tools)) {
@@ -1036,24 +1154,24 @@ export async function remaskResponsesRequest(
   if (urlCarriesToken(request.url)) {
     // P1 (2026-10-06b): a placeholder in the URL is judged, not auto-refused;
     // sensitive content in a URL cannot be masked without changing the target.
-    if (!service.isStructuralIdentifierSafe(sessionID, request.url)) {
-      throw new Error(UNSUPPORTED_REQUEST_BODY);
+    if (!service.isTransportIdentifierSafe(sessionID, request.url)) {
+      throw new Error(refusal("url-token"));
     }
     warnDegradation("request url preserved with a literal placeholder");
   }
   inspectTransportMetadata(service, sessionID, request);
-  if (request.body === null) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  if (request.body === null) throw new Error(refusal("body-missing"));
 
-  const raw = await readCappedText(request, MAX_BODY_BYTES, UNSUPPORTED_REQUEST_BODY);
-  if (raw.length === 0) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  const raw = await readCappedText(request, MAX_BODY_BYTES, refusal("body-cap"));
+  if (raw.length === 0) throw new Error(refusal("body-empty"));
 
   let body: unknown;
   try {
     body = JSON.parse(raw);
   } catch {
-    throw new Error(UNSUPPORTED_REQUEST_BODY);
+    throw new Error(refusal("body-json"));
   }
-  if (!isRecord(body)) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  if (!isRecord(body)) throw new Error(refusal("body-shape"));
 
   validateResponsesDialect(body, attachmentsAllowed(service));
 
@@ -1069,7 +1187,7 @@ export async function remaskResponsesRequest(
         try {
           item.arguments = JSON.parse(item.arguments as string);
         } catch {
-          throw new Error(UNSUPPORTED_REQUEST_BODY);
+          throw new Error(refusal("responses-function-call-arguments"));
         }
         transformedArguments.push(index);
       }
@@ -1078,30 +1196,32 @@ export async function remaskResponsesRequest(
 
   const structuralBefore = collectResponsesStructuralStrings(body);
   for (const identifier of structuralBefore) {
-    if (identifier.includes(PSEUDONYM_TOKEN_PREFIX) || service.detectSensitive(identifier)) {
-      throw new Error(UNSUPPORTED_REQUEST_BODY);
+    if (containsTokenPrefix(identifier) || service.detectSensitive(identifier)) {
+      throw new Error(refusal("structural-identifier"));
     }
   }
   let unsafeNumber = false;
   walkNumbers(body, (value) => {
     if (service.detectSensitive(String(value))) unsafeNumber = true;
   });
-  if (unsafeNumber) throw new Error(UNSUPPORTED_REQUEST_BODY);
+  if (unsafeNumber) throw new Error(refusal("number-sensitive"));
 
-  const next = withOpaqueAttachments(service.attachmentsPolicy ?? "block", body, (input) => {
-    const masked = service.protectJsonForModel(sessionID, input);
-    if (!masked.ok) throw new Error(MASK_FAILURE);
-    const value = masked.value;
-    if (!isRecord(value)) throw new Error(MASK_FAILURE);
-    return value as Record<string, unknown>;
-  });
+  const next = withOpaqueReasoningContent(body, (stage) =>
+    withOpaqueAttachments(service.attachmentsPolicy ?? "block", stage, (input) => {
+      const masked = service.protectJsonForModel(sessionID, input);
+      if (!masked.ok) throw new Error(MASK_FAILURE);
+      const value = masked.value;
+      if (!isRecord(value)) throw new Error(MASK_FAILURE);
+      return value as Record<string, unknown>;
+    }),
+  );
 
   const structuralAfter = collectResponsesStructuralStrings(next);
   if (
     structuralAfter.length !== structuralBefore.length ||
     structuralAfter.some((identifier, index) => identifier !== structuralBefore[index])
   ) {
-    throw new Error(UNSUPPORTED_REQUEST_BODY);
+    throw new Error(refusal("structural-drift"));
   }
 
   if (Array.isArray(next.input)) {
@@ -1122,6 +1242,27 @@ export async function remaskResponsesRequest(
 
 function isRecordArgumentsString(item: Record<string, unknown>): boolean {
   return typeof item.arguments === "string";
+}
+
+/** Hook-first admission: check the supported response route and transport
+ * metadata without reading, validating, or changing the final request body.
+ * Returning the same Request preserves identity for response attribution. */
+export function admitModelRequest(
+  service: TransportMaskingService,
+  sessionID: string,
+  request: Request,
+  allowHookOnly = false,
+): Request {
+  const url = new URL(request.url);
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || (!allowHookOnly && classifyModelRoute(request.url) === null)) {
+    throw new Error(UNSUPPORTED_TRANSPORT);
+  }
+  if (urlCarriesToken(request.url)) {
+    if (!service.isTransportIdentifierSafe(sessionID, request.url)) throw new Error(refusal("url-token"));
+    warnDegradation("request url preserved with a literal placeholder");
+  }
+  inspectTransportMetadata(service, sessionID, request);
+  return request;
 }
 
 /** Protocol dispatcher: masks any supported wire route by URL shape. */
@@ -1172,7 +1313,7 @@ export async function restoreChatCompletionsResponse(
 async function passThroughIfTokenBearing(response: Response): Promise<Response> {
   if (response.body === null) return response;
   const raw = await readCappedText(response, MAX_BODY_BYTES, UNSUPPORTED_RESPONSE);
-  if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
+  if (containsTokenPrefix(raw)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
   return response;
 }
 
@@ -1187,17 +1328,17 @@ async function restoreJsonResponse(
   try {
     body = JSON.parse(raw);
   } catch {
-    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
+    if (containsTokenPrefix(raw)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
     return response;
   }
   if (!isRecord(body)) {
-    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
+    if (containsTokenPrefix(raw)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
     return response;
   }
   if (body.choices === undefined) {
     // Not a chat-completions payload; an unplaceable placeholder degrades to
     // a literal emit with a WARN (P1, 2026-10-06b).
-    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
+    if (containsTokenPrefix(raw)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
     return response;
   }
   if (!Array.isArray(body.choices)) throw new Error(UNSUPPORTED_RESPONSE);
@@ -1261,7 +1402,7 @@ function restoreAssistantContent(
   return changed;
 }
 
-function restoreDisplayText(service: TransportMaskingService, sessionID: string, text: string): string {
+export function restoreDisplayText(service: TransportMaskingService, sessionID: string, text: string): string {
   const result = service.restoreTextForDisplay(sessionID, text);
   if (!result.ok) throw new Error(RESTORE_FAILURE);
   return result.text;
@@ -1289,23 +1430,33 @@ function restoreSseResponse(
 /**
  * Splits `buffered` into the portion safe to restore now and any incomplete
  * token candidate that must be held back until more stream data arrives. A
- * held tail is either a partial token from its LAST full prefix, or the
- * longest suffix that is a proper prefix of the reserved namespace prefix
- * (e.g. `[SG`): emitting that suffix literally would make the token
- * unrestorable. Complete tokens in the emit portion are restored by the
- * caller through the core; a tail that never completes degrades to a
- * literal emit with a WARN at the terminal boundary (P1, 2026-10-06b).
+ * held tail is either a partial token from its LAST full prefix (either
+ * version), or the longest suffix that is a proper prefix of a reserved
+ * namespace prefix (e.g. `[SG`, `[SGP2`): emitting that suffix literally
+ * would make the token unrestorable. Complete tokens in the emit portion are
+ * restored by the caller through the core; a tail that never completes
+ * degrades to a literal emit with a WARN at the terminal boundary
+ * (P1, 2026-10-06b).
  */
-function splitRestorable(buffered: string): { emit: string; hold: string } {
-  const at = buffered.lastIndexOf(PSEUDONYM_TOKEN_PREFIX);
+export function splitRestorable(buffered: string): { emit: string; hold: string } {
+  let at = -1;
+  for (const prefix of PSEUDONYM_TOKEN_PREFIXES) {
+    const candidate = buffered.lastIndexOf(prefix);
+    if (candidate > at) at = candidate;
+  }
   if (at !== -1) {
     const tail = buffered.slice(at);
     if (!tail.includes("]")) return { emit: buffered.slice(0, at), hold: tail };
   }
-  for (let length = PSEUDONYM_TOKEN_PREFIX.length - 1; length >= 1; length--) {
-    const partial = PSEUDONYM_TOKEN_PREFIX.slice(0, length);
-    if (buffered.endsWith(partial)) {
-      return { emit: buffered.slice(0, buffered.length - length), hold: partial };
+  // Longest suffix matching a proper prefix of either reserved prefix. Both
+  // versions share "[SGP" and differ only in the version character, so the
+  // distinct candidates (length 5 down to 1) are checked longest-first.
+  for (let length = PSEUDONYM_TOKEN_PREFIXES[0].length - 1; length >= 1; length--) {
+    for (const prefix of PSEUDONYM_TOKEN_PREFIXES) {
+      const partial = prefix.slice(0, length);
+      if (buffered.endsWith(partial)) {
+        return { emit: buffered.slice(0, buffered.length - length), hold: partial };
+      }
     }
   }
   return { emit: buffered, hold: "" };
@@ -1327,9 +1478,9 @@ function splitRestorable(buffered: string): { emit: string; hold: string } {
  * refuses. Reading is pull-based: one
  * bounded batch of upstream data is consumed per downstream pull, so an unread
  * consumer never builds an unbounded downstream queue. Errors from the
- * underlying stream propagate; downstream cancellation cancels the underlying
- * reader; any failure cancels the underlying stream and errors the piped
- * stream.
+ * underlying stream propagate and downstream cancellation cancels its reader.
+ * SG parse/restore failures instead replay undelivered originals and bypass
+ * further rewriting; they never cancel a healthy upstream response.
  */
 export function createSseRestoreStream(
   service: TransportMaskingService,
@@ -1337,30 +1488,17 @@ export function createSseRestoreStream(
   body: ReadableStream<Uint8Array>,
 ): ReadableStream<Uint8Array> {
   const reader = body.getReader();
-  const decoder = new TextDecoder("utf-8");
-  const encoder = new TextEncoder();
   /** Held-back content tails per choice index (tokens split across events). */
   const channels = new Map<number, string>();
   /** Choice indexes that have already seen a terminal `finish_reason`. */
   const terminalChannels = new Set<number>();
   let totalChannelBytes = 0;
-  let pending = "";
-  let pendingBytes = 0;
   let eventLines: string[] = [];
-  let eventBytes = 0;
-  let finished = false;
 
-  /**
-   * P1 (2026-10-06b): leftover held tails at a boundary ([DONE] or stream
-   * close) are degradation, not stream failure — a partial prefix that never
-   * completed into a marker. WARN and drop (at most a few cosmetic
-   * characters) instead of failing the delivered response.
-   */
+  /** An unresolved boundary stops rewriting; the shared loop retains and
+   * releases the original frames rather than losing the literal prefix. */
   const requireEmptyChannels = (): void => {
-    if (channels.size !== 0) {
-      warnDegradation("stream boundary reached with an incomplete placeholder tail; tail dropped");
-      for (const channel of [...channels.keys()]) deleteChannel(channel);
-    }
+    if (channels.size !== 0) throw new Error(MALFORMED_STREAM);
   };
   const setChannel = (channel: number, hold: string): void => {
     const previous = channels.get(channel) ?? "";
@@ -1378,7 +1516,6 @@ export function createSseRestoreStream(
   const processEvent = (terminated: boolean): string => {
     const lines = eventLines;
     eventLines = [];
-    eventBytes = 0;
     const framing: string[] = [];
     const dataPayloads: string[] = [];
     for (const rawLine of lines) {
@@ -1411,6 +1548,10 @@ export function createSseRestoreStream(
           throw new Error(MALFORMED_STREAM);
         }
         if (!isRecord(chunk)) throw new Error(MALFORMED_STREAM);
+        // A provider error must reach the host immediately, even while an
+        // incomplete text token is holding earlier events transactionally.
+        // Recovery releases the original error envelope, never a fake finish.
+        if (chunk.error !== undefined || chunk.type === "error") throw new Error(MALFORMED_STREAM);
         if (chunk.choices !== undefined) {
           if (!Array.isArray(chunk.choices)) throw new Error(MALFORMED_STREAM);
           for (let position = 0; position < chunk.choices.length; position++) {
@@ -1491,75 +1632,10 @@ export function createSseRestoreStream(
     return terminated ? `${text}\n\n` : text;
   };
 
-  const pushLine = (line: string): void => {
-    eventBytes += byteLength(line) + 1;
-    if (eventBytes > MAX_EVENT_BYTES) throw new Error(STREAM_BUFFER_LIMIT);
-    eventLines.push(line);
-  };
-
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      if (finished) return;
-      try {
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) {
-            const tail = decoder.decode();
-            pendingBytes += byteLength(tail);
-            if (pendingBytes > MAX_PENDING_BYTES) throw new Error(STREAM_BUFFER_LIMIT);
-            pending += tail;
-            if (pending.length > 0) {
-              for (const line of pending.split("\n")) pushLine(line);
-              pending = "";
-              pendingBytes = 0;
-            }
-            let out = "";
-            if (eventLines.length > 0) out += processEvent(false);
-            requireEmptyChannels();
-            finished = true;
-            if (out.length > 0) controller.enqueue(encoder.encode(out));
-            controller.close();
-            return;
-          }
-          const decoded = decoder.decode(value, { stream: true });
-          const decodedBytes = byteLength(decoded);
-          if (pendingBytes + decodedBytes > MAX_PENDING_BYTES) {
-            throw new Error(STREAM_BUFFER_LIMIT);
-          }
-          pendingBytes += decodedBytes;
-          pending += decoded;
-          let out = "";
-          let newline = pending.indexOf("\n");
-          while (newline !== -1) {
-            const line = pending.slice(0, newline);
-            pending = pending.slice(newline + 1);
-            pendingBytes -= byteLength(line) + 1;
-            if (line === "" || line === "\r") out += processEvent(true);
-            else pushLine(line);
-            newline = pending.indexOf("\n");
-          }
-          if (out.length > 0) {
-            controller.enqueue(encoder.encode(out));
-            return;
-          }
-          // No complete event yet: keep reading, bounded by the caps above.
-        }
-      } catch (error) {
-        if (finished) return;
-        finished = true;
-        controller.error(error);
-        try {
-          await reader.cancel();
-        } catch {
-          // Underlying stream is already gone; the error above is the outcome.
-        }
-      }
-    },
-    cancel(reason) {
-      finished = true;
-      return reader.cancel(reason);
-    },
-  });
+  return createRecoveringSseStream(reader, (lines, terminated) => {
+    eventLines = lines;
+    return { output: processEvent(terminated), holding: channels.size > 0 };
+  }, () => { channels.clear(); terminalChannels.clear(); });
 }
 
 // ─── Anthropic Messages response restore ────────────────────────────────────
@@ -1586,7 +1662,7 @@ function allowAnthropicField(fields: AnthropicAllowedFields, record: Record<stri
 
 function anthropicStrayTokenIn(value: unknown, fields?: AnthropicAllowedFields): boolean {
   if (typeof value === "string") {
-    return value.includes(PSEUDONYM_TOKEN_PREFIX);
+    return containsTokenPrefix(value);
   }
   if (value === null || typeof value !== "object") return false;
   if (Array.isArray(value)) {
@@ -1594,7 +1670,7 @@ function anthropicStrayTokenIn(value: unknown, fields?: AnthropicAllowedFields):
   }
   const record = value as Record<string, unknown>;
   for (const key of Object.keys(record)) {
-    if (key.includes(PSEUDONYM_TOKEN_PREFIX)) return true;
+    if (containsTokenPrefix(key)) return true;
     const value = record[key];
     // content[].text is restored in place before this check runs; a surviving
     // token there was intentionally left by restore failure handling.
@@ -1602,7 +1678,7 @@ function anthropicStrayTokenIn(value: unknown, fields?: AnthropicAllowedFields):
       for (const block of value) {
         if (!isRecord(block)) return true;
         if (block.type === "tool_use") {
-          if (typeof block.id === "string" && block.id.includes(PSEUDONYM_TOKEN_PREFIX)) return true;
+          if (typeof block.id === "string" && containsTokenPrefix(block.id)) return true;
           continue; // input stays tokenized by design
         }
         if (anthropicStrayTokenIn(block, fields)) return true;
@@ -1626,15 +1702,15 @@ async function restoreAnthropicJsonResponse(
   try {
     body = JSON.parse(raw);
   } catch {
-    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
+    if (containsTokenPrefix(raw)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
     return response;
   }
   if (!isRecord(body)) {
-    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
+    if (containsTokenPrefix(raw)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
     return response;
   }
   if (body.content === undefined) {
-    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
+    if (containsTokenPrefix(raw)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
     return response;
   }
   if (!Array.isArray(body.content)) throw new Error(UNSUPPORTED_RESPONSE);
@@ -1680,17 +1756,11 @@ export function createAnthropicSseRestoreStream(
   body: ReadableStream<Uint8Array>,
 ): ReadableStream<Uint8Array> {
   const reader = body.getReader();
-  const decoder = new TextDecoder("utf-8");
-  const encoder = new TextEncoder();
   const channels = new Map<number, string>();
   const terminalBlocks = new Set<number>();
   const allowedFields: AnthropicAllowedFields = new WeakMap();
   let totalChannelBytes = 0;
-  let pending = "";
-  let pendingBytes = 0;
   let eventLines: string[] = [];
-  let eventBytes = 0;
-  let finished = false;
   const messageStopped = { value: false };
 
   const setChannel = (channel: number, hold: string): void => {
@@ -1708,7 +1778,6 @@ export function createAnthropicSseRestoreStream(
   const processEvent = (terminated: boolean): string => {
     const lines = eventLines;
     eventLines = [];
-    eventBytes = 0;
     const framing: string[] = [];
     const dataPayloads: string[] = [];
     for (const rawLine of lines) {
@@ -1736,6 +1805,7 @@ export function createAnthropicSseRestoreStream(
         throw new Error(MALFORMED_STREAM);
       }
       if (!isRecord(chunk) || typeof chunk.type !== "string") throw new Error(MALFORMED_STREAM);
+      if (chunk.type === "error") throw new Error(MALFORMED_STREAM);
       if (messageStopped.value) throw new Error(MALFORMED_STREAM);
 
       switch (chunk.type) {
@@ -1792,12 +1862,9 @@ export function createAnthropicSseRestoreStream(
         case "content_block_stop": {
           const index = chunk.index;
           if (typeof index !== "number" || !Number.isInteger(index)) throw new Error(MALFORMED_STREAM);
-          // P1 (2026-10-06b): an unresolved tail at block stop is degradation
-          // — WARN and drop the partial prefix instead of failing the stream.
-          if (channels.has(index)) {
-            warnDegradation("anthropic block stopped with an incomplete placeholder tail; tail dropped");
-            deleteChannel(index);
-          }
+          // The shared recovery loop replays undelivered originals on a
+          // boundary with unresolved text; no literal prefix is discarded.
+          if (channels.has(index)) throw new Error(MALFORMED_STREAM);
           if (!terminalBlocks.has(index) && terminalBlocks.size >= MAX_CHANNELS) {
             throw new Error(STREAM_BUFFER_LIMIT);
           }
@@ -1805,12 +1872,7 @@ export function createAnthropicSseRestoreStream(
           break;
         }
         case "message_stop": {
-          // P1 (2026-10-06b): leftover holds at message stop degrade — WARN
-          // and drop — instead of failing the delivered stream.
-          if (channels.size !== 0) {
-            warnDegradation("anthropic message stopped with incomplete placeholder tail(s); dropped");
-            for (const index of [...channels.keys()]) deleteChannel(index);
-          }
+          if (channels.size !== 0) throw new Error(MALFORMED_STREAM);
           messageStopped.value = true;
           break;
         }
@@ -1831,79 +1893,10 @@ export function createAnthropicSseRestoreStream(
     return terminated ? `${text}\n\n` : text;
   };
 
-  const pushLine = (line: string): void => {
-    eventBytes += byteLength(line) + 1;
-    if (eventBytes > MAX_EVENT_BYTES) throw new Error(STREAM_BUFFER_LIMIT);
-    eventLines.push(line);
-  };
-
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      if (finished) return;
-      try {
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) {
-            const tail = decoder.decode();
-            pendingBytes += byteLength(tail);
-            if (pendingBytes > MAX_PENDING_BYTES) throw new Error(STREAM_BUFFER_LIMIT);
-            pending += tail;
-            if (pending.length > 0) {
-              for (const line of pending.split("\n")) pushLine(line);
-              pending = "";
-              pendingBytes = 0;
-            }
-            let out = "";
-            if (eventLines.length > 0) out += processEvent(false);
-            // P1 (2026-10-06b): leftover holds at close degrade — WARN and drop.
-            if (channels.size !== 0) {
-              warnDegradation("stream closed with incomplete placeholder tail(s); dropped");
-              for (const key of [...channels.keys()]) deleteChannel(key);
-            }
-            finished = true;
-            if (out.length > 0) controller.enqueue(encoder.encode(out));
-            controller.close();
-            return;
-          }
-          const decoded = decoder.decode(value, { stream: true });
-          const decodedBytes = byteLength(decoded);
-          if (pendingBytes + decodedBytes > MAX_PENDING_BYTES) {
-            throw new Error(STREAM_BUFFER_LIMIT);
-          }
-          pendingBytes += decodedBytes;
-          pending += decoded;
-          let out = "";
-          let newline = pending.indexOf("\n");
-          while (newline !== -1) {
-            const line = pending.slice(0, newline);
-            pending = pending.slice(newline + 1);
-            pendingBytes -= byteLength(line) + 1;
-            if (line === "" || line === "\r") out += processEvent(true);
-            else pushLine(line);
-            newline = pending.indexOf("\n");
-          }
-          if (out.length > 0) {
-            controller.enqueue(encoder.encode(out));
-            return;
-          }
-          // No complete event yet: keep reading, bounded by the caps above.
-        }
-      } catch (error) {
-        if (finished) return;
-        finished = true;
-        controller.error(error);
-        try {
-          await reader.cancel();
-        } catch {
-          // Underlying stream is already gone; the error above is the outcome.
-        }
-      }
-    },
-    cancel(reason) {
-      finished = true;
-      return reader.cancel(reason);
-    },
-  });
+  return createRecoveringSseStream(reader, (lines, terminated) => {
+    eventLines = lines;
+    return { output: processEvent(terminated), holding: channels.size > 0 };
+  }, () => { channels.clear(); terminalBlocks.clear(); });
 }
 
 /** Stray-token policy for one Anthropic SSE chunk: tokens may live only in
@@ -1911,7 +1904,7 @@ export function createAnthropicSseRestoreStream(
 function anthropicChunkStrayTokenIn(chunk: Record<string, unknown>, fields?: AnthropicAllowedFields): boolean {
   const check = (value: unknown, inToolPayload: boolean): boolean => {
     if (typeof value === "string") {
-      return !inToolPayload && value.includes(PSEUDONYM_TOKEN_PREFIX);
+      return !inToolPayload && containsTokenPrefix(value);
     }
     if (value === null || typeof value !== "object") return false;
     if (Array.isArray(value)) {
@@ -1919,7 +1912,7 @@ function anthropicChunkStrayTokenIn(chunk: Record<string, unknown>, fields?: Ant
     }
     const record = value as Record<string, unknown>;
     for (const key of Object.keys(record)) {
-      if (key.includes(PSEUDONYM_TOKEN_PREFIX)) return true;
+      if (containsTokenPrefix(key)) return true;
       if (key === "partial_json" || key === "input") {
         continue; // tool-argument payloads stay tokenized by design
       }
@@ -1991,14 +1984,14 @@ export async function restoreModelResponse(
 // ─── OpenAI Responses response restore ──────────────────────────────────────
 
 const RESPONSES_TEXT_PART_TYPES = new Set(["output_text", "input_text", "summary_text", "reasoning_text"]);
-const RESPONSES_TEXT_DELTA_TYPES = new Set([
+export const RESPONSES_TEXT_DELTA_TYPES: ReadonlySet<string> = new Set([
   "response.output_text.delta",
   "response.refusal.delta",
   "response.reasoning.delta",
   "response.reasoning_text.delta",
   "response.reasoning_summary_text.delta",
 ]);
-const RESPONSES_TEXT_DONE_TYPES = new Set([
+export const RESPONSES_TEXT_DONE_TYPES: ReadonlySet<string> = new Set([
   "response.output_text.done",
   "response.refusal.done",
   "response.reasoning.done",
@@ -2059,7 +2052,7 @@ function restoreResponsesItemText(
 
 function responsesStrayTokenIn(value: unknown, fields: ResponsesAllowedFields): boolean {
   if (typeof value === "string") {
-    return value.includes(PSEUDONYM_TOKEN_PREFIX);
+    return containsTokenPrefix(value);
   }
   if (value === null || typeof value !== "object") return false;
   if (Array.isArray(value)) {
@@ -2067,11 +2060,58 @@ function responsesStrayTokenIn(value: unknown, fields: ResponsesAllowedFields): 
   }
   const record = value as Record<string, unknown>;
   for (const key of Object.keys(record)) {
-    if (key.includes(PSEUDONYM_TOKEN_PREFIX)) return true;
+    if (containsTokenPrefix(key)) return true;
     if (fields.get(record)?.has(key)) continue;
     if (responsesStrayTokenIn(record[key], fields)) return true;
   }
   return false;
+}
+
+/** Restore complete display fields of one Responses event (HTTP/WS share
+ * the same part/item semantics). Delta buffering belongs to the transport;
+ * function-call arguments and provider state are never restored here. */
+export function restoreResponsesEventDisplay(
+  service: TransportMaskingService,
+  sessionID: string,
+  chunk: Record<string, unknown>,
+): void {
+  const fields: ResponsesAllowedFields = new WeakMap();
+  const type = String(chunk.type);
+  if (RESPONSES_TEXT_DELTA_TYPES.has(type)) {
+    allowResponsesField(fields, chunk, "delta");
+  } else if (RESPONSES_TEXT_DONE_TYPES.has(type)) {
+    const field = type === "response.refusal.done" ? "refusal" : "text";
+    if (typeof chunk[field] === "string") {
+      chunk[field] = restoreDisplayText(service, sessionID, chunk[field]);
+      allowResponsesField(fields, chunk, field);
+    }
+  } else if (type === "response.function_call_arguments.delta" || type === "response.function_call_arguments.done") {
+    allowResponsesField(fields, chunk, type.endsWith(".delta") ? "delta" : "arguments");
+  } else if (type === "response.output_item.added" || type === "response.output_item.done") {
+    if (isRecord(chunk.item)) restoreResponsesItemText(service, sessionID, chunk.item, fields);
+  } else if (
+    type === "response.content_part.added" || type === "response.content_part.done" ||
+    type === "response.reasoning_summary_part.added" || type === "response.reasoning_summary_part.done"
+  ) {
+    if (isRecord(chunk.part)) restoreResponsesPartText(service, sessionID, chunk.part, fields);
+  } else if (
+    type === "response.created" || type === "response.in_progress" ||
+    type === "response.completed" || type === "response.failed" || type === "response.incomplete"
+  ) {
+    const response = chunk.response;
+    if (isRecord(response)) {
+      if (typeof response.output_text === "string") {
+        response.output_text = restoreDisplayText(service, sessionID, response.output_text);
+        allowResponsesField(fields, response, "output_text");
+      }
+      if (Array.isArray(response.output)) {
+        for (const item of response.output) {
+          if (isRecord(item)) restoreResponsesItemText(service, sessionID, item, fields);
+        }
+      }
+    }
+  }
+  if (responsesStrayTokenIn(chunk, fields)) warnDegradation("responses frame carries an unplaceable placeholder; kept literal");
 }
 
 async function restoreResponsesJsonResponse(
@@ -2085,11 +2125,11 @@ async function restoreResponsesJsonResponse(
   try {
     body = JSON.parse(raw);
   } catch {
-    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
+    if (containsTokenPrefix(raw)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
     return response;
   }
   if (!isRecord(body)) {
-    if (raw.includes(PSEUDONYM_TOKEN_PREFIX)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
+    if (containsTokenPrefix(raw)) warnDegradation("response body carries an unplaceable placeholder; kept literal");
     return response;
   }
   const fields: ResponsesAllowedFields = new WeakMap();
@@ -2123,16 +2163,10 @@ export function createResponsesSseRestoreStream(
   body: ReadableStream<Uint8Array>,
 ): ReadableStream<Uint8Array> {
   const reader = body.getReader();
-  const decoder = new TextDecoder("utf-8");
-  const encoder = new TextEncoder();
   const channels = new Map<string, string>();
   const emittedRawCounts = new Map<string, number>();
   let totalChannelBytes = 0;
-  let pending = "";
-  let pendingBytes = 0;
   let eventLines: string[] = [];
-  let eventBytes = 0;
-  let finished = false;
   const terminal = { value: false };
 
   const setChannel = (channel: string, hold: string): void => {
@@ -2170,7 +2204,6 @@ export function createResponsesSseRestoreStream(
   const processEvent = (terminated: boolean): string => {
     const lines = eventLines;
     eventLines = [];
-    eventBytes = 0;
     const framing: string[] = [];
     const dataPayloads: string[] = [];
     for (const rawLine of lines) {
@@ -2193,11 +2226,7 @@ export function createResponsesSseRestoreStream(
     } else {
       const joined = dataPayloads.join("\n");
       if (joined.trim() === "[DONE]") {
-        // P1 (2026-10-06b): leftover holds at [DONE] degrade — WARN and drop.
-        if (channels.size !== 0) {
-          warnDegradation("responses stream ended with incomplete placeholder tail(s); dropped");
-          for (const key of [...channels.keys()]) deleteChannel(key);
-        }
+        if (channels.size !== 0) throw new Error(MALFORMED_STREAM);
         emittedRawCounts.clear();
         terminal.value = true;
         outputLines = emitPayload("[DONE]");
@@ -2209,6 +2238,7 @@ export function createResponsesSseRestoreStream(
           throw new Error(MALFORMED_STREAM);
         }
         if (!isRecord(chunk) || typeof chunk.type !== "string") throw new Error(MALFORMED_STREAM);
+        if (chunk.type === "error") throw new Error(MALFORMED_STREAM);
         if (terminal.value) throw new Error(MALFORMED_STREAM);
         const eventType = chunk.type;
         const fields: ResponsesAllowedFields = new WeakMap();
@@ -2244,10 +2274,7 @@ export function createResponsesSseRestoreStream(
             chunk[field] = restoreDisplayText(service, sessionID, chunk[field]);
             allowResponsesField(fields, chunk, field);
           } else if (channels.has(channelKey())) {
-            // P1 (2026-10-06b): a done event without text but with a held
-            // partial tail degrades — WARN and drop the tail.
-            warnDegradation("responses text done with an incomplete placeholder tail; tail dropped");
-            deleteChannel(channelKey());
+            throw new Error(MALFORMED_STREAM);
           } else {
             emittedRawCounts.delete(channelKey());
           }
@@ -2280,13 +2307,7 @@ export function createResponsesSseRestoreStream(
           eventType === "response.failed" ||
           eventType === "response.incomplete"
         ) {
-          // P1 (2026-10-06b): terminal events (completed/failed/incomplete)
-          // with leftover holds degrade — WARN and drop — instead of failing
-          // the delivered stream.
-          if (channels.size !== 0) {
-            warnDegradation("responses terminal event with incomplete placeholder tail(s); dropped");
-            for (const key of [...channels.keys()]) deleteChannel(key);
-          }
+          if (channels.size !== 0) throw new Error(MALFORMED_STREAM);
           emittedRawCounts.clear();
           terminal.value = true;
           const response = chunk.response;
@@ -2319,78 +2340,10 @@ export function createResponsesSseRestoreStream(
     return additionalEvents + (terminated ? `${text}\n\n` : text);
   };
 
-  const pushLine = (line: string): void => {
-    eventBytes += byteLength(line) + 1;
-    if (eventBytes > MAX_EVENT_BYTES) throw new Error(STREAM_BUFFER_LIMIT);
-    eventLines.push(line);
-  };
-
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      if (finished) return;
-      try {
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) {
-            const tail = decoder.decode();
-            pendingBytes += byteLength(tail);
-            if (pendingBytes > MAX_PENDING_BYTES) throw new Error(STREAM_BUFFER_LIMIT);
-            pending += tail;
-            if (pending.length > 0) {
-              for (const line of pending.split("\n")) pushLine(line);
-              pending = "";
-              pendingBytes = 0;
-            }
-            let out = "";
-            if (eventLines.length > 0) out += processEvent(false);
-            // P1 (2026-10-06b): leftover holds at close degrade — WARN and drop.
-            if (channels.size !== 0) {
-              warnDegradation("stream closed with incomplete placeholder tail(s); dropped");
-              for (const key of [...channels.keys()]) deleteChannel(key);
-            }
-            finished = true;
-            if (out.length > 0) controller.enqueue(encoder.encode(out));
-            controller.close();
-            return;
-          }
-          const decoded = decoder.decode(value, { stream: true });
-          const decodedBytes = byteLength(decoded);
-          if (pendingBytes + decodedBytes > MAX_PENDING_BYTES) {
-            throw new Error(STREAM_BUFFER_LIMIT);
-          }
-          pendingBytes += decodedBytes;
-          pending += decoded;
-          let out = "";
-          let newline = pending.indexOf("\n");
-          while (newline !== -1) {
-            const line = pending.slice(0, newline);
-            pending = pending.slice(newline + 1);
-            pendingBytes -= byteLength(line) + 1;
-            if (line === "" || line === "\r") out += processEvent(true);
-            else pushLine(line);
-            newline = pending.indexOf("\n");
-          }
-          if (out.length > 0) {
-            controller.enqueue(encoder.encode(out));
-            return;
-          }
-        }
-      } catch (error) {
-        if (finished) return;
-        finished = true;
-        controller.error(error);
-        try {
-          await reader.cancel();
-        } catch {
-          // Underlying stream is already gone; the error above is the outcome.
-        }
-      }
-    },
-    cancel(reason) {
-      finished = true;
-      return reader.cancel(reason);
-    },
-  });
+  return createRecoveringSseStream(reader, (lines, terminated) => {
+    eventLines = lines;
+    return { output: processEvent(terminated), holding: channels.size > 0 };
+  }, () => { channels.clear(); emittedRawCounts.clear(); });
 }
 
 /**

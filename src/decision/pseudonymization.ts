@@ -12,11 +12,15 @@
  * Guarantees implemented here:
  * - Bidirectional exact-string mapping per session identity (never normalized,
  *   never shared across sessions, never persisted; no TTL, no eviction, no fs).
- * - Opaque reserved token namespace `[SGP1:<epoch32hex>-<counter>]` with a
- *   fresh 128-bit random epoch per session creation. Strict protection and
- *   restoration entrypoints reject foreign, expired, or malformed markers.
- *   Explicit model-text entrypoints preserve unknown markers as literal text,
- *   scan them normally, and never grant them mapping ownership.
+ * - Reserved token namespace, two versions (W1, 2026-10-07): new mints are
+ *   category-labelled `[SGP2:<FINDING_TYPE>-<4 letters>×3]` with a random
+ *   letter-only payload (digit-free so digit-based detector families cannot
+ *   match it); the legacy `[SGP1:<epoch32hex>-<counter>]` shape stays
+ *   recognized so mappings issued before the switch keep restoring. Strict
+ *   protection and restoration entrypoints reject foreign, expired, or
+ *   malformed markers of either version. Explicit model-text entrypoints
+ *   preserve unknown markers as literal text, scan them normally, and never
+ *   grant them mapping ownership.
  * - Every protect/restore operation is an atomic transaction: the live
  *   registry is mutated only after the whole operation (including rescans,
  *   token-neighbor scans, capacity checks and independent absence checks)
@@ -40,7 +44,8 @@ import { randomBytes } from "node:crypto";
 import { types } from "node:util";
 import { scanTextWithDecoding } from "../scanner/encoding.js";
 import { scanTextInternal, type ScanOptions } from "../scanner/engine.js";
-import type { Finding, GuardConfig, ScanResult } from "../types.js";
+import type { Finding, FindingType, GuardConfig, ScanResult } from "../types.js";
+import { FINDING_TYPES } from "../types.js";
 
 // ─── Public result types ─────────────────────────────────────────────────────
 
@@ -106,6 +111,13 @@ export interface PseudonymLimits {
   maxUnitsPerOperation: number;
 }
 
+/** Persisted-mapping seed for `seedSession` (W2/B3). */
+export interface SessionSeed {
+  /** The session's original 32-hex epoch (v1-era sessions keep theirs). */
+  epoch: string;
+  entries: ReadonlyArray<{ token: string; original: string }>;
+}
+
 export interface PseudonymizerService {
   isTextSafe(text: string): boolean;
   /**
@@ -116,6 +128,15 @@ export interface PseudonymizerService {
    * position cannot be masked or renamed) or a scanning failure.
    */
   isStructuralIdentifierSafe(sessionId: string, text: string): boolean;
+  /**
+   * Rebuilds a session from persisted mappings (W2/B3, decision
+   * 2026-10-07-db-over-t2). All-or-nothing: on any failure the registry is
+   * untouched. Tokens must match a reserved shape exactly (either version —
+   * v1 seeds keep restoring pre-upgrade mappings); originals are exact
+   * strings. Budgets mirror live staging. Seeding an existing session or a
+   * duplicate epoch fails; callers clear first when they mean replace.
+   */
+  seedSession(sessionId: string, seed: SessionSeed): { ok: true } | PseudonymFailure;
   protectText(sessionId: string, text: string): PseudonymTextResult;
   protectTextForModel(sessionId: string, text: string): PseudonymTextResult;
   restoreText(sessionId: string, text: string): PseudonymTextResult;
@@ -125,6 +146,14 @@ export interface PseudonymizerService {
   restoreJson(sessionId: string, value: unknown): PseudonymJsonResult;
   /** Drops one session's mappings and releases its budgets. Safe if absent. */
   clearSession(sessionId: string): void;
+  /** Read-only: whether this session currently holds committed mappings. */
+  hasSession(sessionId: string): boolean;
+  /**
+   * Read-only committed-mapping snapshot for persistence (W2/B4). Null when
+   * the session is absent. The epoch is included so a hydrated process can
+   * re-register it with identical uniqueness semantics.
+   */
+  exportSession(sessionId: string): SessionSeed | null;
 }
 
 export type CreatePseudonymizerResult =
@@ -134,16 +163,52 @@ export type CreatePseudonymizerResult =
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 /**
- * Reserved, recognizable token namespace. Tokens are
+ * Reserved, recognizable token namespace — two versions.
+ *
+ * v1 (legacy, still recognized for restoration of pre-upgrade mappings):
  * `[SGP1:<32 lowercase hex epoch>-<zero-padded counter>]`, e.g.
- * `[SGP1:0f1e...-00000001]`. Any occurrence of the prefix in any scanned or
- * restored string is validated strictly; unknown shapes fail the operation.
+ * `[SGP1:0f1e...-00000001]`.
+ *
+ * v2 (minted since W1, 2026-10-07): `[SGP2:<CATEGORY>-<seg>-<seg>-<seg>]`,
+ * e.g. `[SGP2:PII_EMAIL-wxyz-abcd-efgh]`. CATEGORY is the scanner
+ * FindingType label (closed enum, `[A-Z][A-Z_]*`); each segment is 4
+ * lowercase letters. Design constraints (decision doc W1 / T3):
+ * - letter-only payload ⇒ zero digit runs (phone/card/IBAN/TW-ID families
+ *   cannot match), ≤4-char hex-like runs (hex detector needs far longer);
+ * - `-` after the category (not `:`) so the generic-secret keyword shape
+ *   `secret\s*[:=]\s*value` cannot self-collide with `SECRET-…` labels;
+ * - payload alphabet shares no shell metacharacter, like v1.
+ * Any occurrence of either prefix in any scanned or restored string is
+ * validated strictly against its version's shape; unknown shapes fail the
+ * operation.
  */
 export const PSEUDONYM_TOKEN_PREFIX = "[SGP1:";
+export const PSEUDONYM_TOKEN_PREFIX_V2 = "[SGP2:";
+
+/** All reserved token prefixes, both versions. */
+export const PSEUDONYM_TOKEN_PREFIXES: readonly string[] = [
+  PSEUDONYM_TOKEN_PREFIX,
+  PSEUDONYM_TOKEN_PREFIX_V2,
+];
+
+/** True when `text` contains any reserved token prefix (either version). */
+export function containsTokenPrefix(text: string): boolean {
+  return PSEUDONYM_TOKEN_PREFIXES.some((prefix) => text.includes(prefix));
+}
 
 const TOKEN_SHAPE = /\[SGP1:[0-9a-f]{32}-\d{8,12}\]/y;
+const TOKEN_SHAPE_V2 = /\[SGP2:[A-Z][A-Z_]{0,31}-[a-z]{4}-[a-z]{4}-[a-z]{4}\]/y;
+
+/** R-round (F1.2): seed intake accepts only real FindingType categories — a
+ * tampered store must not hydrate arbitrary-category tokens into the
+ * registry. Mint paths derive the label from live findings and cannot lie. */
+const KNOWN_SGP2_CATEGORIES: ReadonlySet<string> = new Set<string>(FINDING_TYPES);
 const EPOCH_HEX_CHARS = 32; // 128-bit random session epoch
-const COUNTER_PAD = 8;
+const PAYLOAD_SEGMENT_CHARS = 4;
+const PAYLOAD_SEGMENTS = 3;
+const PAYLOAD_ALPHABET = "abcdefghijklmnopqrstuvwxyz";
+// 26 * 9 = 234: bytes below this threshold are uniform modulo 26.
+const PAYLOAD_BYTE_CEILING = 234;
 
 /** Conservative per-entry accounting overhead in UTF-16 units. */
 const ENTRY_OVERHEAD_UNITS = 64;
@@ -284,6 +349,27 @@ interface Transaction {
  * so callers can mask a whole marker (one unit, never nested) when a finding
  * touches its payload.
  */
+/** Earliest reserved-token prefix (either version) at/after `from`. */
+function findTokenPrefix(
+  text: string,
+  from: number,
+): { at: number; prefix: string } | undefined {
+  let best: { at: number; prefix: string } | undefined;
+  for (const prefix of PSEUDONYM_TOKEN_PREFIXES) {
+    const at = text.indexOf(prefix, from);
+    if (at !== -1 && (best === undefined || at < best.at)) best = { at, prefix };
+  }
+  return best;
+}
+
+/** Strictly matches the versioned token shape at `at`; undefined otherwise. */
+function matchTokenShape(text: string, at: number, prefix: string): string | undefined {
+  const shape = prefix === PSEUDONYM_TOKEN_PREFIX_V2 ? TOKEN_SHAPE_V2 : TOKEN_SHAPE;
+  shape.lastIndex = at;
+  const match = shape.exec(text);
+  return match === null ? undefined : match[0];
+}
+
 function scanOwnedTokenSpans(
   text: string,
   isOwned: (token: string) => boolean,
@@ -291,28 +377,28 @@ function scanOwnedTokenSpans(
 ): { ok: true; spans: Span[]; preserved: Span[] } | PseudonymFailure {
   const spans: Span[] = [];
   const preserved: Span[] = [];
-  let at = text.indexOf(PSEUDONYM_TOKEN_PREFIX);
-  while (at !== -1) {
-    TOKEN_SHAPE.lastIndex = at;
-    const match = TOKEN_SHAPE.exec(text);
-    if (match === null) {
+  let cursor = findTokenPrefix(text, 0);
+  while (cursor !== undefined) {
+    const { at, prefix } = cursor;
+    const token = matchTokenShape(text, at, prefix);
+    if (token === undefined) {
       if (!preserveUnknown) return fail("malformed_token");
-      const nextPrefix = text.indexOf(PSEUDONYM_TOKEN_PREFIX, at + PSEUDONYM_TOKEN_PREFIX.length);
-      const close = text.indexOf("]", at + PSEUDONYM_TOKEN_PREFIX.length);
-      at = nextPrefix !== -1 && (close === -1 || nextPrefix < close)
-        ? nextPrefix
-        : text.indexOf(PSEUDONYM_TOKEN_PREFIX, close === -1 ? text.length : close + 1);
+      const next = findTokenPrefix(text, at + prefix.length);
+      const close = text.indexOf("]", at + prefix.length);
+      cursor = next !== undefined && (close === -1 || next.at < close)
+        ? next
+        : findTokenPrefix(text, close === -1 ? text.length : close + 1);
       continue;
     }
-    const end = at + match[0].length;
-    if (!isOwned(match[0])) {
+    const end = at + token.length;
+    if (!isOwned(token)) {
       if (!preserveUnknown) return fail("unknown_token");
       preserved.push({ start: at, end });
-      at = text.indexOf(PSEUDONYM_TOKEN_PREFIX, end);
+      cursor = findTokenPrefix(text, end);
       continue;
     }
     spans.push({ start: at, end });
-    at = text.indexOf(PSEUDONYM_TOKEN_PREFIX, end);
+    cursor = findTokenPrefix(text, end);
   }
   return { ok: true, spans, preserved };
 }
@@ -541,11 +627,17 @@ function scanForModelBoundary(
  * may legitimately contain overlapping custom-rule matches), and every
  * remaining overlap is then resolved by union masking (P1, 2026-10-06b).
  */
+type FindingSpan = Span & {
+  value: string;
+  type: FindingType;
+  severity: Finding["severity"];
+};
+
 function validateFindingSpans(
   text: string,
   findings: readonly Finding[],
-): { ok: true; spans: Array<Span & { value: string }> } | PseudonymFailure {
-  const spans: Array<Span & { value: string }> = [];
+): { ok: true; spans: FindingSpan[] } | PseudonymFailure {
+  const spans: FindingSpan[] = [];
   for (const finding of findings) {
     if ((finding as { unicode_detected?: unknown }).unicode_detected !== undefined) {
       return fail("invalid_finding_span");
@@ -561,13 +653,20 @@ function validateFindingSpans(
     ) {
       return fail("invalid_finding_span");
     }
-    spans.push({ start, end, value: matched });
+    spans.push({ start, end, value: matched, type: finding.type, severity: finding.severity });
   }
   spans.sort((a, b) => a.start - b.start || a.end - b.end);
-  const deduped: Array<Span & { value: string }> = [];
+  const deduped: FindingSpan[] = [];
   for (const span of spans) {
     const previous = deduped[deduped.length - 1];
-    if (previous && previous.start === span.start && previous.end === span.end) continue;
+    if (previous && previous.start === span.start && previous.end === span.end) {
+      // Identical span from different rules: keep the higher-severity label.
+      if (SEVERITY_RANK[span.severity] > SEVERITY_RANK[previous.severity]) {
+        previous.type = span.type;
+        previous.severity = span.severity;
+      }
+      continue;
+    }
     deduped.push(span);
   }
   return { ok: true, spans: deduped };
@@ -638,39 +737,61 @@ function protectStringTx(
   //     of failing the request.
   // (4) A merged span that still crosses a validated owned token cannot be
   //     masked without corrupting restoration: safe refusal (token_overlap).
-  const candidates: Array<Span & { value: string }> = [];
+  const candidates: FindingSpan[] = [];
   for (const span of collected.spans) {
     if (containedInAnySpan(span, owned.spans)) continue;
     candidates.push(span);
   }
-  const extended: Span[] = [];
+  const extended: FindingSpan[] = [];
   for (const span of candidates) {
-    let bounds: Span = span;
+    let bounds: FindingSpan = span;
     for (const marker of owned.preserved) {
       if (spansOverlap(span, marker)) {
         bounds = {
           start: Math.min(bounds.start, marker.start),
           end: Math.max(bounds.end, marker.end),
+          value: text.slice(Math.min(span.start, marker.start), Math.max(span.end, marker.end)),
+          type: span.type,
+          severity: span.severity,
         };
       }
     }
     extended.push(bounds);
   }
   extended.sort((a, b) => a.start - b.start || a.end - b.end);
-  const actionable: Array<Span & { value: string }> = [];
+  const actionable: FindingSpan[] = [];
   for (const bounds of extended) {
     const last = actionable[actionable.length - 1];
     if (last !== undefined && bounds.start < last.end) {
+      // R-round (F1.1): every overlap competes on severity, including spans
+      // fully contained in the union — a LOW span wrapping an earlier HIGH
+      // span must not keep the LOW category.
+      const outranks = SEVERITY_RANK[bounds.severity] > SEVERITY_RANK[last.severity];
       if (bounds.end > last.end) {
+        // Union merge carries the higher-severity category label forward.
         actionable[actionable.length - 1] = {
           start: last.start,
           end: bounds.end,
           value: text.slice(last.start, bounds.end),
+          type: outranks ? bounds.type : last.type,
+          severity: outranks ? bounds.severity : last.severity,
+        };
+      } else if (outranks) {
+        actionable[actionable.length - 1] = {
+          ...last,
+          type: bounds.type,
+          severity: bounds.severity,
         };
       }
       continue;
     }
-    actionable.push({ start: bounds.start, end: bounds.end, value: text.slice(bounds.start, bounds.end) });
+    actionable.push({
+      start: bounds.start,
+      end: bounds.end,
+      value: text.slice(bounds.start, bounds.end),
+      type: bounds.type,
+      severity: bounds.severity,
+    });
   }
   for (const span of actionable) {
     if (owned.spans.some((tokenSpan) => spansOverlap(span, tokenSpan))) {
@@ -683,7 +804,7 @@ function protectStringTx(
   // Stage every mapping first (charging all budgets), then substitute.
   const stagedSpans: Array<Span & { token: string }> = [];
   for (const span of actionable) {
-    const staged = stageToken(tx, limits, span.value);
+    const staged = stageToken(tx, limits, span.value, span.type);
     if (!staged.ok) return staged;
     stagedSpans.push({ start: span.start, end: span.end, token: staged.token });
   }
@@ -745,10 +866,46 @@ function protectStringTx(
   return { ok: true, text: substituted };
 }
 
+/** Severity rank for category selection when overlapping findings merge. */
+const SEVERITY_RANK: Record<Finding["severity"], number> = { HIGH: 3, MEDIUM: 2, LOW: 1 };
+
+/** Category labels must fit the v2 token grammar (FindingType values do). */
+const CATEGORY_LABEL_SHAPE = /^[A-Z][A-Z_]{0,31}$/;
+
+function categoryLabelOf(category: FindingType): string | undefined {
+  return CATEGORY_LABEL_SHAPE.test(category) ? category : undefined;
+}
+
+/**
+ * Random letter-only SGP2 payload: three 4-letter lowercase segments joined
+ * by hyphens (≈56.6 bits). No digits (digit-based detector families cannot
+ * match), no shell metacharacters, and ≤4-char runs defeat hex-like shapes.
+ * Rejection-sampled bytes keep the alphabet uniform; the bounded draw count
+ * makes exhaustion return undefined (caller fails statically).
+ */
+function mintSgp2Payload(): string | undefined {
+  const segments: string[] = [];
+  for (let segment = 0; segment < PAYLOAD_SEGMENTS; segment += 1) {
+    let chunk = "";
+    for (let draw = 0; draw < 4 && chunk.length < PAYLOAD_SEGMENT_CHARS; draw += 1) {
+      const bytes = randomBytes(PAYLOAD_SEGMENT_CHARS * 2);
+      for (let i = 0; i < bytes.length && chunk.length < PAYLOAD_SEGMENT_CHARS; i += 1) {
+        const byte = bytes[i];
+        if (byte >= PAYLOAD_BYTE_CEILING) continue;
+        chunk += PAYLOAD_ALPHABET[byte % PAYLOAD_ALPHABET.length];
+      }
+    }
+    if (chunk.length < PAYLOAD_SEGMENT_CHARS) return undefined;
+    segments.push(chunk);
+  }
+  return segments.join("-");
+}
+
 function stageToken(
   tx: Transaction,
   limits: PseudonymLimits,
   original: string,
+  category: FindingType,
 ): { ok: true; token: string } | PseudonymFailure {
   const existing = tx.staged?.forward.get(original) ?? tx.live?.forward.get(original);
   if (existing !== undefined) return { ok: true, token: existing }; // idempotent reuse
@@ -779,8 +936,13 @@ function stageToken(
   }
 
   const staged = tx.staged;
-  const counter = staged.counter + 1;
-  const token = `${PSEUDONYM_TOKEN_PREFIX}${staged.epoch}-${String(counter).padStart(COUNTER_PAD, "0")}]`;
+  const label = categoryLabelOf(category);
+  const payload = label === undefined ? undefined : mintSgp2Payload();
+  if (label === undefined || payload === undefined) return fail("internal_failure");
+  // W1 (2026-10-07): new mints are versioned, category-labelled tokens. The
+  // legacy epoch/counter namespace remains recognized for restoration of
+  // mappings issued before the switch.
+  const token = `${PSEUDONYM_TOKEN_PREFIX_V2}${label}-${payload}]`;
   if (staged.reverse.has(token) || tx.live?.reverse.has(token)) return fail("token_collision");
 
   const entryUnits = original.length + token.length + ENTRY_OVERHEAD_UNITS;
@@ -794,7 +956,6 @@ function stageToken(
 
   staged.forward.set(original, token);
   staged.reverse.set(token, original);
-  staged.counter = counter;
   staged.entries += 1;
   staged.units += entryUnits;
   return { ok: true, token };
@@ -834,7 +995,7 @@ function restoreStringTx(
 ): PseudonymTextResult {
   // Token-free path: output === input, charged combined with the input
   // exactly like the replacement path (budget 10 must refuse "abcdef").
-  if (text.indexOf(PSEUDONYM_TOKEN_PREFIX) === -1) {
+  if (!containsTokenPrefix(text)) {
     if (chargedUnits + text.length > limits.maxUnitsPerOperation) {
       return fail("operation_limit");
     }
@@ -853,27 +1014,26 @@ function restoreStringTx(
   };
 
   let from = 0;
-  let at = text.indexOf(PSEUDONYM_TOKEN_PREFIX);
-  while (at !== -1) {
-    TOKEN_SHAPE.lastIndex = at;
-    const match = TOKEN_SHAPE.exec(text);
-    const token = match?.[0];
+  let cursor = findTokenPrefix(text, 0);
+  while (cursor !== undefined) {
+    const { at, prefix } = cursor;
+    const token = matchTokenShape(text, at, prefix);
     const original = token === undefined ? undefined : live?.reverse.get(token);
     if (token === undefined || original === undefined) {
       if (!preserveUnknownMarkers) return fail(token === undefined ? "malformed_token" : "unknown_token");
-      const nextPrefix = text.indexOf(PSEUDONYM_TOKEN_PREFIX, at + PSEUDONYM_TOKEN_PREFIX.length);
-      const close = text.indexOf("]", at + PSEUDONYM_TOKEN_PREFIX.length);
+      const next = findTokenPrefix(text, at + prefix.length);
+      const close = text.indexOf("]", at + prefix.length);
       const end = token !== undefined
         ? at + token.length
-        : nextPrefix !== -1 && (close === -1 || nextPrefix < close)
-          ? nextPrefix
+        : next !== undefined && (close === -1 || next.at < close)
+          ? next.at
           : close === -1
             ? text.length
             : close + 1;
       const literalFailed = appendPiece(text.slice(from, end));
       if (literalFailed !== null) return literalFailed;
       from = end;
-      at = text.indexOf(PSEUDONYM_TOKEN_PREFIX, from);
+      cursor = findTokenPrefix(text, from);
       continue;
     }
     const literalFailed = appendPiece(text.slice(from, at));
@@ -881,7 +1041,7 @@ function restoreStringTx(
     const replacementFailed = appendPiece(original);
     if (replacementFailed !== null) return replacementFailed;
     from = at + token.length;
-    at = text.indexOf(PSEUDONYM_TOKEN_PREFIX, from);
+    cursor = findTokenPrefix(text, from);
   }
   const tailFailed = appendPiece(text.slice(from));
   if (tailFailed !== null) return tailFailed;
@@ -1176,6 +1336,94 @@ function buildService(config: GuardConfig, limits: PseudonymLimits): Pseudonymiz
     }
   };
 
+  const seedSession = (
+    sessionId: string,
+    seed: SessionSeed,
+  ): { ok: true } | PseudonymFailure => {
+    if (!isValidSessionId(sessionId)) return fail("invalid_session");
+    try {
+      if (registry.sessions.has(sessionId)) return fail("invalid_session");
+      if (typeof seed.epoch !== "string" || !/^[0-9a-f]{32}$/.test(seed.epoch)) {
+        return fail("invalid_input");
+      }
+      if (!Array.isArray(seed.entries) || seed.entries.length === 0) return fail("invalid_input");
+      // R-round (F1.3): cheap caps FIRST — a hostile or hand-edited seed must
+      // be sized before any map allocation (memory-exhaustion guard), and the
+      // per-entry unit guard below bounds the loop itself.
+      if (registry.sessions.size >= limits.maxSessions) return fail("session_limit");
+      if (seed.entries.length > limits.maxEntriesPerSession) return fail("entry_limit");
+      // R2-14: two phases. Phase 1 validates shape/category and accumulates
+      // the unit budget WITHOUT any map allocation or key hashing — a hostile
+      // or hand-edited seed is fully sized before the first Map.set, so an
+      // oversized original cannot make the loop hash megabytes before its
+      // rejection. Only then does phase 2 build the forward/reverse maps.
+      let units = sessionId.length;
+      for (const entry of seed.entries) {
+        const token = entry?.token;
+        const original = entry?.original;
+        if (typeof token !== "string" || typeof original !== "string" || original.length === 0) {
+          return fail("invalid_input");
+        }
+        // Exact reserved-shape match, either version (matchTokenShape binds
+        // to the version implied by the token's own prefix).
+        const prefix = PSEUDONYM_TOKEN_PREFIXES.find((candidate) => token.startsWith(candidate));
+        if (prefix === undefined) return fail("malformed_token");
+        if (matchTokenShape(token, 0, prefix) !== token) return fail("malformed_token");
+        if (prefix === PSEUDONYM_TOKEN_PREFIX_V2) {
+          const category = token.slice(
+            PSEUDONYM_TOKEN_PREFIX_V2.length,
+            token.indexOf("-", PSEUDONYM_TOKEN_PREFIX_V2.length),
+          );
+          if (!KNOWN_SGP2_CATEGORIES.has(category)) return fail("malformed_token");
+        }
+        units += original.length + token.length + ENTRY_OVERHEAD_UNITS;
+        if (units > limits.maxSessionUnits) return fail("session_capacity");
+      }
+      const forward = new Map<string, string>();
+      const reverse = new Map<string, string>();
+      for (const entry of seed.entries) {
+        const { token, original } = entry as { token: string; original: string };
+        if (reverse.has(token)) return fail("token_collision");
+        if (forward.has(original)) return fail("key_collision");
+        forward.set(original, token);
+        reverse.set(token, original);
+      }
+      if (registry.epochs.has(seed.epoch)) return fail("epoch_collision");
+      if (registry.sessions.size >= limits.maxSessions) return fail("session_limit");
+      if (seed.entries.length > limits.maxEntriesPerSession) return fail("entry_limit");
+      if (units > limits.maxSessionUnits) return fail("session_capacity");
+      if (registry.totalEntries + seed.entries.length > limits.maxEntriesTotal) {
+        return fail("aggregate_capacity");
+      }
+      if (registry.totalUnits + units > limits.maxUnitsTotal) return fail("aggregate_capacity");
+      registry.sessions.set(sessionId, {
+        epoch: seed.epoch,
+        counter: 0,
+        forward,
+        reverse,
+        entries: seed.entries.length,
+        units,
+      });
+      registry.epochs.add(seed.epoch);
+      registry.totalEntries += seed.entries.length;
+      registry.totalUnits += units;
+      return { ok: true };
+    } catch {
+      return fail("internal_failure");
+    }
+  };
+
+  const hasSession = (sessionId: string): boolean =>
+    isValidSessionId(sessionId) && registry.sessions.has(sessionId);
+
+  const exportSession = (sessionId: string): SessionSeed | null => {
+    if (!isValidSessionId(sessionId)) return null;
+    const session = registry.sessions.get(sessionId);
+    if (session === undefined) return null;
+    const entries = Array.from(session.forward, ([original, token]) => ({ token, original }));
+    return { epoch: session.epoch, entries };
+  };
+
   const clearSession = (sessionId: string): void => {
     if (!isValidSessionId(sessionId)) return; // idempotent, never throws
     const session = registry.sessions.get(sessionId);
@@ -1189,6 +1437,7 @@ function buildService(config: GuardConfig, limits: PseudonymLimits): Pseudonymiz
   return {
     isTextSafe,
     isStructuralIdentifierSafe,
+    seedSession,
     protectText,
     protectTextForModel,
     restoreText,
@@ -1197,6 +1446,8 @@ function buildService(config: GuardConfig, limits: PseudonymLimits): Pseudonymiz
     protectJsonForModel,
     restoreJson,
     clearSession,
+    hasSession,
+    exportSession,
   };
 }
 

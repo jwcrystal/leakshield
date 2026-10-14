@@ -1,15 +1,17 @@
 /**
  * Transparent pseudonymization integration tests (issue #22, stage 1).
  *
- * Offline mocks only: the OpenCode v2 plugin context is mocked (hook
- * registration + captured callbacks), all secrets are synthetic, and no
- * network, filesystem tool effects, or OpenCode runtime are involved.
+ * The OpenCode v2 plugin context is mocked (hook registration + captured
+ * callbacks), all secrets are synthetic, and no network or OpenCode runtime
+ * is involved. POSIX quoting tests additionally run controlled printf commands
+ * through /bin/sh to verify exact argument bytes, without filesystem effects.
  * These tests exercise the guard's observable hook behavior through the
  * request boundary (four kinds + native http), the typed tool gate, cleanup,
  * and fail-closed refusals. They are NOT a native-hook/provider/client
  * ordering proof (see the stage-1 handoff).
  */
 
+import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { createTransparentSessionGuard } from "../src/opencode-transparent.js";
 import { PSEUDONYM_TOKEN_PREFIX } from "../src/decision/pseudonymization.js";
@@ -31,7 +33,7 @@ const baseConfig: GuardConfig = {
 // credential span, which the accepted core rejects as an overlap.
 const KEY = "sk-QwertyuiopAsdfghjklZx";
 const EMAIL = "alice@example.com";
-const TOKEN_RE = /\[SGP1:[0-9a-f]{32}-\d{8,12}\]/g;
+const TOKEN_RE = /\[SGP1:[0-9a-f]{32}-\d{8,12}\]|\[SGP2:[A-Z][A-Z_]{0,31}-[a-z]{4}-[a-z]{4}-[a-z]{4}\]/g;
 const FOREIGN_TOKEN = `[SGP1:${"deadbeef".repeat(4)}-00000001]`;
 
 // Phone rules are opt-in since P2 (2026-10-07); tests that need a
@@ -60,7 +62,7 @@ interface Harness {
   hook: (name: string) => (event: unknown) => Promise<unknown> | unknown;
 }
 
-async function arm(config: GuardConfig = baseConfig, attachmentsPolicy: "block" | "allow" = "block"): Promise<Harness> {
+async function arm(config: GuardConfig = baseConfig, attachmentsPolicy: "block" | "allow" = "block", wireProtection = true): Promise<Harness> {
   const registered: RecordedHook[] = [];
   const disposed: string[] = [];
   const hookFor = (domain: string) => {
@@ -74,10 +76,12 @@ async function arm(config: GuardConfig = baseConfig, attachmentsPolicy: "block" 
     tool: { hook: hookFor("tool") },
     aisdk: { hook: hookFor("aisdk") },
   };
-  const guard = createTransparentSessionGuard(config, attachmentsPolicy);
+  const guard = createTransparentSessionGuard(config, attachmentsPolicy, wireProtection);
   await guard.setup(ctx as never);
   const hook = (name: string) => {
     const hit = registered.find((r) => `${r.domain}:${r.name}` === name);
+    // Host emission with no outbound registration is a no-op, not a guard callback.
+    if (!hit && !wireProtection && ["session:http.request", "session:experimental.ws.handshake", "session:experimental.ws.send", "aisdk:sdk", "aisdk:language"].includes(name)) return async () => undefined;
     if (hit === undefined) throw new Error(`missing hook ${name}`);
     // Host-side invocation: the callback may throw synchronously or return a
     // promise; the wrapper normalizes both to a rejected/fulfilled promise.
@@ -137,14 +141,16 @@ async function mintToken(
   hook: (name: string) => (event: unknown) => Promise<unknown> | unknown,
   secret: string,
   sessionID = "session-1",
+  kind = "primary",
 ): Promise<string> {
   const event = {
     sessionID,
+    model: { providerID: "openai", id: "gpt-test" },
     system: [{ type: "text", text: `x ${secret} y` }],
     messages: [],
     options: {},
   };
-  await hook("session:context")(event);
+  await hook(`session:${kind === "primary" ? "context" : kind}`)(event);
   const match = (event.system as Array<{ text: string }>)[0].text.match(TOKEN_RE);
   if (match === null) throw new Error("no token minted");
   return match[0];
@@ -523,6 +529,153 @@ describe("transparent outbound request snapshots", () => {
 
 // ─── Typed tool gate ─────────────────────────────────────────────────────────
 
+describe("transparent hook-first HTTP boundary", () => {
+  it.each([true, false])("keeps request-hook masking with wireProtection=%s", async (wireProtection) => {
+    const { hook } = await arm(baseConfig, "block", wireProtection);
+    const event = requestEvent();
+    await hook("session:context")(event);
+    expect(JSON.stringify(event)).not.toContain(KEY);
+    expect(JSON.stringify(event)).not.toContain(EMAIL);
+  });
+
+  it("keeps final request identity and does not inspect or mask its body in hook-first mode", async () => {
+    const { hook } = await arm(baseConfig, "block", false);
+    // Simulates content added after context hooks. This is deliberately outside
+    // hook-first coverage; the stronger mode still masks it in existing tests.
+    const request = chatRequest({ model: "gpt-test", messages: [{ role: "user", content: KEY }] });
+    const original = await request.clone().text();
+    const event = { sessionID: "session-1", kind: "primary", request };
+    await hook("session:http.request")(event);
+    expect(event.request).toBe(request);
+    expect(await event.request.clone().text()).toBe(original);
+  });
+
+  it("does not reject a supported route merely because its final body dialect is unknown", async () => {
+    const { hook } = await arm(baseConfig, "block", false);
+    const request = chatRequest({ provider_extension: "opaque" });
+    const event = { sessionID: "session-1", kind: "primary", request };
+    await expect(hook("session:http.request")(event)).resolves.toBeUndefined();
+    expect(event.request).toBe(request);
+  });
+
+  it("retains response restoration and isolation for sessions and request kinds", async () => {
+    const { hook } = await arm(baseConfig, "block", false);
+    const cases = [
+      { sessionID: "session-1", kind: "primary", secret: KEY },
+      { sessionID: "session-2", kind: "title", secret: EMAIL },
+    ];
+    for (const { sessionID, kind, secret } of cases) {
+      const token = await mintToken(hook, secret, sessionID, kind);
+      const model = { providerID: "openai", id: "gpt-test" };
+      const requestEvent = { sessionID, kind, model, request: chatRequest({ messages: [{ role: "user", content: token }] }) };
+      await hook("session:http.request")(requestEvent);
+      const makeResponse = () => new Response(JSON.stringify({ choices: [{
+        index: 0, message: { role: "assistant", content: token },
+      }] }), { headers: { "content-type": "application/json" } });
+      for (const mismatch of [{ sessionID: "other", kind }, { sessionID, kind: "generate" }]) {
+        const event = { ...mismatch, model, request: requestEvent.request, response: makeResponse() };
+        await hook("session:http.response")(event);
+        expect((await event.response.json()).choices[0].message.content).toBe(token);
+      }
+      const cloned = { sessionID, kind, model, request: requestEvent.request.clone(), response: makeResponse() };
+      await hook("session:http.response")(cloned);
+      expect((await cloned.response.json()).choices[0].message.content).toBe(secret);
+      const responseEvent = { sessionID, kind, model, request: requestEvent.request, response: makeResponse() };
+      await hook("session:http.response")(responseEvent);
+      const body = await responseEvent.response.json();
+      expect(body.choices[0].message.content).toBe(secret);
+      const toolEvent = { sessionID, tool: "read", input: { filePath: token } };
+      await hook("tool:execute.before")(toolEvent);
+      expect(toolEvent.input.filePath).toBe(secret);
+    }
+  });
+
+  it("restores split-token SSE on an attributed hook-first retry", async () => {
+    const { hook } = await arm(baseConfig, "block", false);
+    const token = await mintToken(hook, KEY);
+    const request = chatRequest({ messages: [{ role: "user", content: token }] });
+    const requestEvent = { sessionID: "session-1", kind: "primary", model: { providerID: "openai", id: "gpt-test" }, request };
+    await hook("session:http.request")(requestEvent);
+    await hook("session:http.request")(requestEvent);
+    const event = {
+      ...requestEvent,
+      response: new Response(sseBody([sseChunk(token.slice(0, 17)), sseChunk(token.slice(17)), "data: [DONE]\n\n"]),
+        { headers: { "content-type": "text/event-stream" } }),
+    };
+    await hook("session:http.response")(event);
+    const text = await event.response.text();
+    expect(text).toContain(KEY);
+    expect(text).not.toContain("[SGP1:");
+  });
+
+  it("does not gate unknown routes or inspect transport metadata in hook-only mode", async () => {
+    const { hook } = await arm(baseConfig, "block", false);
+    for (const request of [
+      new Request("https://provider.example.com/custom", { method: "POST", body: "{}" }),
+      new Request("ws://provider.example.com/v1/responses", { method: "POST", body: "{}" }),
+      chatRequest({ messages: [] }, { headers: { "x-owner": EMAIL } }),
+    ]) {
+      const event = { sessionID: "session-1", kind: "primary", request };
+      await expect(hook("session:http.request")(event)).resolves.toBeUndefined();
+      expect(event.request).toBe(request);
+      const reply = { ...event, response: new Response("{}") };
+      await hook("session:http.response")(reply);
+      expect(await reply.response.text()).toBe("{}");
+    }
+  });
+
+  it.each(["session:experimental.ws.handshake", "session:experimental.ws.send", "aisdk:sdk", "aisdk:language"])(
+    "does not register transport admission at %s in hook-only mode", async (name) => {
+      const { hook, registered } = await arm(baseConfig, "block", false);
+      expect(registered.some((r) => `${r.domain}:${r.name}` === name)).toBe(false);
+      await expect(hook(name)({ sessionID: "s", frame: "{}" })).resolves.toBeUndefined();
+    },
+  );
+
+  it.each(["block", "allow"] as const)("keeps attachment policy at content hooks with %s", async (policy) => {
+    const { hook } = await arm(baseConfig, policy, false);
+    const media = { type: "media", mime: "image/png", data: Buffer.from(KEY).toString("base64") };
+    const event = {
+      sessionID: "session-1", system: [], options: {},
+      messages: [{ role: "user", content: [{ type: "text", text: KEY }, media] }],
+    };
+    await hook("session:context")(event);
+    expect(JSON.stringify(event)).not.toContain(KEY);
+    if (policy === "allow") {
+      expect(event.messages[0].content[1]).toEqual(media);
+    } else {
+      expect(JSON.stringify(event)).not.toContain(media.data);
+    }
+  });
+
+  it("does not pretend persisted tool-argument tokens can be reconstructed after mapping loss", async () => {
+    const { hook, guard } = await arm(baseConfig, "block", false);
+    const token = await mintToken(hook, KEY);
+    const requestEvent = { sessionID: "session-1", kind: "primary", request: chatRequest({ messages: [] }) };
+    await hook("session:http.request")(requestEvent);
+    const persistedArguments = JSON.stringify({ filePath: token });
+    const event = {
+      ...requestEvent,
+      response: new Response(JSON.stringify({ choices: [{ message: {
+        role: "assistant", content: null,
+        tool_calls: [{ id: "call_read", type: "function", function: { name: "write", arguments: persistedArguments } }],
+      } }] }), { headers: { "content-type": "application/json" } }),
+    };
+    await hook("session:http.response")(event);
+    const response = await event.response.json();
+    expect(response.choices[0].message.tool_calls[0].function.arguments).toBe(persistedArguments);
+    const liveInput = JSON.parse(persistedArguments);
+    await hook("tool:execute.before")({ sessionID: "session-1", tool: "write", input: liveInput });
+    expect(liveInput.filePath).toBe(KEY);
+    await guard.dispose();
+    const restarted = await arm(baseConfig, "block", false);
+    const newToken = await mintToken(restarted.hook, KEY);
+    expect(newToken).not.toBe(token);
+    await expect(restarted.hook("tool:execute.before")({ sessionID: "session-1", tool: "write", input: JSON.parse(persistedArguments) }))
+      .rejects.toThrow(TOOL_REFUSED);
+  });
+});
+
 describe("transparent tool execution gate", () => {
   it("restores registered tokens in tool inputs before execution", async () => {
     const { hook } = await arm();
@@ -553,6 +706,116 @@ describe("transparent tool execution gate", () => {
       hook("tool:execute.before")({ tool: "bash", sessionID: "session-1", input }),
     ).resolves.toBeUndefined();
     expect(input).toEqual({ command: `echo ${KEY}` });
+  });
+
+  it.skipIf(process.platform === "win32").each(["'", '"'])("restores a complete %s-quoted shell argument without changing its quoting", async (quote) => {
+    const { hook } = await arm();
+    const token = await mintToken(hook, KEY);
+    const input = { command: `printf %s ${quote}${token}${quote}` };
+
+    await hook("tool:execute.before")({ tool: "shell", sessionID: "session-1", input });
+
+    expect(input.command).toBe(`printf %s ${quote}${KEY}${quote}`);
+    expect(execFileSync("/bin/sh", ["-c", input.command], { encoding: "utf8" })).toBe(KEY);
+  });
+
+  it.skipIf(process.platform === "win32").each(["'", '"'])("keeps a space-containing original as one %s-quoted argument", async (quote) => {
+    const { hook } = await arm(phoneConfig);
+    const phone = "0912 345 678";
+    const token = await mintToken(hook, phone);
+    const input = { command: `printf '%s' ${quote}${token}${quote}` };
+
+    await hook("tool:execute.before")({ tool: "shell", sessionID: "session-1", input });
+
+    expect(execFileSync("/bin/sh", ["-c", input.command], { encoding: "utf8" })).toBe(phone);
+  });
+
+  it.skipIf(process.platform === "win32").each([">", ">>"])("restores a quoted argument with static %s output redirection", async (operator) => {
+    const { hook } = await arm();
+    const token = await mintToken(hook, KEY);
+    const input = { command: `printf '%s' '${token}' ${operator} 'result file.txt'` };
+
+    await hook("tool:execute.before")({ tool: "shell", sessionID: "session-1", input });
+
+    expect(input.command).toBe(`printf '%s' '${KEY}' ${operator} 'result file.txt'`);
+  });
+
+  it.skipIf(process.platform === "win32")("keeps shell metacharacters literal inside a complete single-quoted argument", async () => {
+    const original = "$(printf INJECTED); * & $HOME";
+    const config: GuardConfig = { ...baseConfig, nda_keywords: [original] };
+    const { hook } = await arm(config);
+    const token = await mintToken(hook, original);
+    const input = { command: `printf %s '${token}'` };
+
+    await hook("tool:execute.before")({ tool: "shell", sessionID: "session-1", input });
+
+    expect(execFileSync("/bin/sh", ["-c", input.command], { encoding: "utf8" })).toBe(original);
+  });
+
+  it("refuses an original that could break its single-quote context without changing any input", async () => {
+    const original = "unsafe'quote";
+    const { hook } = await arm({ ...baseConfig, nda_keywords: [original] });
+    const token = await mintToken(hook, original);
+    const input = { command: `printf %s '${token}'` };
+    await expect(hook("tool:execute.before")({ tool: "shell", sessionID: "session-1", input }))
+      .rejects.toThrow(TOOL_REFUSED);
+    expect(input.command).toBe(`printf %s '${token}'`);
+  });
+
+  it.each(['unsafe"quote', "$HOME", "$(printf INJECTED)", "`printf INJECTED`", "back\\slash"])(
+    "refuses an original unsafe inside double quotes: %s", async (original) => {
+      const { hook } = await arm({ ...baseConfig, nda_keywords: [original] });
+      const token = await mintToken(hook, original);
+      const input = { command: `printf %s "${token}"` };
+      await expect(hook("tool:execute.before")({ tool: "shell", sessionID: "session-1", input }))
+        .rejects.toThrow(TOOL_REFUSED);
+      expect(input.command).toBe(`printf %s "${token}"`);
+    },
+  );
+
+  it("does not admit expansion, concatenation, scripts, or tokenized redirect targets with quoted tokens", async () => {
+    const { hook } = await arm();
+    const token = await mintToken(hook, KEY);
+    const commands = [
+      `'${token}' --argument`,
+      `SECRET='${token}' printf safe`,
+      `printf %s prefix'${token}'`,
+      `printf %s '${token}'suffix`,
+      `printf %s "${token}$HOME"`,
+      `printf %s '${token}' $(printf INJECTED)`,
+      `printf %s '${token}' | cat`,
+      `printf %s '${token}'; printf INJECTED`,
+      `"sh" '-c' '${token}'`,
+      `'python' '-c' '${token}'`,
+      `node '--eval' '${token}'`,
+      `printf %s '${token}' > '${token}'`,
+      `printf %s '${token}' >`,
+      `printf %s '${token}' > result.txt trailing`,
+      `printf %s '${token}' > $HOME/result.txt`,
+      `printf %s '${token}' 2> result.txt`,
+      `printf %s '${token}' < input.txt`,
+      `printf %s '${token}'\necho INJECTED`,
+      `printf %s '${token}`,
+      `printf %s "${token}`,
+    ];
+    for (const command of commands) {
+      const input = { command };
+      await expect(hook("tool:execute.before")({ tool: "shell", sessionID: "session-1", input }))
+        .rejects.toThrow(TOOL_REFUSED);
+      expect(input.command).toBe(command);
+    }
+  });
+
+  it("still refuses option-injecting originals even inside quotes", async () => {
+    const original = "-danger";
+    const { hook } = await arm({ ...baseConfig, nda_keywords: [original] });
+    const token = await mintToken(hook, original);
+    for (const quote of ["'", '"']) {
+      const input = { command: `printf %s ${quote}${token}${quote}` };
+      await expect(hook("tool:execute.before")({ tool: "shell", sessionID: "session-1", input }))
+        .rejects.toThrow(TOOL_REFUSED);
+      expect(input.command).toBe(`printf %s ${quote}${token}${quote}`);
+    }
   });
 
   it("refuses a shell command whose original is not shell-safe, leaving it unchanged", async () => {
@@ -908,6 +1171,52 @@ describe("transparent http.request wire mask", () => {
     const event = { sessionID: "s", kind: "primary", request: clean };
     await hook("session:http.request")(event);
     expect((event.request as Request).headers.get("authorization")).toBe("Bearer test-key");
+  });
+
+  it("field-aware exemption: opt-in URL rule never refuses transport positions, body URLs still mask", async () => {
+    const urlConfig: GuardConfig = {
+      ...baseConfig,
+      settings: { ...baseConfig.settings, rule_overrides: { url: true } },
+    };
+    const { hook } = await arm(urlConfig);
+
+    // Historical regression shape: endpoint URL + URL-valued query + token in query.
+    const request = new Request(
+      `https://provider.example.com/v1/chat/completions?cb=https://app.example.com/hook&q=${encodeURIComponent(FOREIGN_TOKEN)}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer test-key",
+          "x-source": "https://internal.example.com/ref",
+        },
+        body: JSON.stringify({
+          model: "g",
+          messages: [{ role: "user", content: "see https://secret.example.com/panel now" }],
+        }),
+      },
+    );
+    const event = { sessionID: "s", kind: "primary", request };
+    await hook("session:http.request")(event);
+
+    const out = event.request as Request;
+    expect(out.url).toContain("provider.example.com/v1/chat/completions");
+    expect(out.url).toContain(encodeURIComponent(FOREIGN_TOKEN));
+    expect(out.headers.get("x-source")).toBe("https://internal.example.com/ref");
+    expect(out.headers.get("authorization")).toBe("Bearer test-key");
+
+    const body = JSON.parse(await out.text()) as { messages: Array<{ content: string }> };
+    expect(body.messages[0].content).toContain("[SGP2:");
+    expect(body.messages[0].content).not.toContain("secret.example.com");
+
+    // Exemption is field-aware, not rule-wide: a real secret in a transport
+    // position still refuses.
+    const badHeader = chatRequest(
+      { model: "g", messages: [{ role: "user", content: "safe" }] },
+      { headers: { "x-key": "sk-abcdefghij1234567890" } },
+    );
+    const badEvent = { sessionID: "s", kind: "primary", request: badHeader };
+    await expect(hook("session:http.request")(badEvent)).rejects.toThrow();
   });
 
   it("preserves unknown marker examples on the wire while masking other content", async () => {
@@ -1287,7 +1596,7 @@ describe("transparent http.response restore (JSON)", () => {
     expect(JSON.parse(await original.clone().text()).choices[0].message.content).toBe("plain");
   });
 
-  it("refuses responses without verified request attribution", async () => {
+  it("preserves literal responses without verified request attribution", async () => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY);
     const response = new Response(JSON.stringify({ choices: [{ message: { content: token } }] }), {
@@ -1297,14 +1606,12 @@ describe("transparent http.response restore (JSON)", () => {
 
     // No prior http.request for this Request object.
     const orphan = chatRequest({ model: "g", messages: [] });
-    await expect(
-      hook("session:http.response")({ sessionID: "session-1", kind: "primary", request: orphan, response }),
-    ).rejects.toThrow(ATTRIBUTION_FAILED);
+    await hook("session:http.response")({ sessionID: "session-1", kind: "primary", request: orphan, response });
+    expect(await response.clone().text()).toContain(token);
+    expect(await response.clone().text()).not.toContain(KEY);
 
     // Kind mismatch against the recorded attribution.
-    await expect(dispatch(hook, response, { requestKind: "primary", responseKind: "title" })).rejects.toThrow(
-      ATTRIBUTION_FAILED,
-    );
+    await expect(dispatch(hook, response, { requestKind: "primary", responseKind: "title" })).resolves.toBeUndefined();
   });
 
   it("passes non-2xx and non-chat JSON through untouched", async () => {
@@ -1634,7 +1941,7 @@ describe("transparent http.response restore (SSE)", () => {
     expect(output).toContain(`café ${KEY} ☕`);
   });
 
-  it("fails the stream on malformed JSON data lines and cancels the upstream", async () => {
+  it("preserves malformed JSON data lines and only cancels when the consumer does", async () => {
     const { hook } = await arm();
     let upstreamCancelled = false;
     const upstream = new ReadableStream<Uint8Array>({
@@ -1646,8 +1953,10 @@ describe("transparent http.response restore (SSE)", () => {
       },
     });
     const restored = await armSse(hook, upstream);
-    await expect(readAll(restored)).rejects.toThrow();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    const reader = restored.body!.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe("data: {not json\n\n");
+    expect(upstreamCancelled).toBe(false);
+    await reader.cancel();
     expect(upstreamCancelled).toBe(true);
   });
 
@@ -1753,7 +2062,7 @@ describe("transparent http.response restore (SSE)", () => {
     expect(contents).toBe(`x ${KEY} y`);
   });
 
-  it("fails closed when a stream opens more choice channels than the limit", async () => {
+  it("abandons restoration when a stream opens more choice channels than the limit", async () => {
     const { hook } = await arm();
     const events: string[] = [];
     // Each event holds an incomplete token on its own channel, so channels
@@ -1762,7 +2071,7 @@ describe("transparent http.response restore (SSE)", () => {
       events.push(deltaEvent({ content: `${PSEUDONYM_TOKEN_PREFIX}abc` }, index));
     }
     const restored = await armSse(hook, sseBody([...events, "data: [DONE]\n\n"]));
-    await expect(readAll(restored)).rejects.toThrow();
+    expect(await readAll(restored)).toBe([...events, "data: [DONE]\n\n"].join(""));
   });
 
   it("bounds terminal choice state even when content channels stay empty", async () => {
@@ -1772,7 +2081,7 @@ describe("transparent http.response restore (SSE)", () => {
     ).join("\n\n");
     const restored = await armSse(hook, sseBody([`${terminalEvents}\n\ndata: [DONE]\n\n`]));
 
-    await expect(readAll(restored)).rejects.toThrow();
+    expect(await readAll(restored)).toContain('"index":299');
   });
 
   it("pulls from the upstream only as the consumer reads (backpressure)", async () => {
@@ -1801,7 +2110,7 @@ describe("transparent http.response restore (SSE)", () => {
     await reader.cancel();
   });
 
-  it("fails closed on an unterminated event whose accumulated lines exceed the cap", async () => {
+  it("preserves an unterminated event rather than accumulating beyond the cap", async () => {
     const { hook } = await arm();
     // Each 64-KiB comment line arrives as its own chunk, so the pending line
     // buffer stays small while the accumulated event must still be bounded.
@@ -1809,7 +2118,7 @@ describe("transparent http.response restore (SSE)", () => {
     const chunks = Array.from({ length: 24 }, () => `${bigLine}\n`);
     chunks.push("\n", "data: [DONE]\n\n");
     const restored = await armSse(hook, sseBody(chunks));
-    await expect(readAll(restored)).rejects.toThrow();
+    expect(await readAll(restored)).toBe(chunks.join(""));
   });
 
   it("bounds the aggregate held channel state", async () => {
@@ -1820,7 +2129,7 @@ describe("transparent http.response restore (SSE)", () => {
       events.push(deltaEvent({ content: hold }, index));
     }
     const restored = await armSse(hook, sseBody([...events, "data: [DONE]\n\n"]));
-    await expect(readAll(restored)).rejects.toThrow();
+    expect(await readAll(restored)).toBe([...events, "data: [DONE]\n\n"].join(""));
   });
 
   it("bounds the accumulated event by UTF-8 bytes, not code units", async () => {
@@ -1831,7 +2140,7 @@ describe("transparent http.response restore (SSE)", () => {
     const chunks = Array.from({ length: 8 }, () => `${bigLine}\n`);
     chunks.push("\n", "data: [DONE]\n\n");
     const restored = await armSse(hook, sseBody(chunks));
-    await expect(readAll(restored)).rejects.toThrow();
+    expect(await readAll(restored)).toBe(chunks.join(""));
   });
 
   it("bounds a choice channel by UTF-8 bytes, not code units", async () => {
@@ -1842,7 +2151,7 @@ describe("transparent http.response restore (SSE)", () => {
       hook,
       sseBody([deltaEvent({ content: hold }), "data: [DONE]\n\n"]),
     );
-    await expect(readAll(restored)).rejects.toThrow();
+    expect(await readAll(restored)).toBe(deltaEvent({ content: hold }) + "data: [DONE]\n\n");
   });
 
   it("keeps a reserved token in a non-choice SSE payload literal", async () => {
@@ -1863,7 +2172,7 @@ describe("transparent http.response restore (SSE)", () => {
     }
   });
 
-  it("refuses output after a terminal choice even when a token is still pending", async () => {
+  it("keeps output after a terminal choice literal without cross-restoring a pending token", async () => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY);
     const restored = await armSse(
@@ -1875,7 +2184,9 @@ describe("transparent http.response restore (SSE)", () => {
         "data: [DONE]\n\n",
       ]),
     );
-    await expect(readAll(restored)).rejects.toThrow();
+    const output = await readAll(restored);
+    expect(output).toContain(token.slice(12));
+    expect(output).not.toContain(KEY);
   });
 
   it("keeps interleaved choice terminals independent", async () => {
@@ -1906,19 +2217,88 @@ describe("transparent http.response restore (SSE)", () => {
 // ─── Unsupported routes ──────────────────────────────────────────────────────
 
 describe("transparent unsupported routes", () => {
-  it("refuses WebSocket and AI SDK routes with a static error", async () => {
+  it("refuses unidentifiable WebSocket and missing AI SDK fetch admission with a content-free hook identifier", async () => {
     const { hook } = await arm();
     for (const name of [
       "session:experimental.ws.handshake",
       "session:experimental.ws.send",
-      "session:experimental.ws.receive",
       "aisdk:sdk",
       "aisdk:language",
     ]) {
       await expect(
         hook(name)({ sessionID: "session-1", kind: "primary", url: "wss://x", frame: "{}" }),
       ).rejects.toThrow(UNSUPPORTED_ROUTE);
+      const identifier = name.startsWith("session:") ? name.slice("session:".length) : name.replace(":", ".");
+      await expect(
+        hook(name)({ sessionID: KEY, kind: EMAIL, url: `wss://x/${KEY}`, frame: EMAIL }),
+      ).rejects.toThrow(`[hook=${identifier}]`);
     }
+  });
+});
+
+describe("transparent NDA keyword boundaries", () => {
+  it.each(["import Foundation", "Apple Foundation Models", "the agenda for tomorrow"])(
+    "preserves ordinary text through request protection: %s",
+    async (text) => {
+      const { hook } = await arm({ ...baseConfig, nda_keywords: ["NDA"] });
+      const event = { sessionID: "session-1", system: [{ type: "text", text }], messages: [], options: {} };
+      await hook("session:context")(event);
+      expect(event.system[0].text).toBe(text);
+    },
+  );
+
+  it("still masks a standalone NDA in request content", async () => {
+    const { hook } = await arm({ ...baseConfig, nda_keywords: ["NDA"] });
+    const event = { sessionID: "session-1", system: [{ type: "text", text: "sign the NDA" }], messages: [], options: {} };
+    await hook("session:context")(event);
+    expect(event.system[0].text).toMatch(/sign the \[SGP2:/);
+  });
+});
+
+describe("transparent standalone joiners in replayed tool history", () => {
+  it.each(["context", "compaction", "generate", "title"])(
+    "preserves whitespace-separated ZWJ text and masks secrets in %s requests",
+    async (kind) => {
+      const { hook } = await arm();
+      const text = `\u200D\n\nweb page for ${EMAIL}\n\n\u200D\n\nkey ${KEY}\n\n\u200D`;
+      const event = {
+        sessionID: "session-1",
+        system: [],
+        messages: [{
+          id: "msg_tool_history",
+          role: "tool",
+          content: [{
+            type: "tool-result",
+            result: { type: "content", value: [{ type: "text", text }] },
+          }],
+        }],
+        options: {},
+      };
+      await expect(hook(`session:${kind}`)(event)).resolves.toBeUndefined();
+      const masked = event.messages[0].content[0].result.value[0].text;
+      expect(masked).not.toContain(KEY);
+      expect(masked).not.toContain(EMAIL);
+      expect(masked.match(/\u200D/g)).toHaveLength(3);
+      expect(masked.match(TOKEN_RE)).toHaveLength(2);
+      const restored = { sessionID: "session-1", tool: "read", input: { filePath: masked } };
+      await hook("tool:execute.before")(restored);
+      expect(restored.input.filePath).toBe(text);
+    },
+  );
+
+  it.each([
+    `sk-Qwerty\u200DuiopAsdfghjklZx`,
+    `\u200D${KEY}`,
+    `${KEY}\u200D`,
+    `\n\u200D\u200B\u200D\n`,
+    `\n\u200B\n`,
+    `\n\u200C\n`,
+    `\n\uFEFF\n`,
+  ])("still refuses ambiguous zero-width content %#", async (text) => {
+    const { hook } = await arm();
+    const event = { sessionID: "session-1", system: [{ type: "text", text }], messages: [], options: {} };
+    await expect(hook("session:context")(event)).rejects.toThrow(PROTECT_FAILED);
+    expect(event.system[0].text).toBe(text);
   });
 });
 

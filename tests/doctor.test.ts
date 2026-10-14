@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { runDoctor, parseJsonc, type DoctorDeps } from "../src/doctor.js";
+import { runDoctor, parseJsonc, formatDoctorReport, type DoctorDeps } from "../src/doctor.js";
 import type { GuardConfig } from "../src/types.js";
 
 function makeFixture(overrides: {
@@ -84,6 +84,24 @@ describe("runDoctor", () => {
     expect(report.status).toBe("PROTECTED");
     expect(report.hostGeneration).toBe("v2");
     expect(report.checks.find((c) => c.id === "dist")?.state).toBe("ok");
+  });
+
+  it("reports PARTIAL and explicit weaker coverage for hook-first registration", async () => {
+    const { deps } = makeFixture({
+      distFiles: true,
+      config: (tmp) => ({ plugins: [{ package: distRef(tmp), options: { mode: "transparent", wireProtection: false } }] }),
+    });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("PARTIAL");
+    expect(report.checks.find((c) => c.id === "options")?.detail).toContain("wireProtection=false");
+    expect(report.checks.find((c) => c.id === "coverage")?.detail).toContain("hook-only");
+    expect(report.checks.find((c) => c.id === "coverage")?.detail).toContain("not inspected");
+    expect(report.checks.find((c) => c.id === "coverage")?.detail).toContain("scoped host preparation");
+    expect(report.checks.find((c) => c.id === "coverage")?.detail).toContain("no outbound HTTP/WS/SDK admission");
+    expect(report.checks.find((c) => c.id === "coverage")?.detail).not.toContain("refused in both modes");
+    expect(report.checks.find((c) => c.id === "coverage")?.detail).toContain("reply-side SG failures");
+    expect(report.checks.find((c) => c.id === "coverage")?.detail).not.toContain("unknown intercepted HTTP routes (including commandcode legacy /alpha/generate) are refused in both modes");
+    expect(formatDoctorReport(report)).toContain("PARTIAL — hook-first protection");
   });
 
   it("skips the dist check for package-name registration", async () => {
@@ -209,5 +227,8 @@ describe("runDoctor", () => {
     });
     const report = await runDoctor(deps);
     expect(report.checks.find((c) => c.id === "coverage")?.detail).toContain("Chat Completions");
+    expect(report.checks.find((c) => c.id === "coverage")?.detail).toContain("injected HTTP fetch");
+    expect(report.checks.find((c) => c.id === "coverage")?.detail).toContain("outside coverage");
+    expect(report.checks.find((c) => c.id === "coverage")?.detail).not.toContain("Built-in aisdk provider packages");
   });
 });

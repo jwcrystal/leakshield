@@ -44,8 +44,22 @@ const args = process.argv;
 const isCliMode = args.includes("--cli");
 const isWebMode = args.includes("--web");
 const isDoctorMode = args.includes("--doctor");
+const isForgetMode = args.includes("--forget");
+const valueOf = (flag: string): string | undefined => {
+  const index = args.indexOf(flag);
+  return index !== -1 && index + 1 < args.length ? args[index + 1] : undefined;
+};
 
-if (isDoctorMode) {
+if (isForgetMode) {
+  // W2/B5: active erasure of persisted mappings. Content-free output.
+  const { runForget } = await import("./forget.js");
+  const { defaultStorePath } = await import("./decision/mapping-key.js");
+  process.exitCode = runForget({
+    all: args.includes("--all"),
+    session: valueOf("--session"),
+    storePath: valueOf("--path") ?? defaultStorePath(),
+  });
+} else if (isDoctorMode) {
   const { runDoctor, createDoctorDeps, formatDoctorReport } = await import("./doctor.js");
   const report = await runDoctor(createDoctorDeps());
   console.log(formatDoctorReport(report));

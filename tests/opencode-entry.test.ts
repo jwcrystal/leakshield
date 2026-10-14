@@ -474,6 +474,7 @@ describe("OpenCode plugin entry", () => {
       session: { hook: hookFor("session") },
       tool: { hook: hookFor("tool") },
       aisdk: { hook: hookFor("aisdk") },
+      provider: { transform: async () => ({ dispose: async () => {} }) },
     };
 
     await sensitiveGuardPlugin.setup(ctx as never);
@@ -504,7 +505,72 @@ describe("OpenCode plugin entry", () => {
     };
     await contextHook(event);
     expect((event.system as Array<{ text: string }>)[0].text).not.toContain(transparentSecret);
-    expect((event.system as Array<{ text: string }>)[0].text).toMatch(/\[SGP1:[0-9a-f]{32}-\d{8,12}\]/);
+    expect((event.system as Array<{ text: string }>)[0].text).toMatch(/\[SGP1:[0-9a-f]{32}-\d{8,12}\]|\[SGP2:[A-Z][A-Z_]{0,31}-[a-z]{4}-[a-z]{4}-[a-z]{4}\]/);
+  });
+
+  it("does not require or change provider transport settings in hook-only mode", async () => {
+    const callbacks = new Map<string, (event: unknown) => unknown>();
+    const hookFor = (domain: string) => async (name: string, callback: (event: unknown) => unknown) => {
+      callbacks.set(`${domain}:${name}`, callback);
+      return { dispose: async () => {} };
+    };
+    const cleanup = await sensitiveGuardPlugin.setup({
+      options: { mode: "transparent", wireProtection: false },
+      location: { directory: process.cwd() },
+      session: { hook: hookFor("session") }, tool: { hook: hookFor("tool") },
+      // No provider.transform or aisdk API: neither is needed for hook-only.
+    } as never);
+    expect([...callbacks.keys()].some((key) => key.startsWith("aisdk:") || key === "session:http.request")).toBe(false);
+    const event = { sessionID: "s", system: ["safe text"], messages: [], options: {} };
+    await expect(Promise.resolve().then(() => callbacks.get("session:context")!(event))).resolves.toBeUndefined();
+    await cleanup?.();
+  });
+
+  it.each([undefined, true, false])("passes wireProtection=%s through setup without weakening legacy omission", async (wireProtection) => {
+    const callbacks = new Map<string, (event: unknown) => unknown>();
+    const hookFor = (domain: string) => async (name: string, callback: (event: unknown) => unknown) => {
+      callbacks.set(`${domain}:${name}`, callback);
+      return { dispose: async () => {} };
+    };
+    const cleanup = await sensitiveGuardPlugin.setup({
+      options: { mode: "transparent", ...(wireProtection === undefined ? {} : { wireProtection }) },
+      location: { directory: process.cwd() },
+      session: { hook: hookFor("session") }, tool: { hook: hookFor("tool") }, aisdk: { hook: hookFor("aisdk") },
+      provider: { transform: async () => ({ dispose: async () => {} }) },
+    } as never);
+    const secret = "sk-QwertyuiopAsdfghjklZx";
+    const request = new Request("https://api.openai.com/v1/responses", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "gpt-test", input: secret }),
+    });
+    const event = { sessionID: "session-1", kind: "primary", request };
+    expect(callbacks.has("session:http.request")).toBe(wireProtection !== false);
+    await callbacks.get("session:http.request")?.(event);
+    const body = await event.request.clone().text();
+    if (wireProtection === false) {
+      expect(event.request).toBe(request);
+      expect(body).toContain(secret);
+    } else {
+      expect(body).not.toContain(secret);
+    }
+    await cleanup?.();
+  });
+
+  it("keeps initialization fail-closed when hook-first options are malformed", async () => {
+    const callbacks = new Map<string, (event: unknown) => unknown>();
+    const hookFor = (domain: string) => async (name: string, callback: (event: unknown) => unknown) => {
+      callbacks.set(`${domain}:${name}`, callback);
+      return { dispose: async () => {} };
+    };
+    const cleanup = await sensitiveGuardPlugin.setup({
+      options: { mode: "transparent", wireProtection: "false" },
+      location: { directory: process.cwd() },
+      session: { hook: hookFor("session") }, tool: { hook: hookFor("tool") }, aisdk: { hook: hookFor("aisdk") },
+    } as never);
+    for (const name of ["session:context", "session:http.request", "session:http.response", "session:experimental.ws.handshake", "aisdk:language", "tool:execute.before"]) {
+      expect(() => callbacks.get(name)!({})).toThrow("Sensitive Guard initialization failed");
+    }
+    await cleanup?.();
   });
 
   it("fails closed on every route when transparent is combined with deidentify (v2 setup)", async () => {
@@ -620,15 +686,72 @@ describe("OpenCode plugin entry", () => {
       session: { hook: hookFor("session") },
       tool: { hook: hookFor("tool") },
       aisdk: { hook: hookFor("aisdk") },
+      provider: { transform: async () => ({ dispose: async () => void disposed.push("provider:transform") }) },
     };
 
     const cleanup = await sensitiveGuardPlugin.setup(ctx as never);
     expect(typeof cleanup).toBe("function");
 
     await (cleanup as () => Promise<void>)();
-    expect(disposed).toHaveLength(12);
-    expect(disposed[0]).toBe("tool:execute.before");
+    expect(disposed).toHaveLength(13);
+    expect(disposed[0]).toBe("provider:transform");
+    expect(disposed[1]).toBe("tool:execute.before");
     expect(disposed[disposed.length - 1]).toBe("session:context");
+  });
+
+  it("routes only native OpenAI providers through protected HTTP without changing credentials", async () => {
+    const providers = [
+      { id: "openai", package: "@opencode/ai/providers/openai", settings: { transport: "websocket", baseURL: "https://example.invalid/v1" }, headers: { authorization: "synthetic" } },
+      { id: "custom-openai", package: "@opencode/ai/providers/openai", settings: {} },
+      { id: "anthropic", package: "@opencode/ai/providers/anthropic", settings: { transport: "websocket" } },
+      { id: "legacy", package: "@ai-sdk/openai", settings: { transport: "websocket" } },
+    ];
+    let disposed = false;
+    const ctx = {
+      options: { mode: "transparent" },
+      location: { directory: process.cwd() },
+      session: { hook: async () => ({ dispose: async () => {} }) },
+      tool: { hook: async () => ({ dispose: async () => {} }) },
+      aisdk: { hook: async () => ({ dispose: async () => {} }) },
+      provider: { transform: async (callback: (editor: unknown) => void) => {
+        callback({
+          list: () => providers.map((provider) => ({ provider })),
+          update: (id: string, update: (provider: unknown) => void) => update(providers.find((provider) => provider.id === id)),
+        });
+        return { dispose: async () => { disposed = true; } };
+      } },
+    };
+    const cleanup = await sensitiveGuardPlugin.setup(ctx as never);
+    expect(providers.map((provider) => (provider.settings as { transport?: string }).transport)).toEqual([
+      "http", "http", "websocket", "websocket",
+    ]);
+    expect(providers[0].settings.baseURL).toBe("https://example.invalid/v1");
+    expect(providers[0].headers).toEqual({ authorization: "synthetic" });
+    await (cleanup as () => Promise<void>)();
+    expect(disposed).toBe(true);
+  });
+
+  it("cleans up the normal guard and arms fail-closed hooks if HTTP routing registration fails", async () => {
+    const callbacks: Array<(event: unknown) => unknown> = [];
+    let disposed = 0;
+    const hook = async (_name: string, callback: (event: unknown) => unknown) => {
+      callbacks.push(callback);
+      return { dispose: async () => { disposed += 1; } };
+    };
+    const ctx = {
+      options: { mode: "transparent" },
+      location: { directory: process.cwd() },
+      session: { hook }, tool: { hook }, aisdk: { hook },
+      provider: { transform: async () => { throw new Error("synthetic registration failure"); } },
+    };
+    const cleanup = await sensitiveGuardPlugin.setup(ctx as never);
+    expect(disposed).toBe(12);
+    expect(callbacks).toHaveLength(24);
+    for (const callback of callbacks.slice(12)) {
+      expect(() => callback({ sessionID: "s" })).toThrow("Sensitive Guard initialization failed");
+    }
+    await (cleanup as () => Promise<void>)();
+    expect(disposed).toBe(24);
   });
 
   it("fails closed when transparent is requested on the v1 server (v1 has no transport hooks)", async () => {

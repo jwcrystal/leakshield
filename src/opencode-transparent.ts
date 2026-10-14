@@ -306,6 +306,96 @@ function collectStructuralStrings(event: RecordLike): string[] {
   return out;
 }
 
+// ─── Provider-opaque state ───────────────────────────────────────────────────
+
+/**
+ * Provider state the host replays verbatim (OpenAI encrypted reasoning and
+ * compaction checkpoints, Anthropic/Bedrock signatures and redacted thinking,
+ * Gemini thought signatures). It is ciphertext or a MAC over prior output: a
+ * detector false positive inside it (an `AIza` run in base64, say) rewrites
+ * bytes the provider authenticates and the request fails with
+ * `invalid_encrypted_content`. Masking it protects nothing — the plaintext it
+ * stands for is not in it — so it crosses the boundary unscanned, but only
+ * when position AND shape both say it is provider state:
+ *   - position: an assistant message's reasoning/compaction `encrypted`, or a
+ *     known key under any assistant part's `providerMetadata.<provider>`;
+ *   - shape: a single base64/base64url run whose decoded bytes are mostly
+ *     non-printable (ciphertext), so readable text — raw or merely
+ *     base64-encoded — keeps being scanned like any other leaf.
+ * Everything else in those parts (reasoning text, other metadata) is masked
+ * as usual.
+ */
+const OPAQUE_STATE_SENTINEL = "__sg_opaque_state";
+const OPAQUE_STATE_PART_TYPES = new Set(["reasoning", "compaction"]);
+const OPAQUE_STATE_METADATA_KEYS = ["reasoningEncryptedContent", "encryptedContent", "signature", "redactedData", "thoughtSignature"];
+const OPAQUE_STATE_SHAPE = /^[A-Za-z0-9+/_-]+={0,2}$/;
+const OPAQUE_STATE_MIN_LENGTH = 16;
+/** Uniform random bytes are ~37% printable; encoded text is ~100%. */
+const OPAQUE_STATE_MAX_PRINTABLE_RATIO = 0.75;
+
+function isOpaqueStateShaped(value: string): boolean {
+  if (value.length < OPAQUE_STATE_MIN_LENGTH || !OPAQUE_STATE_SHAPE.test(value)) return false;
+  // Node's base64 decoder accepts both the standard and url-safe alphabets.
+  const bytes = Buffer.from(value, "base64");
+  if (bytes.length === 0) return false;
+  let printable = 0;
+  for (const byte of bytes) {
+    if ((byte >= 0x20 && byte <= 0x7e) || byte === 0x09 || byte === 0x0a || byte === 0x0d) printable++;
+  }
+  return printable / bytes.length <= OPAQUE_STATE_MAX_PRINTABLE_RATIO;
+}
+
+type OpaqueStatePath = readonly (string | number)[];
+
+/**
+ * Substitutes trusted opaque state with sentinels around the masking
+ * transaction, then writes each original back at its exact path in the
+ * protected projection. Any path that no longer holds its sentinel fails the
+ * whole request closed: nothing is restored into a moved or rewritten slot.
+ */
+function withOpaqueProviderState(plain: RecordLike, fn: (input: RecordLike) => RecordLike): RecordLike {
+  const slots: Array<{ path: OpaqueStatePath; value: string }> = [];
+  const stash = (container: RecordLike, key: string, path: OpaqueStatePath): void => {
+    const value = container[key];
+    if (typeof value !== "string" || !isOpaqueStateShaped(value)) return;
+    container[key] = `${OPAQUE_STATE_SENTINEL}_${slots.length}`;
+    slots.push({ path, value });
+  };
+  if (Array.isArray(plain.messages)) {
+    plain.messages.forEach((message, messageIndex) => {
+      if (!isRecordLike(message) || message.role !== "assistant" || !Array.isArray(message.content)) return;
+      message.content.forEach((part, partIndex) => {
+        if (!isRecordLike(part)) return;
+        const base = ["messages", messageIndex, "content", partIndex];
+        if (typeof part.type === "string" && OPAQUE_STATE_PART_TYPES.has(part.type)) {
+          stash(part, "encrypted", [...base, "encrypted"]);
+        }
+        if (!isRecordLike(part.providerMetadata)) return;
+        for (const [provider, metadata] of Object.entries(part.providerMetadata)) {
+          if (!isRecordLike(metadata)) continue;
+          for (const key of OPAQUE_STATE_METADATA_KEYS) {
+            stash(metadata, key, [...base, "providerMetadata", provider, key]);
+          }
+        }
+      });
+    });
+  }
+  if (slots.length === 0) return fn(plain);
+  const result = fn(plain);
+  slots.forEach(({ path, value }, index) => {
+    let container: unknown = result;
+    for (const segment of path.slice(0, -1)) {
+      container = container !== null && typeof container === "object" ? (container as RecordLike)[segment] : undefined;
+    }
+    const key = path[path.length - 1];
+    if (container === null || typeof container !== "object" || (container as RecordLike)[key] !== `${OPAQUE_STATE_SENTINEL}_${index}`) {
+      throw new Error(PROTECT_FAILED_ERROR);
+    }
+    (container as RecordLike)[key] = value;
+  });
+  return result;
+}
+
 /**
  * Replaces media/file attachment PARTS (array slots) with an explanatory text
  * part: binary or base64 content cannot be scanned, so it never crosses the
@@ -722,7 +812,9 @@ export function createTransparentSessionGuard(
       if (!isRecordLike(masked.value)) throw new Error(PROTECT_FAILED_ERROR);
       return masked.value as RecordLike;
     };
-    const value = withOpaqueAttachments(attachmentsPolicy, plain, protectTree);
+    // Provider-authenticated reasoning/compaction state is substituted the
+    // same way, so a detector false positive cannot corrupt its bytes.
+    const value = withOpaqueProviderState(plain, (input) => withOpaqueAttachments(attachmentsPolicy, input, protectTree));
     // Defense in depth: no structural identifier may have changed.
     const structuralAfter = collectStructuralStrings(value);
     if (

@@ -41,8 +41,8 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 | DB 連線字串 | MongoDB、PostgreSQL、MySQL、Redis 等 | 🔴 HIGH |
 | 台灣身份證字號 | 格式驗證 | 🔴 HIGH |
 | Email 地址 | 所有 email 格式 | 🟡 MEDIUM |
-| 台灣手機號碼 | 09xx-xxx-xxx | 🟡 MEDIUM |
-| 國際電話 | +國碼格式 | 🟢 LOW |
+| 台灣手機號碼 | **Opt-in** —— 預設關閉（`rule_overrides: { "phone-tw": true }` 開啟）；數字段是實測的誤報來源，關閉的代價是漏偵真電話 | 🟡 MEDIUM |
+| 國際電話 | **Opt-in** —— 預設關閉（`rule_overrides: { "phone-intl": true }` 開啟）；取捨同上 | 🟢 LOW |
 | NDA 關鍵字 | 自訂（見 config/guard.config.yaml） | 🔴 HIGH |
 | 私有域名 | 自訂（見 config/guard.config.yaml） | 🟡 MEDIUM |
 
@@ -328,7 +328,23 @@ OpenCode plugin 成功載入後會成為強制性整合：它會在 OpenCode 儲
 
 `block` 是預設值，會用不含機敏值的攔截訊息替換危險內容。只有在你明確希望已辨識的直接命中改為 `[REDACTED_TYPE]` 佔位符時，才設定 `mode: "redact"`。
 
-**僅限 OpenCode v2 — 透明假名化（transparent）：** 設定 `"mode": "transparent"` 後，偵測到的敏感值會在送往支援的模型請求前替換為穩定的不透明 `[SGP1:…]` 佔位符；反查映射僅存在行程記憶體、以 OpenCode session 為界、永不持久化，也沒有固定 TTL。已知佔位符會在工具執行前還原到工具輸入，並在支援的 wire 回應中還原助理顯示文字。防護涵蓋以 URL 路徑形狀判別的三種自訂 provider 協定——Chat Completions、Anthropic Messages、OpenAI Responses——含串流。無法安全防護的一律拒絕而非放行：WebSocket 與 `aisdk` provider 套件路由、未知或混形 body、以及出現在 transport metadata 或結構識別碼中的佔位符。重新啟動或映射遺失後，請重讀來源並更新受影響的參數；無法還原或不安全的還原會拒絕該次工具呼叫，附可行指引且不留副作用。本機歷史、日誌與產生的檔案仍可能含原文——plugin 保護的是模型邊界，不是你的磁碟。
+**僅限 OpenCode v2 — 透明假名化（transparent）：** 設定 `"mode": "transparent"` 後，偵測到的敏感值會在模型請求快照中替換為穩定的不透明佔位符——W1（2026-10-07）起為帶類別的 `[SGP2:<TYPE>-xxxx-xxxx-xxxx]`（仍辨識舊 `[SGP1:…]` 映射）。反查映射預設僅在行程記憶體、以 OpenCode session 為界；持久化 opt-in。已知佔位符在工具執行前及支援的助理顯示文字中還原。HTTP adapters 支援按路徑形狀判別的 Chat Completions、Anthropic Messages、Responses（含串流），另支援 native Responses-family WS；不依 provider 品牌設 allowlist。Hook-only 保護 content 快照，不設出站傳輸守門，也不為未知協定新增 adapter。失效或不安全的工具還原仍拒絕該次操作。本機歷史、日誌與檔案可能含原文——保護的是模型邊界，不是磁碟。
+
+**純 hook-only／共用 wire 開關：** 新 transparent 安裝可使用 [hook-first 範本](config/opencode.hook-first.example.json)，明確設 `wireProtection: false`。保留 system/messages/options/tools 遮罩與工具安全還原；**不註冊出站 HTTP request、WS handshake/send 或 AI SDK admission hooks**，不檢查 transport metadata、不改 provider transport 設定。未知路線與 SDK 私有傳輸不會因 SG 傳輸門檻被擋。選擇性入站 HTTP／WS hooks 依同 session/kind/model 的成功準備還原支援的顯示文字；缺 hook 或還原失敗只保留 literal，不停用輸入保護。後續新增內容／附件可能未遮罩，`doctor` 仍顯示 `PARTIAL`。**Hook 內無法遮罩的輸入仍拒絕該次請求**，並附安全的 `[stage=prepare.mask reason=…]`；不是靜默放行原文。true 增加 final-wire 與傳輸守門；省略 wire 仍為 true，plugin 預設 mode 仍為 block。[本輪驗證](docs/evidence/2026-10-11-pure-hook-only-verification.md)。
+
+**透明模式容量與生命週期：** guard 每次遮罩／還原操作使用輸入＋輸出合計 8 Mi UTF-16 units、100,000 個 value nodes 的有限預算，不再把 standalone core 的 1 Mi-unit 小預算套在整份歷史。HTTP body／WS frame 仍限 4 MiB；scanner `max_chars`、深度 32、mapping entry 與總記憶體預算仍檢查。每個 guard 最多保留 4,096 個 session，不用 LRU 任意丟棄仍可續用的 mapping。正式 V2 `session.deleted` 事件只回收該 session 的 RAM、回覆準備證明及 WS 緩衝；idle、完成或中斷不視為刪除。缺少／失敗的事件訂閱會保留 mapping 到 unload，因此不是無限期不限容量。刪除事件不抹除加密持久化資料，仍由 TTL／明確 `forget` 管理。[本地驗證與實機限制](docs/evidence/2026-10-14-transparent-capacity-verification.md)。
+
+**AI SDK provider：** true 要求 SDK 使用 OpenCode 注入的 `options.fetch`，以 request-scoped HTTP hooks 提供歸屬與 wire 保護，不依 provider 品牌設 allowlist。Wrapper 檢查 HTTP／HTTPS、支援路徑；缺 fetch、accessor／proxy 或不可寫設定拒絕。false 不註冊 SDK wrapper，不要求 injected fetch，只保留 content/tool hooks 與可選入站還原。私有傳輸不在 final-wire 覆蓋內，也不保證被擋。Commandcode 的 Go／403 fallback `/alpha/generate` 在 false 不受 SG 傳輸守門，true 仍拒絕；沒有 legacy 回覆 adapter。參數、abort 與真實 provider 錯誤維持 host 行為。
+
+Wire 模式的 wrapper 把自身拒絕表示為 **本地 HTTP 400 錯誤回覆**，附 `error.code: "sensitive_guard_transport_refusal"` 與不含原值的 WARN；被拒請求不外送。Hook-only 沒有此 wrapper 或傳輸 admission。真正網路錯誤、abort 與 provider 回覆不改，也不捏造 provider 成功。Responses easy-input 可省略 `type: "message"`，不擅自補 type。
+
+**兩種模式共用回覆降級：** SG 的歸屬、JSON／SSE／WS 還原或解析失敗會停止 SG 改寫，不再因此阻斷 host 回覆；不猜其他 session／model 的 mapping。SSE 以有界交易保留尚未送出的原始 events，失敗後按原順序釋出並接續原 bytes，不重送已發內容、不丟 held tails。Provider error event 立即傳遞，來源錯誤與 consumer cancel 仍生效。使用者可能看到 placeholder，壞掉的 provider 資料仍可能被 OpenCode 拒絕。WS 只能取代單一 frame，不能重播多 channel；限制見 [降級驗證](docs/evidence/2026-10-11-experience-first-verification.md)。工具防線不隨回覆降級解除。
+
+**Native WebSocket（experimental）：** 支援 `/responses` 的 `ws:`／`wss:` 與 flat `response.create`，按協定形狀而非 OpenAI 品牌限制。出站共用 HTTP Responses masker；入站支援跨 frame 顯示文字還原，工具參數保留 token 給本機 tool gate，encrypted reasoning 與 continuation ID 不亂改。不同協定／extensions 不自動視為相容。Host 沒有 connection ID，狀態按 session、請求種類、模型，再按 response ID 與內容 channel 隔離；新 handshake／模型切換、HTTP fallback、拒絕 frame 與 dispose 清除舊狀態，terminal 清除緩衝，並限制 frame／channel／總緩衝大小。若 provider 缺最後一個文字 delta，保留並還原 `.done` 完整欄位、顯示固定警告，不擅自改成 delta；只讀 delta 的 consumer 可能顯示不完整。未知顯示 token 保持 literal，不因此中斷回答；不安全或未知寫入映射仍拒絕。原有 native OpenAI HTTP preference 為相容性保留，明確 WS 設定現在可走支援路線。這不是系統網路防火牆或所有 WS provider 的支援承諾。[驗證與限制](docs/evidence/2026-10-11-responses-ws-verification.md)。
+
+**選擇性映射持久化（W2，2026-10-07）：** transparent 模式設定 `"persistence": { "enabled": true }` 後，已保存映射以 per-entry AES-256-GCM（AAD 綁 session＋token）加密持久於 SQLite（預設 `~/.local/share/sensitive-guard/SGP.db`），session 首次觸及時水合，供跨重啟還原。選項：`ttlDays`（預設 7；0＝僅手動清除）、`path`（儲存位置）、`keyFile`/`keyfilePath`（無 OS keychain 環境的較弱降級）。金鑰走 OS keychain（macOS Keychain／Windows DPAPI／Linux libsecret）→ 明確啟用的 keyfile → 記憶體降級。Runtime log 在成功開啟 store 時記錄 `persistence: active; key=os-keychain|keyfile`，後續降級另有 WARN；缺金鑰不直接拒絕對話，但未保存的舊 token 仍可能被工具防線拒絕。`--doctor` 只查設定／DB 可讀性，標示 **尚未驗證 runtime 啟用與解密**，不碰真實 keychain。TTL 在 writer 開啟 store 時清理，非定時刪除；保存變動映射會延長期限，單純讀取不延長，7 天不是嚴格刪除期限。啟用不能找回先前已遺失的映射。主動清除：`sensitive-guard --forget --all`（或 `--session <id>`）刪除持久映射，輸出僅計數。擦除為邏輯層＋檔內盡力（`secure_delete` 清零釋放頁、`forget --all` 另做 VACUUM 與 WAL 截斷）；實體媒體與備份殘留（SSD wear-leveling、快照、還原）不在保證範圍。開啟後若切換金鑰來源（keychain↔keyfile），store 會拒開並降級 memory-only，直到 `forget --all` 重置——不靜默換 key。
+
+**持久化風險須知（開啟前必讀）：** 設計為雙秘密——單獨拿到 DB 檔或金鑰都解不開，兩者同時才行。備份（Time Machine、雲端同步）會複製 `SGP.db`：`forget` 無法回收備份已抄走的內容，還原備份＋尚存的金鑰可再識別舊 session——備份保留政策請一併考量。keychain 防**離線竊取**（偷磁碟、偷備份、複製 `SGP.db`）；不防已在你登入 session 內執行的惡意程式。keyfile 選項把門檻降為「同目錄樹的兩個檔案」，僅建議無 keychain 服務的伺服器/無頭環境使用。
 
 **僅限 OpenCode v2 — Email 去識別化試驗：** 選擇性開啟的 `deidentify` 選項（必須搭配 `mode: "redact"`）會將重複出現的 MEDIUM 等級 email 命中改為穩定且不透明的 `[SG-EMAIL-…]` 佔位符，讓 agent 能關聯多筆記錄而不會看到原始地址。對應金鑰在每次 plugin setup（即一個 OpenCode session）產生一次、僅存在記憶體、永不持久化——佔位符在同一個 live session 內穩定，重新啟動後即改變，且不存在反查映射。其他行為維持不變：HIGH 憑證仍會被脫敏或攔截，截斷、編碼或無法驗證的內容會攔截整個單元。
 
@@ -355,6 +371,8 @@ OpenCode plugin 成功載入後會成為強制性整合：它會在 OpenCode 儲
 附件：transparent 模式支援 `attachments` 政策，動作為 DLP 標準命名。**`"block"`（預設）** 會略過 media／file parts——以通知文字取代，二進位永不離開本機，對話照常繼續（模型讀不到圖片）。**`"allow"`** 會將附件未掃描送出並附加一則可見通知——這是明確的設定層決定，代表你為圖片內容作保（`"allow"` 需搭配 `mode: "transparent"`）。三家參考產品都直接放行附件且無選項。block／redact 模式下附件照舊攔截。既有 session 可能已存有原文，安裝 plugin 後請建立新 session。此 plugin 僅保護 OpenCode 發出的模型請求，不涵蓋其他 AI client 或本機工具。
 
 OpenCode 目前會記錄並跳過在 plugin factory 執行前就載入失敗的模組，例如套件缺失或 JavaScript 語法錯誤。安裝或升級後，請先用 `sk-` 加至少 20 個英數字元的合成測試 key 執行 smoke test，確認訊息已被 Sensitive Guard 替換，再處理真實機敏資料。
+
+**Shell 參數還原：** macOS／Linux 的 POSIX shell 支援占位符作為完整的未加引號、單引號或雙引號參數；保留原引號，並檢查原值不會破壞該引號語境，含空格的原值仍是一個參數。支援單一、結尾的 `>`／`>>`，目標須為靜態字面檔名。命令／變數賦值位置、帶 token 的重新導向檔名、展開、引號拼接、管線、inline script、會跳出引號或以 `-` 起始的原值，仍在修改參數前拒絕該次工具呼叫。不含 token 的命令不受影響。Windows 不啟用新增的引號／重新導向支援；這不是通用 shell parser。`wireProtection` 的兩種設定不會改變此工具防線。
 
 #### 隔離 smoke test（OpenCode v2）
 

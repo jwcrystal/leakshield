@@ -12,5 +12,5 @@
 _Avoid_: Tokenize、匿名化
 
 **Pseudonymize（假名化）**:
-以可逆占位符替換敏感片段，並分開保管原值對應關係。此處置尚未實作。
+以可逆占位符替換敏感片段，並分開保管原值對應關係。transparent 模式即此處置（issue #22）：記憶體映射為預設；`persistence.enabled` 時映射加密持久化於 `SGP.db`（per-entry AES-256-GCM，金鑰走 keychain→keyfile→記憶體降級階梯），重啟後可水合還原。
 _Avoid_: Tokenize

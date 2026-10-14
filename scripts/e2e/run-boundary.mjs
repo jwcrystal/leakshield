@@ -88,6 +88,7 @@ import os from "node:os";
 import path from "node:path";
 import { statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { resultExitCode } from "./result-status.mjs";
 
 const E2E_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(E2E_DIR, "..", "..");
@@ -614,13 +615,15 @@ const CASES = [
     responsesProvider: true,
     control: { label: "C19-responses-transparent", echoTokenInTextNext: true },
     expectation: (r) => {
+      if (r.exitCode !== 0 || r.timedOut)
+        return { verdict: "fail", reason: "Responses primary invocation failed or timed out; title capture is not a successful round-trip" };
       if (r.requests.length === 0)
-        return { verdict: "observe", reason: "no provider request captured; inspect out/logs" };
+        return { verdict: "fail", reason: "no provider request captured; inspect out/logs" };
       if (r.canariesInProviderRequests.length > 0)
         return { verdict: "fail", reason: "canary leaked to the Responses-native provider" };
-      const tokenRequests = r.requests.filter((q) => q.markers.includes("transparentToken")).length;
+      const tokenRequests = r.requests.filter((q) => q.hasTools && q.markers.includes("transparentToken")).length;
       if (tokenRequests === 0)
-        return { verdict: "fail", reason: "no [SGP1:… token in any /v1/responses request — body was not pseudonymized" };
+        return { verdict: "fail", reason: "no token-bearing primary Responses request; title-only capture is insufficient" };
       const parts = r.assistantParts ?? [];
       const assistantRole = parts.filter((p) => p.role === "assistant");
       const scoped = assistantRole.length > 0 ? assistantRole.map((p) => p.text).join("\n") : (r.assistantText ?? "");
@@ -628,12 +631,42 @@ const CASES = [
         return { verdict: "fail", reason: "user-facing output shows a raw [SGP1:… token over the Responses route" };
       if (scoped.includes("alice.canary@example-test.invalid"))
         return { verdict: "pass", reason: "Responses-native round-trip: tokens on the wire, originals in display" };
-      return { verdict: "observe", reason: "wire masking proven; display-restore signal missing; inspect out/logs" };
+      return { verdict: "fail", reason: "primary display-restore signal missing; inspect out/logs" };
+    },
+  },
+  {
+    id: "C19-ws-refused",
+    description: "Explicit WebSocket config overrides plugin HTTP preference: primary route must refuse with a content-free diagnostic",
+    plugins: [{ package: DIST_DIR, options: { mode: "transparent" } }],
+    prompt: CANARY_PROMPT,
+    responsesProvider: true,
+    responsesTransport: "websocket",
+    printLogs: true,
+    control: { label: "C19-ws-refused" },
+    expectation: (r) => {
+      if (r.canariesInProviderRequests.length > 0)
+        return { verdict: "fail", reason: "canary leaked while rejecting WebSocket" };
+      if (r.requests.some((q) => q.hasTools))
+        return { verdict: "fail", reason: "unsupported primary request unexpectedly reached HTTP capture" };
+      if (r.timedOut || r.exitCode === 0 || !r.refusedHooks.includes("experimental.ws.handshake"))
+        return { verdict: "fail", reason: "expected explicit WS handshake refusal was not observed" };
+      return { verdict: "pass", reason: "explicit WS config refused with identified handshake hook; no primary outbound capture" };
     },
   },
 ];
 
 // ------------------------------------------------------------- utilities --
+// Exercise built-in OpenAI's default transport/auth setup as well as the
+// custom native-package provider. Both use only the local capture endpoint.
+const responsesCase = CASES.find((caseDef) => caseDef.id === "C19-responses-transparent");
+CASES.push({
+  ...responsesCase,
+  id: "C19-native-openai",
+  description: "Built-in OpenAI identity with no explicit transport: protected HTTP Responses round-trip",
+  responsesProviderID: "openai",
+  control: { ...responsesCase.control, label: "C19-native-openai" },
+});
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function opencodeBin() {
@@ -781,13 +814,15 @@ function buildConfig(caseDef, port) {
     };
   }
   // Phase 3 (C19): an OpenAI Responses-native provider pointed at the same
-  // capture server; the OpenAI SDK posts to {baseURL}/responses.
+  // capture server. Explicit transport config has higher precedence than
+  // plugin provider transforms; test that refusal separately from HTTP.
   if (caseDef.responsesProvider) {
-    providers["capture-responses"] = {
+    providers[caseDef.responsesProviderID ?? "capture-responses"] = {
       name: "Capture Responses",
       env: ["CAPTURE_API_KEY"],
       package: "@opencode/ai/providers/openai",
       settings: {
+        ...(caseDef.responsesTransport ? { transport: caseDef.responsesTransport } : {}),
         baseURL: `http://127.0.0.1:${port}/v1`,
         apiKey: "sg-e2e-capture",
       },
@@ -883,10 +918,10 @@ async function runCase(caseDef, port) {
     caseDef.anthropicProvider
       ? "capture-anthropic/capture-anthropic-1"
       : caseDef.responsesProvider
-        ? "capture-responses/capture-responses-1"
+        ? `${caseDef.responsesProviderID ?? "capture-responses"}/capture-responses-1`
         : "capture/capture-1",
   ];
-  if (process.env.E2E_PRINT_LOGS === "1") args.push("--print-logs");
+  if (process.env.E2E_PRINT_LOGS === "1" || caseDef.printLogs) args.push("--print-logs");
   args.push(caseDef.prompt);
 
   const startedAt = Date.now();
@@ -1057,6 +1092,7 @@ async function runCase(caseDef, port) {
     stdoutCanaries,
     assistantParts,
     assistantText,
+    refusedHooks: [...new Set((run1.stderr.match(/\[hook=([a-z.]+)\]/g) ?? []).map((value) => value.slice(6, -1)))],
     restoredExactPathRead,
     workdir,
   };
@@ -1202,7 +1238,7 @@ async function main() {
   console.log("-".repeat(100));
   console.log(`storage canary hits: ${storageHits}   log canary hits: ${logHitCount}   unattributed captures: ${unattributed.length}`);
   console.log(`evidence: ${EVIDENCE_PATH}`);
-  process.exit(0); // undici keep-alive sockets and child pipes must not hold the loop open
+  process.exit(resultExitCode(results)); // do not hide failed acceptance gates or runner errors
 }
 
 main().catch((err) => {

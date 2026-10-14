@@ -6,7 +6,7 @@
 1. sensitive-guard（transparent 模式）與 VibeGuard / opencode-vibeguard / Rehydra 的差異
 2. 實際使用流程能否「正常對話」，操作是否與三家相同
 
-事實基礎：`docs/evidence/2026-10-05-provider-transport-reference-research.md`（三方 source 均固定 SHA）＋ 本 repo C1–C17 payload 實證（`scripts/e2e/run-boundary.mjs`，17 案例全綠）。
+事實基礎：`docs/evidence/2026-10-05-provider-transport-reference-research.md`（三方 source 均固定 SHA）＋ 本 repo C1–C17 payload 實證（`scripts/e2e/run-boundary.mjs`，17 案例全綠）。2026-10-07 增補同世代參考 EightDoor/opencode-rehydra-sdk（固定 SHA，見 §6，全為 S 級 source 宣稱）。
 
 > **更新註記（2026-10-05 稍後，Phase 3 完成後）**：wire 協定已為三條（Chat Completions／Anthropic Messages／Responses，C18／C19 實證）；附件政策為 `block`（omission notice，預設）／`allow`（明示未掃描）。本文 §3、§4 中與此牴觸的敘述（含「Anthropic／Responses 待補」與附件相關字句）以本註記為準。
 
@@ -56,12 +56,29 @@
 2. **覆蓋範圍**：VibeGuard 代理可保護其他 AI 客戶端；我們明確限縮在「OpenCode 模型對話邊界」，工具外送（curl/remote MCP）本來就不在保證範圍（README 已聲明）。
 3. **發布形態**：三家有 npm 已發布套件；我們尚未 publish（doctor 已支援套件名註冊形態，publish 後零改動）。
 4. **真實 provider E2E**：我們的 17 案例全在本地 capture server；真實 provider 端到端尚未重跑（open item，與三家比較無關，是我們自己的閘門）。
+5. **（2026-10-07 增補）WS 回應還原**：EightDoor V2 plugin 以 `experimental.ws.receive`＋per-session tail buffer 還原 WS frames（S 級宣稱，見 §6）；我們 fail-closed 拒絕 WS 並以 HTTP preference 導流（wire inventory T4 決策：先導流，必要時才設計 frame 層 adapter）。
+6. **（2026-10-07 增補）偵測豐富度**：EightDoor（承 Rehydra 血統）有本地 ONNX NER、semantic enrichment、.env／VCS 身分辨識；我們為規則驅動＋round-trip verifier。屬能力廣度差距，非邊界保證差距。
 
 ## 5. 我們領先的點
 
-1. **wire 級 fail-closed**：VibeGuard 遇不支援 payload 會原樣轉送（靜默不保護）；我們一律拒絕並讓使用者知道——這是「安心使用」的核心差異。
+1. **wire 級 fail-closed**：VibeGuard 遇不支援 payload 會原樣轉送（靜默不保護）；我們一律拒絕並讓使用者知道——這是「安心使用」的核心差異。（2026-10-07 收窄：同世代 V2 對手 EightDoor 的出站 scrub 亦 fail-closed，但位於 message-hook 層，無 wire `http.request` 攔截、未知形狀拒絕與 WS／aisdk 守門，見 §6；獨有性以「wire 層＋未知形狀拒絕」機制定義為準。）
 2. **邊界證據文件化**：17 案例＋對照組的可重跑 harness（含 title、retry、tool-error、context、顯示還原），三家 repo 均無等效邊界證據。
 3. **安裝健檢**（`--doctor`）：直接回應「插件沒載入卻看似正常」的風險，三家無對應物。
+
+## 6. 同世代參考：EightDoor/opencode-rehydra-sdk（2026-10-07 增補）
+
+來源：`EightDoor/opencode-rehydra-sdk` @ `4b892b0f57b5514a0385a2138642f207ae68b813`（2026-09-30；獨立 repo，內容主體為 `rehydra-ai/rehydra-sdk` 的 MIT 衍生＋新增 V2 plugin 層；npm 已發布 `opencode-rehydar` 0.14.0–0.14.3；0 star、單一作者、成立一週）。**全部為 S 級 source 宣稱，未 runtime 驗證**；不併入 §3 主表（主體與 Rehydra 重複計數），僅記錄與本計畫最接近的同世代設計。
+
+| 軸 | EightDoor V2 plugin（S 級宣稱） | sensitive-guard transparent |
+|---|---|---|
+| 出站遮罩位置 | `session.hook("context"/"compaction"/"generate"/"title")` 訊息層 scrub（deep-clone、例外 rethrow＝fail-closed） | `http.request` wire 層＋4 request kinds；與 caller 無關 |
+| 未知形狀／未涵蓋 caller | 非 message 路徑不經遮罩；回應還原失敗原樣放行（明寫 fail-open） | wire 形狀判別，未知一律 refuse；WS／aisdk 全拒（C 實證） |
+| 回覆還原 | `session.hook("http.response")`（JSON walk＋SSE 跨片段 tag 縫合）＋`experimental.ws.receive`（tail buffer 跨 frame 縫合） | `http.response` 三協定＋streaming（C17–C19）；WS fail-closed 拒絕 |
+| tool hooks | `execute.before/after` 還原（fail-open，吞錯） | `execute.before` fail-closed（未知 token 拒絕、shell 語法限制）；`execute.after` 架構上不需要——本地結果從未遮罩，回送由 request kinds 保護（C11／C16） |
+| 偵測 | regex recognizers＋本地 ONNX NER＋semantic enrich＋.env／git 身分 | 規則驅動（builtin/dynamic）＋round-trip verifier |
+| 發布／證據 | npm 已發布；mock 級測試（`plugin-v2.test.ts` 等） | 未 publish（doctor 已支援）；17 案例 host 級 payload E2E＋對照組＋doctor |
+
+結論：**品類雷同**（V2 native、透明假名化、wire 級回應還原、npm 形態、title/compaction 覆蓋），但**出站保證層次不同**——其保證依賴所有 caller 皆經 session hooks（V1 世代弱點的 V2 形狀），本計畫保證位於 wire 邊界且未知形狀拒絕。可參考項（npm 發布工程、WS tail-buffer 還原技術、adapter 單元測試分層；來源 MIT，衍生鏈 rehydra-sdk 亦 MIT，引用需 attribution）另由 plan 追蹤，不在本文件展開。
 
 ## 附註：本日 harness 修復
 

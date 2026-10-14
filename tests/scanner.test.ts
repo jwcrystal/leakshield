@@ -61,10 +61,19 @@ describe("scanText() — PII 偵測", () => {
     expect(finding?.severity).toBe("HIGH");
   });
 
-  it("台灣手機號碼應被偵測為 PII_PHONE_TW", () => {
-    const result = scanText("電話：0912345678", defaultConfig);
+  it("台灣手機號碼應被偵測為 PII_PHONE_TW（opt-in 開啟時）", () => {
+    const phoneOn: GuardConfig = {
+      ...defaultConfig,
+      settings: { ...defaultConfig.settings, rule_overrides: { "phone-tw": true } },
+    };
+    const result = scanText("電話：0912345678", phoneOn);
     const finding = result.findings.find((f) => f.type === "PII_PHONE_TW");
     expect(finding).toBeDefined();
+  });
+
+  it("電話規則預設關閉（P2，2026-10-06 決策；漏真電話風險見 README）", () => {
+    const result = scanText("電話：0912345678 或 +14155552671", defaultConfig);
+    expect(result.findings.some((f) => f.type === "PII_PHONE_TW" || f.type === "PII_PHONE_INTL")).toBe(false);
   });
 });
 

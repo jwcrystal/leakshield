@@ -1,73 +1,38 @@
-# sensitive-guard 自訂規則範例
-# 複製到 ~/.sensitive-guard/guard.config.yaml 或 ./config/guard.config.yaml 後啟用
+# sensitive-guard 設定範例
+# 複製後請先替換示例關鍵字與域名；不適用的規則請刪除。
 
 # ─── NDA / 機密關鍵字（大小寫不敏感）────────────────────────
+# 首尾為 ASCII 英數字的關鍵字以「整字」比對（NDA 不會誤中 Foundation、agenda）；
+# CJK 關鍵字（如「機密」）維持子字串比對。
 nda_keywords:
-  - "CONFIDENTIAL"
-  - "INTERNAL ONLY"
-  - "DO NOT SHARE"
-  - "NDA"
-  - "PROPRIETARY"
-  - "TRADE SECRET"
-  - "secret"
   # ─── 公司內部專案名稱 ───
   - "Project Phoenix"
   # - "Operation XYZ"
   # - "MyCompany Internal"
 
 # ─── 私有域名 ────────────────────────────────────────────
-private_domains:
-  - "internal.mycompany.com"
-  - "corp.mycompany.com"
-  # ─── 內部服務域名 ───
-  # - "dev.yourcompany.io"
-  # - "staging.yourcompany.com"
-  # - "jenkins.internal"
-  # - "gitlab.corp"
+private_domains: []
+  # 請換成你公司的私有域名；勿保留以下佔位範例。
+  # - "internal.example.com"
+  # - "gitlab.internal.example.com"
 
 # ─── 自訂正則規則（大小寫不敏感）─────────────────────────────
-# severity: HIGH / MEDIUM / LOW（預設 HIGH）
-# pattern 上限 200 字元，危險 ReDoS 會自動跳過
-custom_rules:
-  # ─── 員工／身份編號 ───
-  - description: "員工編號"
-    pattern: "\\bEMP-\\d{6}\\b"
-    severity: HIGH
-
-  - description: "台灣護照號碼"
-    pattern: "\\b[A-Z]{1,2}[0-9]{7,9}\\b"
-    severity: HIGH
-
-  - description: "台灣統一編號（營利事業）"
-    pattern: "\\b[0-9]{8}\\b"
-    severity: HIGH
-
-  # ─── 財務／金流 ───
-  - description: "信用卡號（Visa／Mastercard）"
-    pattern: "\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14})\\b"
-    severity: HIGH
-
-  - description: "台灣銀行帳號（10-14 位數）"
-    pattern: "\\b\\d{10,14}\\b"
-    severity: MEDIUM
-
-  # ─── 內部系統代號 ───
-  - description: "Jira 工單"
-    pattern: "\\b[A-Z]{2,10}-\\d{1,6}\\b"
-    severity: LOW
-
-  - description: "GitHub Issue 編號"
-    pattern: "#\\d{3,6}"
-    severity: LOW
-
-  # ─── 客製化敏感值（自定義格式） ───
-  - description: "API endpoint 含內部域名"
-    pattern: "https?://[a-z-]+\\.corp\\.example\\.com/[\\w-/]+"
-    severity: HIGH
-
-  - description: "AWS account ID（12 位數）"
-    pattern: "\\b(?:AWS)?[0-9]{12}(?:account)?\\b"
-    severity: HIGH
+# severity: HIGH / MEDIUM / LOW（預設 HIGH）；任何 severity 都會回報命中。
+# pattern 上限 200 字元，危險 ReDoS 會自動跳過。
+# 先驗證格式並評估誤報，再取消註解啟用；通用數字 pattern 容易大量誤報。
+custom_rules: []
+# - description: "員工編號（依公司格式調整）"
+#   pattern: "\\bEMP-\\d{6}\\b"
+#   severity: HIGH
+#
+# - description: "信用卡號（Visa／Mastercard 常見格式；未做 Luhn 驗證）"
+#   pattern: "\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14})\\b"
+#   severity: HIGH
+#
+# Jira 工單通常不是機密；LOW 仍會產生 finding，僅在確有需要時啟用：
+# - description: "Jira 工單"
+#   pattern: "\\b[A-Z]{2,10}-\\d{1,6}\\b"
+#   severity: LOW
 
 # ─── 掃描設定 ──────────────────────────────────────────
 settings:
@@ -77,9 +42,10 @@ settings:
   show_line_numbers: true
   # 命中預覽長度
   preview_length: 60
-  # 啟用 Base64／URL／Hex 解碼檢測
-  # encoding_detection: true
-  # 已知 secret value 的來源檔案（路徑相對工作目錄）
+  # Base64／URL／Hex 解碼檢測；預設關閉，需明確啟用。
+  encoding_detection: false
+  # 選用：已知 secret value 的來源檔案（路徑相對 workspace 根目錄）。
+  # 僅非空且至少 8 字元的 value 會用於精確比對；不會回傳 value。
   # env_files:
   #   - .env
   #   - .env.local

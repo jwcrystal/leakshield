@@ -5,6 +5,7 @@ import * as yaml from "js-yaml";
 import { fileURLToPath } from "url";
 import { z } from "zod";
 import { loadExactValueDetector } from "../scanner/exact-values.js";
+import { BUILTIN_RULE_IDS } from "../rules/builtin.js";
 import type { GuardConfig } from "../types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,7 +30,21 @@ export const GuardConfigSchema = z.object({
     preview_length: z.number().int().positive().default(60),
     encoding_detection: z.boolean().default(false),
     env_files: z.array(z.string().min(1).max(MAX_ENV_FILE_PATH_LENGTH)).max(16).default([]),
+    rule_overrides: z.record(z.string().min(1), z.boolean()).default({}),
   }).default({}),
+}).superRefine((config, ctx) => {
+  // Unknown rule ids in `rule_overrides` fail the parse (fail-closed): a typo
+  // must never silently leave a rule in the wrong state.
+  const overrides = config.settings.rule_overrides ?? {};
+  for (const id of Object.keys(overrides)) {
+    if (!BUILTIN_RULE_IDS.has(id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["settings", "rule_overrides", id],
+        message: `unknown builtin rule id "${id}" (see src/rules/builtin.ts BUILTIN_RULE_IDS)`,
+      });
+    }
+  }
 });
 
 function finalizeConfig(config: GuardConfig, workspaceRoot: string): GuardConfig {

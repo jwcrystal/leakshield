@@ -34,6 +34,13 @@ const EMAIL = "alice@example.com";
 const TOKEN_RE = /\[SGP1:[0-9a-f]{32}-\d{8,12}\]/g;
 const FOREIGN_TOKEN = `[SGP1:${"deadbeef".repeat(4)}-00000001]`;
 
+// Phone rules are opt-in since P2 (2026-10-07); tests that need a
+// space-containing phone original enable them explicitly.
+const phoneConfig: GuardConfig = {
+  ...baseConfig,
+  settings: { ...baseConfig.settings, rule_overrides: { "phone-tw": true } },
+};
+
 const PROTECT_FAILED = "Sensitive Guard transparent mode failed to protect a model request.";
 const INIT_FAILED = "Sensitive Guard initialization failed";
 const ATTRIBUTION_FAILED = "Sensitive Guard transparent mode blocked a response without verified request attribution.";
@@ -549,7 +556,7 @@ describe("transparent tool execution gate", () => {
   });
 
   it("refuses a shell command whose original is not shell-safe, leaving it unchanged", async () => {
-    const { hook } = await arm();
+    const { hook } = await arm(phoneConfig);
     // A phone value with spaces is detected and tokenized, but substituting it
     // verbatim into a shell command would change word splitting.
     const phone = "0912 345 678";
@@ -576,7 +583,7 @@ describe("transparent tool execution gate", () => {
   });
 
   it("treats an unrecognized tool as shell-like (fail-closed)", async () => {
-    const { hook } = await arm();
+    const { hook } = await arm(phoneConfig);
     const phone = "0912 345 678";
     const token = await mintToken(hook, phone);
 
@@ -1064,7 +1071,7 @@ describe("transparent http.request wire mask", () => {
   });
 
   it("refuses sensitive numeric tool arguments before committing capacity", async () => {
-    const { hook } = await arm();
+    const { hook } = await arm(phoneConfig);
     // A JSON-encoded numeric pin that the phone detector matches. Protecting it
     // as a raw string would corrupt the JSON after the commit; it must refuse
     // BEFORE any mapping is issued.
@@ -1116,7 +1123,7 @@ describe("transparent http.request wire mask", () => {
   });
 
   it("rejects unsafe numeric values inside legacy arguments before committing capacity", async () => {
-    const { hook } = await arm();
+    const { hook } = await arm(phoneConfig);
     for (let index = 0; index < 200; index++) {
       const request = chatRequest({
         model: "g",

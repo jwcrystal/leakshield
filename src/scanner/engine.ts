@@ -18,7 +18,14 @@ function getRules(config: GuardConfig): Rule[] {
     dynamic = buildDynamicRules(config);
     dynamicCache.set(config, dynamic);
   }
-  return [...BUILTIN_RULES, ...dynamic];
+  // Built-in rule toggle: an explicit override wins; otherwise opt-in rules
+  // stay off and the rest stay on. Ids are validated at config load, so any
+  // builtin without an id would silently become always-on — tests forbid that.
+  const overrides = config.settings.rule_overrides ?? {};
+  const activeBuiltins = BUILTIN_RULES.filter(
+    (rule) => (rule.id !== undefined && rule.id in overrides ? overrides[rule.id] : !rule.optIn),
+  );
+  return [...activeBuiltins, ...dynamic];
 }
 
 function hasMatchingRange(findings: readonly Finding[], index: number, length: number): boolean {
@@ -149,6 +156,7 @@ function scanTextInternal(text: string, config: GuardConfig, opts?: ScanOptions)
 
     while ((match = rule.pattern.exec(truncated)) !== null) {
       const matchedText = match[0];
+      if (rule.validate !== undefined && !rule.validate(matchedText)) continue;
       const key = `${rule.type}:${match.index}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -300,6 +308,7 @@ export function redactText(
     rule.pattern.lastIndex = 0;
     let match: RegExpExecArray | null;
     while ((match = rule.pattern.exec(truncated)) !== null) {
+      if (rule.validate !== undefined && !rule.validate(match[0])) continue;
       if (overlapsSpan(match.index, match.index + match[0].length, protectedSpans)) continue;
       const key = `${match.index}:${match[0].length}`;
       if (seen.has(key)) continue;

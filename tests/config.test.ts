@@ -23,10 +23,9 @@ describe("loadConfig() — 讀取真實設定檔", () => {
     expect(config).toHaveProperty("settings");
   });
 
-  it("nda_keywords 應為非空字串陣列", () => {
+  it("nda_keywords 應為字串陣列，允許明確停用", () => {
     const config = loadConfig();
     expect(Array.isArray(config.nda_keywords)).toBe(true);
-    expect(config.nda_keywords.length).toBeGreaterThan(0);
     config.nda_keywords.forEach((kw) => expect(typeof kw).toBe("string"));
   });
 

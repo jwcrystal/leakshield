@@ -100,8 +100,8 @@ const FIXTURE_DIR = path.join(E2E_DIR, "fixtures", "restoration-probe");
 const FIXTURE_INDEX = path.join(FIXTURE_DIR, "index.js");
 const RUNNER_SELF = fileURLToPath(import.meta.url);
 const OUT_ROOT = path.join(E2E_DIR, "out");
-const APPROVED_TMP = "/private/var/folders/bk/gt_sdlpj6c94nb18cmsg2c0h0000gn/T/opencode";
-const TMP_ROOT = existsSync(APPROVED_TMP) ? APPROVED_TMP : os.tmpdir();
+const PREFERRED_TMP = path.join(os.tmpdir(), "opencode");
+const TMP_ROOT = existsSync(PREFERRED_TMP) ? PREFERRED_TMP : os.tmpdir();
 const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
 const SQLITE3 = "/usr/bin/sqlite3";
 

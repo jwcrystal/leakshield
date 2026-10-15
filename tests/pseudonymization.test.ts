@@ -533,12 +533,27 @@ describe("fail-closed content hazards", () => {
     expect(created.protectText("s", `${KEY1}${"x".repeat(40)}`)).toEqual({ ok: false, reason: "truncated_content" });
   });
 
-  it("rejects synthetic unicode findings and invalid spans", () => {
+  it("refuses zero-width characters only when they hide a finding", () => {
     const ps = makeService();
-    const zeroWidth = `note\u200B ${KEY1}`;
-    expect(ps.protectText("s", zeroWidth)).toEqual({ ok: false, reason: "invalid_finding_span" });
+    const hidden = `note ${KEY1.slice(0, 10)}\u200B${KEY1.slice(10)}`;
+    expect(ps.protectText("s", hidden)).toEqual({ ok: false, reason: "unicode_evasion" });
+
+    const harmless = ps.protectText("s", `note\u200B ${KEY1}`);
+    expect(harmless.ok).toBe(true);
+    if (harmless.ok) {
+      expect(harmless.text).not.toContain(KEY1);
+      expect(harmless.text.startsWith("note\u200B [SGP2:API_KEY-")).toBe(true);
+    }
     const longUnicode = `\u200B${"y".repeat(80)}`;
-    expect(ps.protectText("s", longUnicode)).toEqual({ ok: false, reason: "invalid_finding_span" });
+    expect(ps.protectText("s", longUnicode)).toEqual({ ok: true, text: longUnicode });
+  });
+
+  it("refuses an encoded secret split by zero-width characters", () => {
+    const ps = makeService();
+    const encoded = Buffer.from(`api key ${KEY1}`).toString("base64");
+    const split = `${encoded.slice(0, 12)}\u200B${encoded.slice(12)}`;
+    const result = ps.protectText("s", `data: ${split}`);
+    expect(result.ok).toBe(false);
   });
 
   it("dedups identical spans from different rules and unions real overlaps", () => {

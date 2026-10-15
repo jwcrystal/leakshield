@@ -107,61 +107,32 @@ function honorDirectives(opts?: ScanOptions): boolean {
   return opts?.honorIgnoreDirectives !== false;
 }
 
-/**
- * Internal scan function without encoding detection.
- * Used by scanTextWithDecoding to avoid infinite recursion.
- */
-function scanTextInternal(text: string, config: GuardConfig, opts?: ScanOptions): ScanResult {
-  // Step 1: Check for truncation
-  const wasTruncated = text.length > config.settings.max_chars;
-  const truncated = text.slice(0, config.settings.max_chars);
+/** Invisible format characters that can splice a value so the rules miss it. */
+export const ZERO_WIDTH_CHARS = /[\u200B-\u200D\uFEFF\u2060\u180E]/g;
 
-  const allRules = getRules(config);
+/** Rule and exact-value findings for one text, in rule order. */
+function collectRuleFindings(
+  text: string,
+  rules: ReturnType<typeof getRules>,
+  config: GuardConfig,
+  ignoredLines: Set<number>,
+): Finding[] {
   const findings: Finding[] = [];
   const seen = new Set<string>();
-  const ignoredLines = honorDirectives(opts) ? getIgnoredLines(truncated) : new Set<number>();
-
-  // Step 2: Scan for suspicious Unicode patterns ONLY if there's an actual threat
-  // This doesn't modify the text, just detects issues
-  const suspicious = detectSuspiciousUnicode(truncated);
-  if (suspicious.hasZeroWidth || suspicious.hasHomographs) {
-    // Only add Unicode finding if there's a clear attack pattern
-    findings.push({
-      type: "CUSTOM",
-      severity: suspicious.hasZeroWidth ? "HIGH" : "MEDIUM",
-      line: 1,
-      column: 1,
-      preview: "****",
-      description: suspicious.hasZeroWidth
-        ? "檢測到零寬字符 (可能用於繞過敏感資料檢測)"
-        : "檢測到可疑的 Unicode 字符 (可能的同形異義字攻擊)",
-      match_start: 0,
-      match_end: truncated.length,
-      match_text: truncated.substring(0, 50), // Only store first 50 chars
-      unicode_detected: {
-        had_zero_width: suspicious.hasZeroWidth,
-        had_homographs: suspicious.hasHomographs,
-        details: suspicious.details,
-      },
-    } as any);
-  }
-
-  // Step 3: Regular pattern scanning on the original text
-  // We scan the original text, not normalized, to preserve accurate offsets
-  for (const rule of allRules) {
+  for (const rule of rules) {
     // Reuse the compiled RegExp; reset lastIndex before each scan so the
     // stateful global flag starts from the beginning of the input.
     rule.pattern.lastIndex = 0;
     let match: RegExpExecArray | null;
 
-    while ((match = rule.pattern.exec(truncated)) !== null) {
+    while ((match = rule.pattern.exec(text)) !== null) {
       const matchedText = match[0];
       if (rule.validate !== undefined && !rule.validate(matchedText)) continue;
       const key = `${rule.type}:${match.index}`;
       if (seen.has(key)) continue;
       seen.add(key);
 
-      const { line, col } = getLineCol(truncated, match.index);
+      const { line, col } = getLineCol(text, match.index);
       if (ignoredLines.has(line)) continue;
 
       const preview = redact(matchedText, config.settings.preview_length);
@@ -180,7 +151,85 @@ function scanTextInternal(text: string, config: GuardConfig, opts?: ScanOptions)
     }
   }
 
-  addExactValueFindings(truncated, config, ignoredLines, findings);
+  addExactValueFindings(text, config, ignoredLines, findings);
+  return findings;
+}
+
+/**
+ * Zero-width characters are common in harmless text: emoji ZWJ sequences, a
+ * BOM at the start of a file, ZWNJ in Persian. They only matter when they
+ * splice a sensitive value so the rules miss it (`pass\u200Dword=…`, a key
+ * split by ZWSP). Strip them, rescan, and report only when the stripped text
+ * yields a finding the raw text does not. Line breaks are untouched, so the
+ * raw text's ignored lines still apply.
+ */
+function zeroWidthHidesFinding(
+  text: string,
+  rawFindings: readonly Finding[],
+  rules: ReturnType<typeof getRules>,
+  config: GuardConfig,
+  ignoredLines: Set<number>,
+): boolean {
+  const stripped = text.replace(ZERO_WIDTH_CHARS, "");
+  if (stripped === text) return false;
+  const identity = (finding: Finding): string =>
+    `${finding.type}\0${(finding.match_text ?? "").replace(ZERO_WIDTH_CHARS, "")}`;
+  const unmatched = new Map<string, number>();
+  for (const finding of rawFindings) {
+    const id = identity(finding);
+    unmatched.set(id, (unmatched.get(id) ?? 0) + 1);
+  }
+  for (const finding of collectRuleFindings(stripped, rules, config, ignoredLines)) {
+    const id = identity(finding);
+    const remaining = unmatched.get(id) ?? 0;
+    if (remaining === 0) return true;
+    unmatched.set(id, remaining - 1);
+  }
+  return false;
+}
+
+/**
+ * Internal scan function without encoding detection.
+ * Used by scanTextWithDecoding to avoid infinite recursion.
+ */
+function scanTextInternal(text: string, config: GuardConfig, opts?: ScanOptions): ScanResult {
+  // Step 1: Check for truncation
+  const wasTruncated = text.length > config.settings.max_chars;
+  const truncated = text.slice(0, config.settings.max_chars);
+
+  const allRules = getRules(config);
+  const ignoredLines = honorDirectives(opts) ? getIgnoredLines(truncated) : new Set<number>();
+
+  // Step 2: Regular pattern scanning on the original text
+  // We scan the original text, not normalized, to preserve accurate offsets
+  const ruleFindings = collectRuleFindings(truncated, allRules, config, ignoredLines);
+
+  // Step 3: Flag suspicious Unicode only when it is an actual threat. This
+  // doesn't modify the text, just detects issues.
+  const suspicious = detectSuspiciousUnicode(truncated);
+  const zeroWidthEvasion = zeroWidthHidesFinding(truncated, ruleFindings, allRules, config, ignoredLines);
+  const findings: Finding[] = [];
+  if (zeroWidthEvasion || suspicious.hasHomographs) {
+    findings.push({
+      type: "CUSTOM",
+      severity: zeroWidthEvasion ? "HIGH" : "MEDIUM",
+      line: 1,
+      column: 1,
+      preview: "****",
+      description: zeroWidthEvasion
+        ? "檢測到零寬字符藏住敏感資料 (可能用於繞過敏感資料檢測)"
+        : "檢測到可疑的 Unicode 字符 (可能的同形異義字攻擊)",
+      match_start: 0,
+      match_end: truncated.length,
+      match_text: truncated.substring(0, 50), // Only store first 50 chars
+      unicode_detected: {
+        had_zero_width: zeroWidthEvasion,
+        had_homographs: suspicious.hasHomographs,
+        details: suspicious.details,
+      },
+    } as any);
+  }
+  findings.push(...ruleFindings);
 
   const safe = findings.length === 0;
   const highCount = findings.filter((f) => f.severity === "HIGH").length;
@@ -201,7 +250,7 @@ function scanTextInternal(text: string, config: GuardConfig, opts?: ScanOptions)
 
   // Add warnings for Unicode issues and truncation
   const warnings = [];
-  if (suspicious.hasZeroWidth) warnings.push("零寬字符");
+  if (zeroWidthEvasion) warnings.push("零寬字符");
   if (suspicious.hasHomographs) warnings.push("可疑 Unicode");
   if (wasTruncated) warnings.push("內容截斷");
 

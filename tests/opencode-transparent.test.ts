@@ -2287,14 +2287,30 @@ describe("transparent standalone joiners in replayed tool history", () => {
   );
 
   it.each([
-    `sk-Qwerty\u200DuiopAsdfghjklZx`,
     `\u200D${KEY}`,
     `${KEY}\u200D`,
     `\n\u200D\u200B\u200D\n`,
     `\n\u200B\n`,
     `\n\u200C\n`,
     `\n\uFEFF\n`,
-  ])("still refuses ambiguous zero-width content %#", async (text) => {
+    `Hi \u{1F468}\u200D\u{1F4BB} about ${KEY}`,
+    `\uFEFFname,email\nbob,${EMAIL}`,
+  ])("keeps zero-width characters that hide nothing and masks the rest %#", async (text) => {
+    const { hook } = await arm();
+    const event = { sessionID: "session-1", system: [{ type: "text", text }], messages: [], options: {} };
+    await expect(hook("session:context")(event)).resolves.toBeUndefined();
+    const masked = event.system[0].text;
+    expect(masked).not.toContain(KEY);
+    expect(masked).not.toContain(EMAIL);
+    const zeroWidth = /[\u200B-\u200D\uFEFF]/g;
+    expect(masked.match(zeroWidth)?.length).toBe(text.match(zeroWidth)?.length);
+  });
+
+  it.each([
+    `sk-Qwerty\u200DuiopAsdfghjklZx`,
+    `pass\u200Dword=Tr0ub4dor&3xYz`,
+    `alice@exam\u200Bple.com`,
+  ])("still refuses zero-width characters that hide a finding %#", async (text) => {
     const { hook } = await arm();
     const event = { sessionID: "session-1", system: [{ type: "text", text }], messages: [], options: {} };
     await expect(hook("session:context")(event)).rejects.toThrow(PROTECT_FAILED);

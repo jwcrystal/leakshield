@@ -4,7 +4,7 @@
  */
 
 import type { GuardConfig, ScanResult } from "../types.js";
-import { scanTextInternal, type ScanOptions } from "./engine.js";
+import { ZERO_WIDTH_CHARS, scanTextInternal, type ScanOptions } from "./engine.js";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -209,65 +209,83 @@ export function scanTextWithDecoding(text: string, config: GuardConfig, opts?: S
   const originalResult = scanTextInternal(text, config, opts);
   results.push(originalResult);
 
-  // 2. Try Base64 decoding
-  const base64Candidates = detectBase64(text);
-  for (const candidate of base64Candidates) {
-    const decoded = tryDecodeBase64(candidate);
-    if (decoded && decoded.confidence >= 0.6) {
-      const decodedResult = scanTextInternal(decoded.decoded, config, opts);
-      if (!decodedResult.safe) {
-        results.push(decodedResult);
-        encodingTypesFound.add('Base64');
+  // A zero-width character inside an encoded run breaks candidate detection
+  // (a ZWSP in Base64 or hex), so decode the stripped form as well. Each
+  // candidate is decoded once even when both forms contain it.
+  const stripped = text.replace(ZERO_WIDTH_CHARS, "");
+  const sources = stripped === text ? [text] : [text, stripped];
+  const decodedCandidates = new Set<string>();
+  const firstSighting = (kind: string, candidate: string): boolean => {
+    const id = `${kind}\0${candidate}`;
+    if (decodedCandidates.has(id)) return false;
+    decodedCandidates.add(id);
+    return true;
+  };
 
-        // Add metadata about the encoding
-        decodedResult.findings.forEach(f => {
-          (f as any).encoding_detected = {
-            type: 'Base64',
-            confidence: decoded.confidence,
-            encoded_length: candidate.length,
-            decoded_length: decoded.decoded.length,
-          };
-        });
+  for (const source of sources) {
+    // 2. Try Base64 decoding
+    const base64Candidates = detectBase64(source);
+    for (const candidate of base64Candidates) {
+      if (!firstSighting("base64", candidate)) continue;
+      const decoded = tryDecodeBase64(candidate);
+      if (decoded && decoded.confidence >= 0.6) {
+        const decodedResult = scanTextInternal(decoded.decoded, config, opts);
+        if (!decodedResult.safe) {
+          results.push(decodedResult);
+          encodingTypesFound.add('Base64');
+
+          // Add metadata about the encoding
+          decodedResult.findings.forEach(f => {
+            (f as any).encoding_detected = {
+              type: 'Base64',
+              confidence: decoded.confidence,
+              encoded_length: candidate.length,
+              decoded_length: decoded.decoded.length,
+            };
+          });
+        }
       }
     }
-  }
 
-  // 3. Try URL decoding
-  const urlCandidates = detectUrlEncoding(text);
-  for (const candidate of urlCandidates) {
-    const decoded = tryDecodeUrl(candidate);
-    if (decoded && decoded.confidence >= 0.5) {
-      const decodedResult = scanTextInternal(decoded.decoded, config, opts);
-      if (!decodedResult.safe) {
-        results.push(decodedResult);
-        encodingTypesFound.add('URL');
+    // 3. Try URL decoding
+    const urlCandidates = detectUrlEncoding(source);
+    for (const candidate of urlCandidates) {
+      if (!firstSighting("url", candidate)) continue;
+      const decoded = tryDecodeUrl(candidate);
+      if (decoded && decoded.confidence >= 0.5) {
+        const decodedResult = scanTextInternal(decoded.decoded, config, opts);
+        if (!decodedResult.safe) {
+          results.push(decodedResult);
+          encodingTypesFound.add('URL');
 
-        decodedResult.findings.forEach(f => {
-          (f as any).encoding_detected = {
-            type: 'URL',
-            confidence: decoded.confidence,
-          };
-        });
+          decodedResult.findings.forEach(f => {
+            (f as any).encoding_detected = {
+              type: 'URL',
+              confidence: decoded.confidence,
+            };
+          });
+        }
       }
     }
-  }
 
-  // 4. Try Hex decoding
-  const hexCandidates = detectHexEncoding(text);
-  for (const candidate of hexCandidates) {
-    const decoded = tryDecodeHex(candidate);
-    if (decoded && decoded.confidence >= 0.5) {
-      const decodedResult = scanTextInternal(decoded.decoded, config, opts);
-      if (!decodedResult.safe) {
-        results.push(decodedResult);
-        encodingTypesFound.add('Hex');
+    // 4. Try Hex decoding
+    const hexCandidates = detectHexEncoding(source);
+    for (const candidate of hexCandidates) {
+      if (!firstSighting("hex", candidate)) continue;
+      const decoded = tryDecodeHex(candidate);
+      if (decoded && decoded.confidence >= 0.5) {
+        const decodedResult = scanTextInternal(decoded.decoded, config, opts);
+        if (!decodedResult.safe) {
+          results.push(decodedResult);
+          encodingTypesFound.add('Hex');
 
-        decodedResult.findings.forEach(f => {
-          (f as any).encoding_detected = {
-            type: 'Hex',
-            confidence: decoded.confidence,
-          };
-        });
+          decodedResult.findings.forEach(f => {
+            (f as any).encoding_detected = {
+              type: 'Hex',
+              confidence: decoded.confidence,
+            };
+          });
+        }
       }
     }
   }

@@ -327,3 +327,41 @@ describe("redactText() — honorIgnoreDirectives 選項", () => {
     expect(result.redacted).toContain("[REDACTED_PII_EMAIL]");
   });
 });
+
+// ─── 零寬字元：只有藏住敏感值時才標記 ─────────────────────────────────────────
+
+describe("scanText() — zero-width characters flag only when they hide a finding", () => {
+  const isZeroWidthFinding = (finding: unknown) =>
+    (finding as { unicode_detected?: { had_zero_width?: boolean } }).unicode_detected?.had_zero_width === true;
+
+  it.each([
+    ["an emoji ZWJ sequence", "Hi \u{1F468}\u200D\u{1F4BB} done"],
+    ["a family emoji", "\u{1F468}\u200D\u{1F469}\u200D\u{1F467} family"],
+    ["a rainbow flag", "\u{1F3F3}\uFE0F\u200D\u{1F308}"],
+    ["a UTF-8 BOM", "\uFEFFname,email\nbob,x"],
+    ["a Persian ZWNJ", "\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645"],
+    ["a ZWSP between words", "foo\u200Bbar"],
+  ])("does not flag %s", (_name, text) => {
+    const result = scanText(text, defaultConfig);
+    expect(result.findings.some(isZeroWidthFinding)).toBe(false);
+    expect(result.safe).toBe(true);
+  });
+
+  it("still reports real findings next to harmless zero-width text", () => {
+    const result = scanText("\u{1F468}\u200D\u{1F4BB} key sk-Abcdef1234567890abcdef", defaultConfig);
+    expect(result.findings.some(isZeroWidthFinding)).toBe(false);
+    expect(result.findings.some((finding) => finding.type === "API_KEY")).toBe(true);
+  });
+
+  it.each([
+    ["a secret keyword split by ZWJ", "pass\u200Dword=Tr0ub4dor&3xYz"],
+    ["an API key split by ZWSP", "sk-Abcdef12345\u200B67890abcdef"],
+    ["an email split by ZWSP", "alice@exam\u200Bple.com"],
+    ["an API key split by a BOM", "sk-Abcdef1234\uFEFF567890abcdef"],
+    ["an API key split by a word joiner", "sk-Abcdef1234\u2060567890abcdef"],
+  ])("flags zero-width characters that hide %s", (_name, text) => {
+    const result = scanText(text, defaultConfig);
+    expect(result.findings.find(isZeroWidthFinding)?.severity).toBe("HIGH");
+    expect(result.safe).toBe(false);
+  });
+});

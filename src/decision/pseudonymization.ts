@@ -60,6 +60,8 @@ export type PseudonymFailureReason =
   | "operation_limit"
   | "truncated_content"
   | "encoded_content"
+  /** Zero-width characters hide a value the scanner would otherwise detect. */
+  | "unicode_evasion"
   | "invalid_finding_span"
   | "token_overlap"
   | "malformed_token"
@@ -552,7 +554,7 @@ function urlContextHazard(
     if (scan.was_truncated) return fail("truncated_content");
     for (const finding of scan.findings) {
       if ((finding as { unicode_detected?: unknown }).unicode_detected !== undefined) {
-        return fail("encoded_content");
+        return fail("unicode_evasion");
       }
       const start = finding.match_start;
       const end = finding.match_end;
@@ -640,7 +642,7 @@ function validateFindingSpans(
   const spans: FindingSpan[] = [];
   for (const finding of findings) {
     if ((finding as { unicode_detected?: unknown }).unicode_detected !== undefined) {
-      return fail("invalid_finding_span");
+      return fail("unicode_evasion");
     }
     const start = finding.match_start;
     const end = finding.match_end;

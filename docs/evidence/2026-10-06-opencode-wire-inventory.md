@@ -106,6 +106,6 @@ Native OpenAI 預設 transport 為 WebSocket；所以 native GPT 的拒絕可能
 - [S6] [Gemini endpoint／SSE](https://github.com/anomalyco/opencode/blob/e7a34f09bfd9134dfade5a8ddb843f7030bc9a69/packages/ai/src/protocols/gemini.ts#L829-L833)
 - [S7] [Bedrock AWS framing](https://github.com/anomalyco/opencode/blob/e7a34f09bfd9134dfade5a8ddb843f7030bc9a69/packages/ai/src/protocols/bedrock-converse.ts#L814)、[route 與 auth](https://github.com/anomalyco/opencode/blob/e7a34f09bfd9134dfade5a8ddb843f7030bc9a69/packages/ai/src/protocols/bedrock-converse.ts#L875-L890)
 - [S8] [OpenAI-compatible Responses adapter](https://github.com/anomalyco/opencode/blob/e7a34f09bfd9134dfade5a8ddb843f7030bc9a69/packages/ai/src/protocols/openai-compatible-responses.ts#L9-L20)
-- 本 repo 候選修法／失敗證據：[GPT handoff](../../.scratch/handoff-20261006-gpt-plugin.md)
+- 本 repo 候選修法／失敗證據：GPT handoff（本機筆記，未收錄於 repo）
 
 此盤點補充 [穩定性修正計畫](2026-10-06-stability-fix-plan.md)；不解除首次失敗後的 reviewer gate。

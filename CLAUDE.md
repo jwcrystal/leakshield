@@ -1,3 +1,5 @@
+> GitNexus is the maintainer's local code-intelligence tool. If it is not available to you, skip the GitNexus steps below; `npx tsc --noEmit` and `npm test` (see CONTRIBUTING.md) are the required checks.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 

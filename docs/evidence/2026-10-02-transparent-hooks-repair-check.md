@@ -1,6 +1,6 @@
 # Transparent hooks: second user-repair check
 
-Designated oracle: openai/gpt-6.1-sol#high, session ses_f049a01bbffejeUK7XfIUZmLyW. Read-only review and offline diagnostics; no source edits, staging/commits, installs, network or runtime. Classification follows the corrected policy/fixture distinctions, not earlier blanket defect claims.
+Designated oracle: openai/gpt-6.1-sol#high, session ses_…. Read-only review and offline diagnostics; no source edits, staging/commits, installs, network or runtime. Classification follows the corrected policy/fixture distinctions, not earlier blanket defect claims.
 
 ## Verdict and snapshot limitation
 

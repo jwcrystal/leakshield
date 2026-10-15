@@ -99,11 +99,11 @@ without matching request attribution. [hook=experimental.ws.receive]
 
 ## 已驗證但不是本次重跑：真實帳號證據
 
-此前 GOAT 帳號 smoke：OpenAI Chat Completions 的兩種 wire 設定通過，合成 email 送出前遮罩、顯示還原。Anthropic Messages 的兩案捕獲到已遮罩請求，但生成失敗，原因尚未釐清。不能將本地 Anthropic 成功當作真實 provider 已驗收。
+此前 真實帳號 smoke：OpenAI Chat Completions 的兩種 wire 設定通過，合成 email 送出前遮罩、顯示還原。Anthropic Messages 的兩案捕獲到已遮罩請求，但生成失敗，原因尚未釐清。不能將本地 Anthropic 成功當作真實 provider 已驗收。
 
 ## 使用者指定的 V2 參考：EightDoor 補測
 
-參考訊息：`openchamber://session/ses_ed95147f0ffelZl7Ao33U13pgU?message=msg_1273eaeac0014jrRxwS1Bcb3tT`。已讀取該訊息；它所指的 V2 實作是 EightDoor fork，不是官方套件。訊息引用的 GitHub commit 與 npm 發布版不視為同一份程式；本次實測的是已安裝的 `opencode-rehydar@0.14.3`。
+參考訊息：使用者在本機 OpenChamber 對話中指定的訊息（連結已移除）。已讀取該訊息；它所指的 V2 實作是 EightDoor fork，不是官方套件。訊息引用的 GitHub commit 與 npm 發布版不視為同一份程式；本次實測的是已安裝的 `opencode-rehydar@0.14.3`。
 
 相同 host、合成資料、隔離方法及案例腳本補跑 **12 個 Chat Completions 案例＋3 個 native Responses transport 案例**。與上面的 60 案合計執行 75 案，仍不是 75 個安全成功案例。
 

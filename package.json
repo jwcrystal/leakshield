@@ -2,6 +2,25 @@
   "name": "sensitive-guard",
   "version": "1.0.0",
   "description": "OpenCode plugin, CLI, and web scanner for sensitive content before sending it to AI",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jwcrystal/sensitive-guard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jwcrystal/sensitive-guard/issues"
+  },
+  "homepage": "https://github.com/jwcrystal/sensitive-guard#readme",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "secrets",
+    "pii",
+    "redaction",
+    "pseudonymization",
+    "llm",
+    "security"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "files": [

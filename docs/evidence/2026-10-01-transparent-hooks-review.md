@@ -46,7 +46,7 @@ Produce a bounded recovery plan for hooks defects and separately approve the leg
 
 ## Delayed original oracle report — corroborating evidence
 
-The original designated oracle session ses_f093f9faaffe9zDUe4b90VRU1Y subsequently completed. Its earlier absence was an unavailable result, not evidence of a completed review. The report independently confirms corrections required and runtime NO-GO, with no edits, suite reruns, network or runtime launches. One in-memory diagnostic syntax error was corrected without source changes.
+The original designated oracle session ses_… subsequently completed. Its earlier absence was an unavailable result, not evidence of a completed review. The report independently confirms corrections required and runtime NO-GO, with no edits, suite reruns, network or runtime launches. One in-memory diagnostic syntax error was corrected without source changes.
 
 Additional confirmed details:
 

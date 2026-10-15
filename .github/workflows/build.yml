@@ -29,12 +29,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       - name: Build binary
-        run: bun build --compile --target=${{ matrix.target }} ./src/index.ts --outfile=${{ matrix.out }}
+        run: bun build --compile --target=${{ matrix.target }} ./src/cli.ts --outfile=${{ matrix.out }}
         shell: bash
 
       - name: Embed icon (Windows)
         if: matrix.os == 'windows-latest'
-        run: bun build --compile --target=bun-windows-x64 --windows-icon=icon.ico ./src/index.ts --outfile=sensitive-guard.exe
+        run: bun build --compile --target=bun-windows-x64 --windows-icon=icon.ico ./src/cli.ts --outfile=sensitive-guard.exe
         shell: bash
 
       - uses: actions/upload-artifact@v4

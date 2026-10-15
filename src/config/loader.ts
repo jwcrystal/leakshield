@@ -1,9 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
+import { createHash } from "crypto";
 import * as yaml from "js-yaml";
 import { fileURLToPath } from "url";
 import { z } from "zod";
 import { loadExactValueDetector } from "../scanner/exact-values.js";
+import { BUILTIN_RULE_IDS } from "../rules/builtin.js";
 import type { GuardConfig } from "../types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -28,7 +30,21 @@ export const GuardConfigSchema = z.object({
     preview_length: z.number().int().positive().default(60),
     encoding_detection: z.boolean().default(false),
     env_files: z.array(z.string().min(1).max(MAX_ENV_FILE_PATH_LENGTH)).max(16).default([]),
+    rule_overrides: z.record(z.string().min(1), z.boolean()).default({}),
   }).default({}),
+}).superRefine((config, ctx) => {
+  // Unknown rule ids in `rule_overrides` fail the parse (fail-closed): a typo
+  // must never silently leave a rule in the wrong state.
+  const overrides = config.settings.rule_overrides ?? {};
+  for (const id of Object.keys(overrides)) {
+    if (!BUILTIN_RULE_IDS.has(id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["settings", "rule_overrides", id],
+        message: `unknown builtin rule id "${id}" (see src/rules/builtin.ts BUILTIN_RULE_IDS)`,
+      });
+    }
+  }
 });
 
 function finalizeConfig(config: GuardConfig, workspaceRoot: string): GuardConfig {
@@ -38,7 +54,12 @@ function finalizeConfig(config: GuardConfig, workspaceRoot: string): GuardConfig
   };
 }
 
-export function loadConfig(overridePath?: string, workspaceRoot = process.cwd()): GuardConfig {
+/**
+ * Resolves the guard config path exactly like `loadConfig` does: the override
+ * when it exists, otherwise the first default candidate that exists. Returns
+ * undefined when no config file is present (defaults apply).
+ */
+export function findConfigPath(overridePath?: string): string | undefined {
   const configPaths = overridePath
     ? [overridePath]
     : [
@@ -48,11 +69,49 @@ export function loadConfig(overridePath?: string, workspaceRoot = process.cwd())
       ];
 
   for (const p of configPaths) {
-    if (fs.existsSync(p)) {
-      const raw = fs.readFileSync(p, "utf-8");
-      return finalizeConfig(GuardConfigSchema.parse(yaml.load(raw)), workspaceRoot);
-    }
+    if (fs.existsSync(p)) return p;
   }
+  return undefined;
+}
 
-  return finalizeConfig(GuardConfigSchema.parse({}), workspaceRoot);
+export interface LoadedGuardConfig {
+  config: GuardConfig;
+  /**
+   * sha256 of the exact bytes `config` was parsed from, or "absent" when no
+   * configuration file exists (defaults apply). Consumers that authorize from
+   * this config can compare the fingerprint on later reads.
+   */
+  fingerprint: string;
+  configPath: string | undefined;
+}
+
+/**
+ * Loads the guard config and, from the very same read, the fingerprint of the
+ * bytes it was parsed from. The allowlist inside `config` and `fingerprint`
+ * are therefore guaranteed to describe one configuration state — an edit
+ * between a config load and a separate fingerprint read could otherwise
+ * authorize against content that never existed at a single point in time.
+ */
+export function loadConfigWithFingerprint(
+  overridePath?: string,
+  workspaceRoot = process.cwd(),
+): LoadedGuardConfig {
+  const configPath = findConfigPath(overridePath);
+  if (!configPath) {
+    return {
+      config: finalizeConfig(GuardConfigSchema.parse({}), workspaceRoot),
+      fingerprint: "absent",
+      configPath,
+    };
+  }
+  const raw = fs.readFileSync(configPath, "utf-8");
+  return {
+    config: finalizeConfig(GuardConfigSchema.parse(yaml.load(raw)), workspaceRoot),
+    fingerprint: createHash("sha256").update(raw).digest("hex"),
+    configPath,
+  };
+}
+
+export function loadConfig(overridePath?: string, workspaceRoot = process.cwd()): GuardConfig {
+  return loadConfigWithFingerprint(overridePath, workspaceRoot).config;
 }

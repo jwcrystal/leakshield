@@ -1,8 +1,17 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { createHash } from "node:crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { loadConfig } from "../src/config/loader.js";
+import { loadConfig, loadConfigWithFingerprint } from "../src/config/loader.js";
+
+// The ESM namespace of fs cannot be spied on directly; a transparent spread
+// of the actual module keeps everything real while the single-read test can
+// intercept readFileSync as seen by the loader.
+vi.mock("fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("fs")>();
+  return { ...actual };
+});
 
 // ─── 使用真實設定檔（config/guard.config.yaml）────────────────────────────────
 
@@ -14,10 +23,9 @@ describe("loadConfig() — 讀取真實設定檔", () => {
     expect(config).toHaveProperty("settings");
   });
 
-  it("nda_keywords 應為非空字串陣列", () => {
+  it("nda_keywords 應為字串陣列，允許明確停用", () => {
     const config = loadConfig();
     expect(Array.isArray(config.nda_keywords)).toBe(true);
-    expect(config.nda_keywords.length).toBeGreaterThan(0);
     config.nda_keywords.forEach((kw) => expect(typeof kw).toBe("string"));
   });
 
@@ -146,5 +154,56 @@ settings:
     expect(config.settings.max_chars).toBe(50000);
     expect(config.settings.show_line_numbers).toBe(false);
     expect(config.settings.preview_length).toBe(30);
+  });
+});
+
+// ─── 單次讀取：config 與指紋來自同一次檔案讀取 ──────────────────────────────────
+
+describe("loadConfigWithFingerprint() — 單次讀取綁定", () => {
+  let tmpFile: string;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (tmpFile && fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+  });
+
+  function writeTmp(content: string): string {
+    tmpFile = path.join(os.tmpdir(), `guard-test-${Date.now()}.yaml`);
+    fs.writeFileSync(tmpFile, content, "utf-8");
+    return tmpFile;
+  }
+
+  it("fingerprint 等於設定檔位元組的 sha256", () => {
+    const p = writeTmp("settings:\n  max_chars: 50000\n");
+    const loaded = loadConfigWithFingerprint(p);
+    const bytes = fs.readFileSync(p, "utf-8");
+    expect(loaded.fingerprint).toBe(createHash("sha256").update(bytes).digest("hex"));
+    expect(loaded.configPath).toBe(p);
+    expect(loaded.config.settings.max_chars).toBe(50000);
+  });
+
+  it("config 與 fingerprint 來自同一次讀取（讀取設定檔恰好一次）", () => {
+    const p = writeTmp("settings:\n  max_chars: 50000\n");
+    const readSpy = vi.spyOn(fs, "readFileSync");
+    loadConfigWithFingerprint(p);
+    const readsOfConfig = readSpy.mock.calls.filter(
+      ([file]) => String(file) === p,
+    );
+    expect(readsOfConfig).toHaveLength(1);
+  });
+
+  it("沒有設定檔時 fingerprint 為 absent 且回傳預設值", () => {
+    const loaded = loadConfigWithFingerprint("/nonexistent/path/guard.config.yaml");
+    expect(loaded.fingerprint).toBe("absent");
+    expect(loaded.configPath).toBeUndefined();
+    expect(loaded.config.settings.max_chars).toBe(200000);
+  });
+
+  it("loadConfig() 委派至單次讀取載入器", () => {
+    const p = writeTmp("settings:\n  max_chars: 50000\n");
+    const viaDelegate = loadConfig(p);
+    const viaLoader = loadConfigWithFingerprint(p).config;
+    expect(viaDelegate.settings.max_chars).toBe(viaLoader.settings.max_chars);
+    expect(viaDelegate.nda_keywords).toEqual(viaLoader.nda_keywords);
   });
 });

@@ -18,24 +18,38 @@ export interface GuardConfig {
     preview_length: number;
     encoding_detection: boolean;
     env_files?: string[];
+    /** Built-in rule id → enabled. Absent id = the rule's own default (opt-in rules stay off). */
+    rule_overrides?: Record<string, boolean>;
   };
   /** In-memory only; serializes to a fingerprint without retaining raw values. */
   exact_value_detector?: ExactValueDetector;
 }
 
-export type FindingType =
-  | "API_KEY"
-  | "SECRET"
-  | "TOKEN"
-  | "PII_EMAIL"
-  | "PII_PHONE_TW"
-  | "PII_PHONE_INTL"
-  | "PII_ID_TW"
-  | "DB_CONNECTION"
-  | "PRIVATE_DOMAIN"
-  | "NDA_KEYWORD"
-  | "ENV_SECRET"
-  | "CUSTOM";
+/**
+ * Runtime-closed enumeration (R-round F1.2): the SGP2 category whitelist is
+ * enforced at persisted-seed intake, so the legal labels must exist as a
+ * value, not just a type. Keep list and type in one place.
+ */
+export const FINDING_TYPES = [
+  "API_KEY",
+  "SECRET",
+  "TOKEN",
+  "PII_EMAIL",
+  "PII_PHONE_TW",
+  "PII_PHONE_INTL",
+  "PII_ID_TW",
+  "DB_CONNECTION",
+  "PRIVATE_DOMAIN",
+  "NDA_KEYWORD",
+  "ENV_SECRET",
+  "CUSTOM",
+  "PII_CREDIT_CARD",
+  "PII_IBAN",
+  "PII_IP",
+  "PII_URL",
+] as const;
+
+export type FindingType = (typeof FINDING_TYPES)[number];
 
 export interface Finding {
   type: FindingType;
@@ -44,9 +58,9 @@ export interface Finding {
   column?: number;
   preview: string;
   description: string;
-  /** Internal-only: byte offset of match start in the original content. */
+  /** Internal-only: UTF-16 code-unit offset of the match start in the original content (regex `.index`; the scanner slices with String.slice). Not a byte offset. */
   match_start?: number;
-  /** Internal-only: byte offset of match end in the original content. */
+  /** Internal-only: UTF-16 code-unit offset of the match end (match_start + match length). Not a byte offset. */
   match_end?: number;
   /** Internal-only: the raw matched text. Never expose to transport outputs. */
   match_text?: string;
@@ -88,4 +102,23 @@ export interface Rule {
   severity: Finding["severity"];
   description: string;
   pattern: RegExp;
+  /**
+   * Stable identifier for built-in rules, the key used by
+   * `settings.rule_overrides` in the guard config. Every BUILTIN_RULES entry
+   * must set one (tests enforce this) so any built-in can be toggled.
+   */
+  id?: string;
+  /**
+   * Opt-in rules are disabled unless explicitly enabled via
+   * `settings.rule_overrides`. Used for high-noise rules (e.g. URL) that
+   * must not run always-on.
+   */
+  optIn?: boolean;
+  /**
+   * Optional semantic validation for a regex match (Luhn for credit cards,
+   * mod-97 for IBAN, routability for IPv4). Returning false skips the match
+   * entirely — used to keep checksum-capable formats at near-zero false
+   * positives without weakening the pattern shape.
+   */
+  validate?: (match: string) => boolean;
 }

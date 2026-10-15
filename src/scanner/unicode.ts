@@ -84,8 +84,12 @@ export function detectSuspiciousUnicode(text: string): {
   let hasMixedScripts = false;
   let hasHomographs = false;
 
-  // Check for zero-width characters (HIGH confidence - almost always malicious)
-  if (/[\u200B-\u200D\uFEFF]/.test(text)) {
+  // Web text can contain standalone ZWJ separators. Whitespace on both sides
+  // means these joiners cannot splice a sensitive value. Exclude only those
+  // separators from this heuristic; keep the original text and regular scans.
+  // Embedded/adjacent joiners and every other zero-width character still flag.
+  const zeroWidthProbe = text.replace(/(?<!\S)\u200D+(?!\S)/g, '');
+  if (/[\u200B-\u200D\uFEFF]/.test(zeroWidthProbe)) {
     hasZeroWidth = true;
     details.push('包含零寬字符 (可被用於繞過檢測)');
   }

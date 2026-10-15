@@ -27,12 +27,25 @@ function isSafePattern(pattern: string): boolean {
 export function buildDynamicRules(config: GuardConfig): Rule[] {
   const rules: Rule[] = [];
 
+  // Word boundaries make keyword rules match the standalone WORD, not words
+  // that merely contain it ("Foundation" must not trip「NDA」, "confidentiality"
+  // must not trip「CONFIDENTIAL」). Boundaries are added only where the
+  // keyword's edge is an ASCII word character: `\b` never holds between two
+  // non-word characters, so CJK keywords (「機密」inside Chinese text) would
+  // silently stop matching if we wrapped them unconditionally.
+  const keywordPattern = (keyword: string): RegExp => {
+    const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const lead = /^[A-Za-z0-9_]/.test(keyword) ? "\\b" : "";
+    const trail = /[A-Za-z0-9_]$/.test(keyword) ? "\\b" : "";
+    return new RegExp(lead + escaped + trail, "gi");
+  };
+
   for (const kw of config.nda_keywords) {
     rules.push({
       type: "NDA_KEYWORD",
       severity: "HIGH",
       description: `NDA 關鍵字「${kw}」`,
-      pattern: new RegExp(kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"),
+      pattern: keywordPattern(kw),
     });
   }
 

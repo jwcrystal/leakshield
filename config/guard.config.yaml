@@ -2,44 +2,34 @@
 # 修改這個檔案來自訂你的 NDA 關鍵字與私有域名
 
 # NDA / 機密關鍵字（大小寫不敏感）
-nda_keywords:
-  - "CONFIDENTIAL"
-  - "INTERNAL ONLY"
-  - "DO NOT SHARE"
-  - "NDA"
-  - "PROPRIETARY"
-  - "TRADE SECRET"
-  - "secret"
+# 比對語意：首尾為 ASCII 英數字的關鍵字以「整字」比對（NDA 不會命中 Foundation、agenda）；
+# CJK 關鍵字（如「機密」）維持子字串比對。
+nda_keywords: []
   # 加入你的公司內部關鍵字，例如：
   # - "Project Phoenix"
   # - "Operation XYZ"
   # - "MyCompany Internal"
 
-# 私有域名（只填你公司的內部域名）
-private_domains:
-  - "internal.mycompany.com"
-  - "corp.mycompany.com"
+# 私有域名（只填你公司的內部域名；移除不適用的佔位範例）
+# 以子字串比對、大小寫不敏感；填完整 hostname 可降低誤配。
+private_domains: []
   # 加入你的私有域名，例如：
-  # - "dev.yourcompany.io"
-  # - "staging.yourcompany.com"
+  # - "internal.mycompany.com"
+  # - "corp.mycompany.com"
 
 # 自訂規則（使用正則表達式，大小寫不敏感）
 # severity 可填 HIGH / MEDIUM / LOW，不填預設 HIGH
 # pattern 長度上限 200 字元；危險的 ReDoS pattern 會被自動略過並顯示警告
-custom_rules:
-# 取消下方範例的註解來啟用自訂規則，例如：
+custom_rules: []
+# 自訂 regex 命中都會形成 finding；LOW 也不代表忽略或不攔截。
+# 通用數字 pattern 容易誤報，請先依實際資料格式驗證，再取消註解。
 # - description: "員工編號"
 #   pattern: "\\bEMP-\\d{6}\\b"
 #   severity: HIGH
 #
-# - description: "台灣護照號碼"
-#   pattern: "\\b[A-Z]{1,2}[0-9]{7,9}\\b"
-#   severity: HIGH
+# 信用卡已內建 builtin 規則（id: credit-card，含 Luhn 驗證），不必自訂。
 #
-# - description: "信用卡號（Visa / Mastercard）"
-#   pattern: "\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14})\\b"
-#   severity: HIGH
-#
+# Jira 工單通常不是機密；LOW 仍會產生 finding，僅在確有需要時啟用：
 # - description: "Jira 工單編號"
 #   pattern: "\\b[A-Z]{2,10}-\\d{1,6}\\b"
 #   severity: LOW
@@ -52,8 +42,15 @@ settings:
   show_line_numbers: true
   # 命中內容預覽的最大長度（遮蔽敏感值）
   preview_length: 60
+  # Base64／URL／Hex 解碼檢測；預設關閉，需明確啟用。
+  encoding_detection: false
   # 已知 secret value 的來源檔案。預設不讀取；路徑相對專案根目錄。
-  # 檔案內的非空 value 會用於精確比對，但不會傳送、記錄或序列化。
+  # 僅非空且至少 8 字元的 value 會用於精確比對，不會傳送、記錄或序列化。
   # env_files:
   #   - .env
   #   - .env.local
+  # 個別開關 builtin 規則（id 清單見 src/rules/builtin.ts；未知 id 會載入失敗）。
+  # opt-in 規則（目前僅 url）預設關閉；其餘預設開啟，可於此關閉：
+  # rule_overrides:
+  #   url: true
+  #   phone-intl: false

@@ -60,6 +60,18 @@ describe("protectText()", () => {
     expect(result.action).toBe("block");
     expect(result.text).not.toContain("safe safe");
   });
+
+  it("never honors in-text ignore directives at the model boundary (redact mode)", () => {
+    const email = "alice.canary@example-test.invalid";
+    const result = protectText(`email ${email} // sg-ignore`, config, {
+      mode: "redact",
+      context: "message text",
+    });
+
+    expect(result.action).not.toBe("allow");
+    expect(result.text).not.toContain(email);
+    expect(result.text).toContain("[REDACTED_PII_EMAIL]");
+  });
 });
 
 describe("protectUnknownStrings()", () => {
@@ -81,6 +93,19 @@ describe("protectUnknownStrings()", () => {
 
     expect(protectedValue).not.toBe(original);
     expect(protectedValue.self).toBe(protectedValue);
+  });
+
+  it("protects sensitive object keys, not only values", () => {
+    const email = "alice.canary@example-test.invalid";
+    const original = { [email]: "ok", safe: { [email]: "nested" } };
+
+    const protectedValue = protectUnknownStrings(original, config, {
+      mode: "redact",
+      context: "tool metadata",
+    });
+
+    const serialized = JSON.stringify(protectedValue);
+    expect(serialized).not.toContain(email);
   });
 });
 

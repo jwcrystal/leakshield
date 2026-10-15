@@ -18,7 +18,14 @@ function getRules(config: GuardConfig): Rule[] {
     dynamic = buildDynamicRules(config);
     dynamicCache.set(config, dynamic);
   }
-  return [...BUILTIN_RULES, ...dynamic];
+  // Built-in rule toggle: an explicit override wins; otherwise opt-in rules
+  // stay off and the rest stay on. Ids are validated at config load, so any
+  // builtin without an id would silently become always-on — tests forbid that.
+  const overrides = config.settings.rule_overrides ?? {};
+  const activeBuiltins = BUILTIN_RULES.filter(
+    (rule) => (rule.id !== undefined && rule.id in overrides ? overrides[rule.id] : !rule.optIn),
+  );
+  return [...activeBuiltins, ...dynamic];
 }
 
 function hasMatchingRange(findings: readonly Finding[], index: number, length: number): boolean {
@@ -83,10 +90,28 @@ function addExactValueFindings(
 }
 
 /**
+ * Options shared by the scanning entry points.
+ */
+export interface ScanOptions {
+  /**
+   * When false, in-text ignore directives (`// sg-ignore` and friends) are NOT
+   * honored and every line is scanned. The model boundary (protectText /
+   * deidentifyText) must always pass false — prompt or tool text could
+   * otherwise carry a directive and sail through raw (fail-open bypass).
+   * The CLI/Web transports keep the default (true), which is their contract.
+   */
+  honorIgnoreDirectives?: boolean;
+}
+
+function honorDirectives(opts?: ScanOptions): boolean {
+  return opts?.honorIgnoreDirectives !== false;
+}
+
+/**
  * Internal scan function without encoding detection.
  * Used by scanTextWithDecoding to avoid infinite recursion.
  */
-function scanTextInternal(text: string, config: GuardConfig): ScanResult {
+function scanTextInternal(text: string, config: GuardConfig, opts?: ScanOptions): ScanResult {
   // Step 1: Check for truncation
   const wasTruncated = text.length > config.settings.max_chars;
   const truncated = text.slice(0, config.settings.max_chars);
@@ -94,7 +119,7 @@ function scanTextInternal(text: string, config: GuardConfig): ScanResult {
   const allRules = getRules(config);
   const findings: Finding[] = [];
   const seen = new Set<string>();
-  const ignoredLines = getIgnoredLines(truncated);
+  const ignoredLines = honorDirectives(opts) ? getIgnoredLines(truncated) : new Set<number>();
 
   // Step 2: Scan for suspicious Unicode patterns ONLY if there's an actual threat
   // This doesn't modify the text, just detects issues
@@ -131,6 +156,7 @@ function scanTextInternal(text: string, config: GuardConfig): ScanResult {
 
     while ((match = rule.pattern.exec(truncated)) !== null) {
       const matchedText = match[0];
+      if (rule.validate !== undefined && !rule.validate(matchedText)) continue;
       const key = `${rule.type}:${match.index}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -193,10 +219,10 @@ function scanTextInternal(text: string, config: GuardConfig): ScanResult {
   };
 }
 
-export function scanText(text: string, config: GuardConfig): ScanResult {
+export function scanText(text: string, config: GuardConfig, opts?: ScanOptions): ScanResult {
   // If encoding detection is enabled, use the enhanced scanner
   if (config.settings.encoding_detection) {
-    const result = encoding.scanTextWithDecoding(text, config);
+    const result = encoding.scanTextWithDecoding(text, config, opts);
 
     // Generate proper summary based on merged results
     const safe = result.safe;
@@ -241,16 +267,39 @@ export function scanText(text: string, config: GuardConfig): ScanResult {
   }
 
   // Otherwise, use internal scan without encoding detection
-  return scanTextInternal(text, config);
+  return scanTextInternal(text, config, opts);
 }
 
 // ─── Export scanTextInternal for use by encoding.ts ─────────────────────────────
 export { scanTextInternal };
 
-export function redactText(text: string, config: GuardConfig): RedactResult {
+/** A UTF-16 code-unit span, half-open [start, end). */
+export interface Utf16Span {
+  start: number;
+  end: number;
+}
+
+function overlapsSpan(start: number, end: number, spans: readonly Utf16Span[]): boolean {
+  return spans.some((span) => start < span.end && span.start < end);
+}
+
+export function redactText(
+  text: string,
+  config: GuardConfig,
+  opts?: ScanOptions,
+  /**
+   * Spans that must never be rewritten by redaction (validated issued
+   * placeholders). A match that merely OVERLAPS one of these spans is
+   * skipped, not redacted: redacting it would corrupt the protected value,
+   * and leaving it unredacted lets the verification pass report it as a
+   * crossing residual and fail closed. Only fully contained matches are
+   * exempt from residual reporting (see filterResidualFindings).
+   */
+  protectedSpans: readonly Utf16Span[] = [],
+): RedactResult {
   const truncated = text.slice(0, config.settings.max_chars);
   const allRules = getRules(config);
-  const ignoredLines = getIgnoredLines(truncated);
+  const ignoredLines = honorDirectives(opts) ? getIgnoredLines(truncated) : new Set<number>();
 
   const matches: MatchEntry[] = [];
   const seen = new Set<string>();
@@ -259,6 +308,8 @@ export function redactText(text: string, config: GuardConfig): RedactResult {
     rule.pattern.lastIndex = 0;
     let match: RegExpExecArray | null;
     while ((match = rule.pattern.exec(truncated)) !== null) {
+      if (rule.validate !== undefined && !rule.validate(match[0])) continue;
+      if (overlapsSpan(match.index, match.index + match[0].length, protectedSpans)) continue;
       const key = `${match.index}:${match[0].length}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -271,6 +322,7 @@ export function redactText(text: string, config: GuardConfig): RedactResult {
   const detector = config.exact_value_detector;
   if (detector) {
     for (const match of detector.findAll(truncated)) {
+      if (overlapsSpan(match.index, match.index + match.length, protectedSpans)) continue;
       if (matches.some((entry) => entry.index === match.index && entry.length === match.length)) continue;
       const { line } = getLineCol(truncated, match.index);
       if (ignoredLines.has(line)) continue;
@@ -283,7 +335,7 @@ export function redactText(text: string, config: GuardConfig): RedactResult {
     redacted = redacted.slice(0, m.index) + `[REDACTED_${m.type}]` + redacted.slice(m.index + m.length);
   }
 
-  const { findings, total_findings } = scanText(text, config);
+  const { findings, total_findings } = scanText(text, config, opts);
   const summary = total_findings === 0
     ? t("redact.safe_summary")
     : t("redact.unsafe_summary", { count: total_findings });

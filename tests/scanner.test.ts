@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { scanText } from "../src/scanner/engine.js";
+import { redactText, scanText } from "../src/scanner/engine.js";
 import type { GuardConfig } from "../src/types.js";
 
 const defaultConfig: GuardConfig = {
@@ -61,10 +61,19 @@ describe("scanText() — PII 偵測", () => {
     expect(finding?.severity).toBe("HIGH");
   });
 
-  it("台灣手機號碼應被偵測為 PII_PHONE_TW", () => {
-    const result = scanText("電話：0912345678", defaultConfig);
+  it("台灣手機號碼應被偵測為 PII_PHONE_TW（opt-in 開啟時）", () => {
+    const phoneOn: GuardConfig = {
+      ...defaultConfig,
+      settings: { ...defaultConfig.settings, rule_overrides: { "phone-tw": true } },
+    };
+    const result = scanText("電話：0912345678", phoneOn);
     const finding = result.findings.find((f) => f.type === "PII_PHONE_TW");
     expect(finding).toBeDefined();
+  });
+
+  it("電話規則預設關閉（P2，2026-10-06 決策；漏真電話風險見 README）", () => {
+    const result = scanText("電話：0912345678 或 +14155552671", defaultConfig);
+    expect(result.findings.some((f) => f.type === "PII_PHONE_TW" || f.type === "PII_PHONE_INTL")).toBe(false);
   });
 });
 
@@ -268,5 +277,53 @@ describe("scanText() — match metadata (match_start, match_end, match_text)", (
     // "aaa\nbbb\n" = 8 chars, so match_start should be 8
     expect(f.match_start).toBe(8);
     expect(f.match_end).toBe(36);
+  });
+});
+
+// ─── honorIgnoreDirectives 選項（模型邊界不得尊重行內 ignore） ────────────────
+
+describe("scanText() — honorIgnoreDirectives 選項", () => {
+  const text = "bob.canary@example-test.invalid // sg-ignore";
+  const encodingConfig: GuardConfig = {
+    ...defaultConfig,
+    settings: { ...defaultConfig.settings, encoding_detection: true },
+  };
+
+  it("預設行為不變：ignore 標記仍抑制 finding（CLI/Web 契約）", () => {
+    expect(
+      scanText(text, defaultConfig).findings.some((f) => f.type === "PII_EMAIL"),
+    ).toBe(false);
+    expect(
+      scanText(text, encodingConfig).findings.some((f) => f.type === "PII_EMAIL"),
+    ).toBe(false);
+  });
+
+  it("{honorIgnoreDirectives:false} 時 PII_EMAIL 必須被回報（含編碼偵測路徑）", () => {
+    expect(
+      scanText(text, defaultConfig, { honorIgnoreDirectives: false }).findings.some(
+        (f) => f.type === "PII_EMAIL",
+      ),
+    ).toBe(true);
+    expect(
+      scanText(text, encodingConfig, { honorIgnoreDirectives: false }).findings.some(
+        (f) => f.type === "PII_EMAIL",
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("redactText() — honorIgnoreDirectives 選項", () => {
+  const text = "bob.canary@example-test.invalid // sg-ignore";
+
+  it("預設行為不變：ignore 標記仍抑制替換", () => {
+    expect(redactText(text, defaultConfig).redacted).toContain(
+      "bob.canary@example-test.invalid",
+    );
+  });
+
+  it("{honorIgnoreDirectives:false} 時必須替換為 [REDACTED_PII_EMAIL]", () => {
+    const result = redactText(text, defaultConfig, { honorIgnoreDirectives: false });
+    expect(result.redacted).not.toContain("bob.canary@example-test.invalid");
+    expect(result.redacted).toContain("[REDACTED_PII_EMAIL]");
   });
 });

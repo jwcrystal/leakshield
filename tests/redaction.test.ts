@@ -7,7 +7,50 @@ import {
   sanitizeScanResultForExport,
   sanitizeRedactResultForExport,
 } from "../src/decision/redaction.js";
-import type { Finding, FindingType } from "../src/types.js";
+import { scanText } from "../src/scanner/engine.js";
+import { BUILTIN_RULES } from "../src/rules/builtin.js";
+import type { Finding, FindingType, GuardConfig } from "../src/types.js";
+
+// ─── PEM 全區塊端到端 ────────────────────────────────────────────────────────
+
+describe("PEM full-block protection (end to end)", () => {
+  const pemConfig: GuardConfig = {
+    nda_keywords: [],
+    private_domains: [],
+    custom_rules: [],
+    settings: {
+      max_chars: 200000,
+      show_line_numbers: true,
+      preview_length: 60,
+      encoding_detection: true,
+    },
+  };
+
+  const PEM_BODY =
+    "MIIEowIBAAKCAQEA0Z3VSZSJdyyY8wzwLS0cSBMubeJ6h1LpZfK0hVfX4mW2pQ9zRrTnXyBvGcE7dNaU5fHiJkOlM";
+  const pem = `-----BEGIN OPENSSH PRIVATE KEY-----\n${PEM_BODY}\n${PEM_BODY}\n-----END OPENSSH PRIVATE KEY-----`;
+
+  it("scanner flags the whole block as one SECRET finding", () => {
+    const result = scanText(`config:\n${pem}\ndone`, pemConfig);
+    const finding = result.findings.find((f) => f.type === "SECRET");
+    expect(finding).toBeDefined();
+    expect(finding!.match_text).toBe(pem);
+  });
+
+  it("redaction removes the ENTIRE key body — nothing reconstructible remains", () => {
+    const redacted = buildRedactedContent(`config:\n${pem}\ndone`, scanText(`config:\n${pem}\ndone`, pemConfig).findings);
+    // The SECRET placeholder is historically named REDACTED_PASSWORD.
+    expect(redacted).toContain("[REDACTED_PASSWORD]");
+    expect(redacted).not.toContain(PEM_BODY);
+    expect(redacted).not.toContain("BEGIN OPENSSH");
+    expect(redacted).not.toContain("END OPENSSH");
+  });
+
+  it("builtin rule set carries exactly one PEM rule", () => {
+    const pemRules = BUILTIN_RULES.filter((r) => r.description === "PEM Private Key");
+    expect(pemRules).toHaveLength(1);
+  });
+});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

@@ -468,6 +468,50 @@ describe("buildDynamicRules()", () => {
     expect(matches(rules[0].pattern, "Project (Alpha) document")).toBe(true);
   });
 
+  // 回歸：2026-10-06 事件 — /NDA/gi 無字界，把「Fou[nda]tion」遮成 token
+  it("NDA 關鍵字有字界：Foundation 不得觸發遮罩", () => {
+    const config = { ...baseConfig, nda_keywords: ["NDA"] };
+    const rules = buildDynamicRules(config);
+    expect(matches(rules[0].pattern, "Apple Foundation Models on-device 3B")).toBe(false);
+    expect(matches(rules[0].pattern, "import Foundation")).toBe(false);
+  });
+
+  it("NDA 關鍵字有字界：agenda 等內含 nda 的單字不得觸發", () => {
+    const config = { ...baseConfig, nda_keywords: ["NDA"] };
+    const rules = buildDynamicRules(config);
+    expect(matches(rules[0].pattern, "the agenda for tomorrow")).toBe(false);
+    expect(matches(rules[0].pattern, "Rhonda updated the memorandum")).toBe(false);
+  });
+
+  it("同類誤判：CONFIDENTIAL 不得命中 confidentiality", () => {
+    const config = { ...baseConfig, nda_keywords: ["CONFIDENTIAL"] };
+    const rules = buildDynamicRules(config);
+    expect(matches(rules[0].pattern, "a confidentiality agreement was drafted")).toBe(false);
+    expect(matches(rules[0].pattern, "this is confidential info")).toBe(true);
+  });
+
+  it("字界不影響真正的 NDA 命中", () => {
+    const config = { ...baseConfig, nda_keywords: ["NDA"] };
+    const rules = buildDynamicRules(config);
+    expect(matches(rules[0].pattern, "please sign the NDA")).toBe(true);
+    expect(matches(rules[0].pattern, "NDA-protected material")).toBe(true);
+    expect(matches(rules[0].pattern, "under nda")).toBe(true);
+  });
+
+  it("CJK 關鍵字不加字界，中文內容仍命中", () => {
+    const config = { ...baseConfig, nda_keywords: ["機密"] };
+    const rules = buildDynamicRules(config);
+    expect(matches(rules[0].pattern, "這是公司機密文件")).toBe(true);
+  });
+
+  it("字首字尾非 ASCII word char 時不加對應字界", () => {
+    const config = { ...baseConfig, nda_keywords: ["(SECRET)"] };
+    const rules = buildDynamicRules(config);
+    expect(matches(rules[0].pattern, "marked (SECRET) draft")).toBe(true);
+    // 邊界是非 word char，不適用 \b，維持子字串匹配
+    expect(matches(rules[0].pattern, "X(SECRET)Y")).toBe(true);
+  });
+
   it("私有域名生成 PRIVATE_DOMAIN 規則", () => {
     const config = { ...baseConfig, private_domains: ["internal.corp.com"] };
     const rules = buildDynamicRules(config);
@@ -480,5 +524,47 @@ describe("buildDynamicRules()", () => {
   it("無設定時回傳空陣列", () => {
     const rules = buildDynamicRules(baseConfig);
     expect(rules).toHaveLength(0);
+  });
+});
+
+// ─── PEM Private Key（完整區塊保護） ────────────────────────────────────────
+
+describe("PEM Private Key", () => {
+  const pat = ruleFor("PEM Private Key");
+
+  const PEM_BODY =
+    "MIIEowIBAAKCAQEA0Z3VSZSJdyyY8wzwLS0cSBMubeJ6h1LpZfK0hVfX4mW2pQ9zRrTnXyBvGcE7dNaU5fHiJkOlM";
+  const pem = `-----BEGIN RSA PRIVATE KEY-----\n${PEM_BODY}\n${PEM_BODY}\n-----END RSA PRIVATE KEY-----`;
+
+  it("完整區塊：match 覆蓋 header、body 與 END 行", () => {
+    const re = new RegExp(pat.source, pat.flags);
+    const hit = re.exec(pem);
+    expect(hit).not.toBeNull();
+    expect(hit![0].startsWith("-----BEGIN RSA PRIVATE KEY-----")).toBe(true);
+    expect(hit![0].endsWith("-----END RSA PRIVATE KEY-----")).toBe(true);
+    expect(hit![0]).toContain(PEM_BODY);
+  });
+
+  it("截斷區塊（無 END）：仍命中 header", () => {
+    expect(matches(pat, `-----BEGIN OPENSSH PRIVATE KEY-----\n${PEM_BODY}`)).toBe(true);
+  });
+
+  it("多把 key：逐一完整匹配", () => {
+    const re = new RegExp(pat.source, pat.flags);
+    const two = `${pem}\nmiddle text\n${pem}`;
+    const hits = [...two.matchAll(re)];
+    expect(hits).toHaveLength(2);
+    expect(hits[0][0]).toBe(pem);
+    expect(hits[1][0]).toBe(pem);
+  });
+
+  it("EC / DSA / 無前綴變體同樣完整匹配", () => {
+    for (const kind of ["EC", "DSA", ""]) {
+      const label = kind === "" ? "PRIVATE KEY" : `${kind} PRIVATE KEY`;
+      const block = `-----BEGIN ${label}-----\n${PEM_BODY}\n-----END ${label}-----`;
+      const re = new RegExp(pat.source, pat.flags);
+      const hit = re.exec(block);
+      expect(hit?.[0]).toBe(block);
+    }
   });
 });

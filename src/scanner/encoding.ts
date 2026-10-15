@@ -4,7 +4,7 @@
  */
 
 import type { GuardConfig, ScanResult } from "../types.js";
-import { scanTextInternal } from "./engine.js";
+import { scanTextInternal, type ScanOptions } from "./engine.js";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -201,12 +201,12 @@ export interface ScanWithDecodingResult {
  * Scans text with automatic decoding of common encodings.
  * This prevents attackers from bypassing detection using Base64, URL encoding, etc.
  */
-export function scanTextWithDecoding(text: string, config: GuardConfig): ScanWithDecodingResult {
+export function scanTextWithDecoding(text: string, config: GuardConfig, opts?: ScanOptions): ScanWithDecodingResult {
   const results: ScanResult[] = [];
   const encodingTypesFound = new Set<string>();
 
   // 1. Scan the original text
-  const originalResult = scanTextInternal(text, config);
+  const originalResult = scanTextInternal(text, config, opts);
   results.push(originalResult);
 
   // 2. Try Base64 decoding
@@ -214,7 +214,7 @@ export function scanTextWithDecoding(text: string, config: GuardConfig): ScanWit
   for (const candidate of base64Candidates) {
     const decoded = tryDecodeBase64(candidate);
     if (decoded && decoded.confidence >= 0.6) {
-      const decodedResult = scanTextInternal(decoded.decoded, config);
+      const decodedResult = scanTextInternal(decoded.decoded, config, opts);
       if (!decodedResult.safe) {
         results.push(decodedResult);
         encodingTypesFound.add('Base64');
@@ -237,7 +237,7 @@ export function scanTextWithDecoding(text: string, config: GuardConfig): ScanWit
   for (const candidate of urlCandidates) {
     const decoded = tryDecodeUrl(candidate);
     if (decoded && decoded.confidence >= 0.5) {
-      const decodedResult = scanTextInternal(decoded.decoded, config);
+      const decodedResult = scanTextInternal(decoded.decoded, config, opts);
       if (!decodedResult.safe) {
         results.push(decodedResult);
         encodingTypesFound.add('URL');
@@ -257,7 +257,7 @@ export function scanTextWithDecoding(text: string, config: GuardConfig): ScanWit
   for (const candidate of hexCandidates) {
     const decoded = tryDecodeHex(candidate);
     if (decoded && decoded.confidence >= 0.5) {
-      const decodedResult = scanTextInternal(decoded.decoded, config);
+      const decodedResult = scanTextInternal(decoded.decoded, config, opts);
       if (!decodedResult.safe) {
         results.push(decodedResult);
         encodingTypesFound.add('Hex');

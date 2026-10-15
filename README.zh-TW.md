@@ -22,12 +22,21 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 | CLI | `npx sensitive-guard --file ./path` | 明確的本機或 CI 掃描；不會把內容送到模型 |
 | Web UI | `npm run web` | 在 `http://localhost:3000` 手動以瀏覽器掃描 |
 
+## 目前狀態
+
+**實驗性，尚未正式發佈。** 還沒發佈到 npm：請在本機建置（`npm ci && npm run build`），再讓 OpenCode 指向 `dist` 目錄。
+
+- Transparent 模式已在 OpenCode v2.0.28 搭配本機替身 provider 驗證，並用真實 OpenAI 模型驗證過一次。它**不保證**敏感內容絕不會送到模型：建議的 hook-first 設定在 `--doctor` 顯示為 `PARTIAL`，hook 之後才加入的內容，以及被允許的工具外送（curl、遠端 MCP），都不在保護範圍內。
+- 尚未驗證：OS keychain 持久化、真實 Anthropic provider、其他 provider 的長對話、長時間使用（[#26](https://github.com/jwcrystal/sensitive-guard/issues/26)）。
+- 第一個正式版本前，預設值仍可能調整（[#24](https://github.com/jwcrystal/sensitive-guard/issues/24)、[#27](https://github.com/jwcrystal/sensitive-guard/issues/27)），變更見 [CHANGELOG](CHANGELOG.md)。
+- 驗證紀錄：[docs/evidence](docs/evidence/README.md)。漏洞請私下回報：[SECURITY.md](SECURITY.md)。授權：[MIT](LICENSE)。
+
 ---
 
 
 ## 🚀 新成員快速上手
 
-- 3 分鐘 Onboarding：[`ONBOARDING.zh-TW.md`](./ONBOARDING.zh-TW.md)
+- 3 分鐘 Onboarding：[`docs/ONBOARDING.zh-TW.md`](./docs/ONBOARDING.zh-TW.md)
 
 ---
 

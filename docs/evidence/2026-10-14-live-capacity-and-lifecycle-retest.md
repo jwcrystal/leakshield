@@ -4,7 +4,7 @@
 
 **後續更新（同日）：** opaque integrity 已在 hook 層修正：`src/opencode-transparent.ts` 的 `withOpaqueProviderState` 在遮罩交易前後以 sentinel 保留 assistant 訊息中 reasoning／compaction 的 `encrypted`，以及 `providerMetadata.<provider>` 的 `reasoningEncryptedContent`／`encryptedContent`／`signature`／`redactedData`／`thoughtSignature`；限定位置之外，還要求單一 base64(url) 片段且解碼後可列印比例 ≤ 75%，readable 或 base64 編碼的明文仍照常掃描。新回歸 `tests/opencode-transparent-opaque-state.test.ts`（9 案，修正前 6 red）；`npm test` 44 files／955 passed（`web.test.ts` 需在沙盒外綁本機 port）；`verify-opaque-reasoning-integrity.mjs` exit 0。真實 OpenCode v2.0.28 host＋本地模型替身（`OPENCODE_BIN=/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode node scripts/e2e/run-responses-ws.mjs`）HTTP／WS × hook／wire 四案 PASS、exit 0。
 
-**真實模型重測（同日，使用者授權）：PASS。** 同一 fixture、來源 session 與 model，`retest-installed-plugin.mjs` exit 0：short-new-session `ses_ec6434aa6ffePiIBTFPg6OGygM`、source-history-fork `ses_ec6433c81ffes3pCWXGJWre0cM` 皆精確 marker、error／tool events 0、準備拒絕 0；私有服務 PID **58843** 已停止，全域設定與 compiled guard（SHA-256 `cc1499410400ffe8e6e664fbccce9fa615f0933e135a3fee843ab6a4ff003d5b`）前後一致。`invalid_encrypted_content` 未再出現，支持 opaque 改寫為先前失敗原因，但仍是單次、單 provider／model 的結果。`wsDegradationObserved=true` 為通用 WARN prefix 偵測，未據此判定問題。Runner 需配合目前 host 的 server 認證：已改為與 lifecycle runner 相同的隨機 `OPENCODE_SERVER_PASSWORD`／`OPENCODE_PASSWORD`，否則在 `server-start` 階段以 Unauthorized 失敗、不送出任何模型請求。下文保留修正前的紀錄。
+**真實模型重測（同日，使用者授權）：PASS。** 同一 fixture、來源 session 與 model，`retest-installed-plugin.mjs` exit 0：short-new-session `ses_…`、source-history-fork `ses_…` 皆精確 marker、error／tool events 0、準備拒絕 0；私有服務 PID **58843** 已停止，全域設定與 compiled guard（SHA-256 `cc1499410400ffe8e6e664fbccce9fa615f0933e135a3fee843ab6a4ff003d5b`）前後一致。`invalid_encrypted_content` 未再出現，支持 opaque 改寫為先前失敗原因，但仍是單次、單 provider／model 的結果。`wsDegradationObserved=true` 為通用 WARN prefix 偵測，未據此判定問題。Runner 需配合目前 host 的 server 認證：已改為與 lifecycle runner 相同的隨機 `OPENCODE_SERVER_PASSWORD`／`OPENCODE_PASSWORD`，否則在 `server-start` 階段以 Unauthorized 失敗、不送出任何模型請求。下文保留修正前的紀錄。
 
 ## 結論
 
@@ -22,7 +22,7 @@
 ### 條件與隔離
 
 - Host：OpenCode **v2.0.28**；獨立服務 PID **39711**，測試後已停止。
-- 來源 session：`ses_ed95147f0ffelZl7Ao33U13pgU`。
+- 來源 session：`ses_…`。
 - 測試前唯讀確認來源 model：`openai/gpt-6.1-sol#high`；本次沿用。
 - SG：`active`，共 95 plugins；使用修正後的 `dist`。
 - Guard SHA-256：`7d621101a223497a17f7340746b283c6318ddd2566c958068cac6142e8177d3a`，前後不變。
@@ -35,7 +35,7 @@
 OPENCODE_BIN="$(command -v opencode)" \
 node scripts/diagnostics/retest-installed-plugin.mjs \
   --plugin-config $TMPDIR/opencode/sg-live-capacity-20261014/opencode.json \
-  --source-session ses_ed95147f0ffelZl7Ao33U13pgU \
+  --source-session ses_… \
   --model 'openai/gpt-6.1-sol#high'
 ```
 
@@ -46,8 +46,8 @@ node scripts/diagnostics/retest-installed-plugin.mjs \
 | short-new-session | 0 | 是 | 否 | 0 | 0 | PASS |
 | source-history-fork | 1 | 否 | 否 | 1 | 0 | FAIL |
 
-- 短對話：`ses_ec676c419ffeTaYWZceSo1Vs3o`。
-- 歷史分叉：`ses_ec676a44cffe86NQrH9M2hh0Nq`；其 fork metadata 指回上述來源。
+- 短對話：`ses_…`。
+- 歷史分叉：`ses_…`；其 fork metadata 指回上述來源。
 - Runner 整體 exit **1**，沒有把短對話成功當成整體通過。
 - 新增準備拒絕數 **0**；未觀察到新的 stage/reason 準備拒絕。
 - 唯讀檢查分叉 stored error，取得 `invalid_encrypted_content`／400；不保存原始 provider error、密文或模型全文。

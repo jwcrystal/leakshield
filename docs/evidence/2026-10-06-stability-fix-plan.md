@@ -19,7 +19,7 @@
 | Config 範例 | 已調整，測試衝突已修正 | 空 NDA 陣列合法；缺省 fallback 值仍有獨立測試 |
 | GPT transport | 本地 HTTP 已驗證，真實認證待驗 | native OpenAI HTTP preference 可卸載；明確 WS config 會覆蓋並被拒絕，不宣稱可強制覆寫 config |
 | GPT 回覆 | 本地 C19 與 native identity 往返通過 | 主請求與顯示還原皆成立；初次錯誤是明確 WS 配置造成，不是已證明的 response parser 缺陷 |
-| 可見 token | 有實際事件 | 參考 session `ses_eef9c5755ffecoT3FQNvbiNwAS` 的 reasoning 與 websearch input 含 token；確切還原／執行缺口尚未完成因果追蹤 |
+| 可見 token | 有實際事件 | 參考 session `ses_…` 的 reasoning 與 websearch input 含 token；確切還原／執行缺口尚未完成因果追蹤 |
 | 重啟恢復 | 未證明可靠 | mapping 在記憶體；history 已持久化 token 時，重新啟動不能假設仍可還原 |
 
 重要更正：live log 的共用拒絕字串不能區分 WS 或 AI SDK。固定版本 OpenCode source 的 native OpenAI 預設為 WebSocket；配置中的 SDK 名稱也不等於實際路線。必須依實際 hook／transport 證據判断。
@@ -30,7 +30,7 @@
 
 ### P0-A：定位 GPT stream 失敗，完成 HTTP 相容性
 
-- 先由 reviewer 接手 [第一次失敗交接](../../.scratch/handoff-20261006-gpt-plugin.md)，取得新的診斷與驗證計畫，再續修。
+- 先由 reviewer 接手 第一次失敗交接（本機筆記，未收錄於 repo），取得新的診斷與驗證計畫，再續修。
 - 找出 nested cause，區分 capture fixture、guard response rewrite 與 host Responses consumer 的相容問題。
 - 驗證 provider transform 的載入順序、reload、卸載及設定覆寫效果；確認 endpoint、認證與其他 provider 不受誤改。
 - 分別驗證 OpenAI API key 與 ChatGPT 訂閱認證；不能將一種認證的成功外推到另一種。

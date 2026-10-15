@@ -2,7 +2,7 @@
 
 ## Disposition
 
-Specified oracle: openai/gpt-6.1-sol#high; session ses_f04cb8eafffek7BGOpdDXCm42v. User requested read-only review after applying repairs using cmd/DS V4.1 Flash; no additional fixer or implementation authorized by this review.
+Specified oracle: openai/gpt-6.1-sol#high; session ses_…. User requested read-only review after applying repairs using cmd/DS V4.1 Flash; no additional fixer or implementation authorized by this review.
 
 - Issue 22: **NEEDS REPAIR**; confirmed boundary, lifecycle and streaming defects remain.
 - Issue 20: admission placeholder corruption fixed, but **replay still NEEDS REPAIR**.
@@ -80,7 +80,7 @@ Repair confirmed cases with targeted regressions and independently review again 
 
 ## Classification correction after contract/fixture reassessment
 
-Designated oracle rechecked source, spec and bounded public-hook diagnostics in session ses_f04bd46d2ffe0JgJwnk47y4Io6. Earlier blanket classification of all six rows as confirmed production bugs was too broad. This section supersedes the corresponding severity/scope assertions above; do not use the earlier rows alone to authorize changes.
+Designated oracle rechecked source, spec and bounded public-hook diagnostics in session ses_…. Earlier blanket classification of all six rows as confirmed production bugs was too broad. This section supersedes the corresponding severity/scope assertions above; do not use the earlier rows alone to authorize changes.
 
 1. Transport/numeric/schema coverage is mixed policy and logic. Arbitrary header/query protection boundaries are not yet established; legitimate authentication must not be altered. Finite JSON numbers are explicitly preserved by accepted core and existing tests. Default scanner does not detect 12345678; only the custom rule does. Decide these policies before changing behavior. Owned token as schema property key still bypasses the existing structural-token refusal gate: that narrower case is a logic defect. Withdraw the whole-row HIGH disclosure characterization.
 2. Failed-request mapping capacity is a confirmed adapter logic defect, not failed atomicity inside core API operations. With valid safe context before each session's rejected HTTP request, 128 refused requests consume capacity and the next sensitive context fails. In this normal sequence sessions are tracked, so the previous blanket untracked-session claim does not apply. Validate the complete adapter operation before committing protection and test capacity after refusal.

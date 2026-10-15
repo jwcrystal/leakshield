@@ -22,6 +22,15 @@ MCP server mode has been removed. It depended on the model voluntarily calling a
 | CLI | `npx sensitive-guard --file ./path` | Explicit local or CI scans; it never sends content to a model |
 | Web UI | `npm run web` | Manual browser scans at `http://localhost:3000` |
 
+## Project status
+
+**Experimental, pre-release.** Nothing is published to npm yet: build locally (`npm ci && npm run build`) and point OpenCode at the `dist` directory.
+
+- Transparent mode has been verified on OpenCode v2.0.28 with local loopback providers, and once against a real OpenAI model. It is **not** a guarantee that nothing sensitive reaches a model: the recommended hook-first setup is reported as `PARTIAL` by `--doctor`, and content added after the plugin's hooks or sent by permitted tools (curl, remote MCP) is outside its coverage.
+- Not yet verified: OS-keychain persistence, a real Anthropic provider, long histories on other providers, long-running use ([#26](https://github.com/jwcrystal/sensitive-guard/issues/26)).
+- Defaults may still change before the first tagged release ([#24](https://github.com/jwcrystal/sensitive-guard/issues/24), [#27](https://github.com/jwcrystal/sensitive-guard/issues/27)); see the [changelog](CHANGELOG.md).
+- Verification records: [docs/evidence](docs/evidence/README.md). Report vulnerabilities privately: [SECURITY.md](SECURITY.md). License: [MIT](LICENSE).
+
 ---
 
 ## Detection Coverage

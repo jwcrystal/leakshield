@@ -27,7 +27,7 @@
 ```sh
 node scripts/diagnostics/retest-installed-plugin.mjs \
   --plugin-config $TMPDIR/opencode/sg-live-retest-20261011T143100/opencode.json \
-  --source-session ses_ed95147f0ffelZl7Ao33U13pgU \
+  --source-session ses_… \
   --model 'openai/gpt-6.1-sol#high'
 ```
 
@@ -38,8 +38,8 @@ node scripts/diagnostics/retest-installed-plugin.mjs \
 | short-new-session | 0 | 是 | 否 | 0 | 0 |
 | source-history-fork | 1 | 否 | 是 | 1 | 0 |
 
-- 短對話 session：`ses_ed45a9021ffekonqWGCXIHhleM`。
-- 分叉 session：`ses_ed45a7cd3ffekIpiKsglVExIdS`。
+- 短對話 session：`ses_…`。
+- 分叉 session：`ses_…`。
 - 整體 runner exit **1**；沒有把短對話通過當成整體成功。
 - 新增準備拒絕 **1**，主 log 總數由 4 增至 5。
 - Runner 的 `wsDegradationObserved=true` 是偵測通用 `[sensitive-guard] degraded:` prefix，不足以單獨證明 WS 失敗；不據此判定本次拒絕原因或完整還原能力。

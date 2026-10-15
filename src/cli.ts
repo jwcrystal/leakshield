@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * sensitive-guard — entry point
- * CLI 掃描模式：npx tsx src/index.ts --cli --text "..."
- * Web 模式：npx tsx src/index.ts --web
+ * CLI 掃描模式：npx tsx src/cli.ts --cli --text "..."
+ * Web 模式：npx tsx src/cli.ts --web
  */
 
 import { initWindowsEncoding } from "./utils/win-encoding.js";

@@ -10,7 +10,7 @@
 |---|---|---|---|---|
 | V2 載入 | ✅ | ✅ | ✅ | ❌ `Plugin must export a default definition…` |
 | 11 情境合成值外送 | **0** | **0** | system-secret 2 筆 | 與無插件相同（10/11 情境外送） |
-| 11 情境操作正確 | **11/11** | 10/11（重啟舊 token 寫檔拒絕） | 11/11 | 4/11（未形成 token，無從還原） |
+| 11 情境操作正確 | **11/11** | 10/11（重啟舊 token 寫檔拒絕） | 11/11 | 5/11（未形成 token，無從還原） |
 | Responses HTTP／WS／default | — | 6/6 不外送 | 3/3 不外送 | 3/3 各 2 筆外送 |
 | 長歷史真實模型分叉 | — | ✅（本日 opaque 修正後） | 未測 | 未測（無法載入） |
 
@@ -19,9 +19,9 @@
 - **SG**：`55e5ff9`（`dist` 與 HEAD 一致），兩組 `wireProtection: false`（hook）／`true`（wire），持久化關閉；另加 `sg-persist-test` 持久化組，使用測試專用 `InMemoryMappingKeyProvider`，**未驗證真實 Keychain ladder**。
 - **官方**：npm `latest` 仍為 0.14.0（`time.modified` 2026-09-06），`rehydra` 0.14.0；與 10/11 同一隔離安裝。
 - **EightDoor**：npm `latest` 仍為 0.14.3（2026-09-29）；同一隔離安裝。
-- **Harness**：`$TMPDIR/opencode/sg-rehydra-test-4Uw7Wx/` 的 `compare.mjs`（Chat Completions 11 情境）、`protocols.mjs`（native Responses 三種 transport）。各案例獨立 HOME／XDG、`opencode run --standalone`、loopback 模型替身、合成 email／env secret；**無真實模型請求**。持久化組以 `compare-current.mjs`（同腳本，只把寫死的舊 SG 副本路徑改指 `E2E_SG_DIST`）執行。
-- Harness 標頭字串仍印 `v2.0.25`，為寫死文字；實際執行檔 `opencode --version` 為 v2.0.28。
-- 「外送」= 請求 × 合成值種類命中數，不是獨立漏洞數。
+- **Harness**：本次結果由本機暫存目錄的 `compare.mjs`（Chat Completions 11 情境）與 `protocols.mjs`（native Responses 三種 transport）產生；各案例獨立 HOME／XDG、`opencode run --standalone`、loopback 模型替身、合成 email／env secret；**無真實模型請求**。持久化組以 `compare-current.mjs`（同腳本，只把寫死的舊 SG 副本路徑改指 `E2E_SG_DIST`）執行。
+- **已納入 repo（2026-10-15）**：暫存目錄被系統清掉，`protocols.mjs` 已遺失，現以 [`scripts/e2e/compare/`](../../scripts/e2e/compare/README.md) 的 `chat.mjs`／`responses.mjs` 取代。`chat.mjs` 由保留的 `compare-current.mjs` 轉入；**`responses.mjs` 是依殘留的案例設定與擷取結果重建，不是原檔**。以官方 0.14.0／EightDoor 0.14.3 重新安裝後重跑，Chat 55 案與 Responses 12 案的對話、操作、外送與 primary 路線結果與本文逐格一致（SG 預設組亦同）。數字以本文為準，之後重現請用 repo 內版本。
+- 「外送」在 Chat 是請求 × 合成值種類命中數，不是獨立漏洞數；Responses 表的外送是含原值的請求數（標題與主請求各算一筆，故未保護為 2）。
 
 ## Chat Completions 11 情境（每格：操作／外送筆數）
 

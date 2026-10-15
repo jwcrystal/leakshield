@@ -60,5 +60,5 @@
 ## 重現的限制
 
 - E2E 與診斷腳本在 [`scripts/e2e/`](../../scripts/e2e) 與 [`scripts/diagnostics/`](../../scripts/diagnostics)，可直接重跑。
-- **三方比較用的 `compare.mjs`／`protocols.mjs` 目前放在本機暫存目錄（`$TMPDIR/opencode/sg-rehydra-test-*/`），不在 repo 內**，也依賴隔離安裝的官方與 EightDoor 套件。暫存目錄可能被系統清除，要長期可重現需先把 harness 納入 repo。
+- 三方比較的測試腳本在 [`scripts/e2e/compare/`](../../scripts/e2e/compare/README.md)（Chat Completions 與 native Responses 兩支）。官方與 EightDoor 套件不隨 repo 附帶，需依該 README 另行安裝；未安裝時只跑 baseline 與 SG。10/14 的結果原由暫存目錄的舊版腳本產生，該目錄已被系統清除，repo 內版本已重跑並與其結果一致。
 - 各報告中的 `$TMPDIR/...` 證據目錄是當次測試的本機輸出，不保證仍存在。

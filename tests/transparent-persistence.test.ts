@@ -22,6 +22,7 @@
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -305,6 +306,34 @@ describe("guard persistence (B4)", () => {
       // …then the file corrupts AFTER setup (disk failure, crash torn write).
       writeFileSync(persistence.path, "torn write garbage");
       const event = contextEvent("ses_midflight", EMAIL);
+      await hook("session:context")(event);
+      expect((event.system as Array<{ text: string }>)[0].text).toMatch(/\[SGP2:PII_EMAIL-/);
+      expect(warnings.some((line) => line.includes("disabled for this process"))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("a failing absent-generation read mid-flight disables persistence, not the conversation", async () => {
+    const persistence = persistenceAt("absent-generation");
+    const seed = openMappingStore({
+      path: persistence.path,
+      keyProvider: new InMemoryMappingKeyProvider(TEST_KEY),
+    });
+    seed.close();
+    const warnings: string[] = [];
+    const spy = vi.spyOn(console, "warn").mockImplementation((message?: unknown) => {
+      warnings.push(String(message));
+    });
+    try {
+      const { hook } = await arm(persistence);
+      // The sessions table still answers (no such session), but the tombstone
+      // table the next read needs is damaged after setup.
+      const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
+      const damage = new DatabaseSync(persistence.path);
+      damage.exec("DROP TABLE session_tombstones");
+      damage.close();
+      const event = contextEvent("ses_absent_generation", EMAIL);
       await hook("session:context")(event);
       expect((event.system as Array<{ text: string }>)[0].text).toMatch(/\[SGP2:PII_EMAIL-/);
       expect(warnings.some((line) => line.includes("disabled for this process"))).toBe(true);

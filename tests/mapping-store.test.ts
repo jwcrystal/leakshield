@@ -194,6 +194,26 @@ describe("mapping store (B1)", () => {
   });
 });
 
+describe("open failure hygiene", () => {
+  it("closes the handle when PRAGMA setup fails on a non-SQLite file", () => {
+    const path = join(tempRoot, "not-a-database.db");
+    writeFileSync(path, "this is not a sqlite database, it is just text ".repeat(40));
+    const { DatabaseSync } = nodeRequire("node:sqlite") as typeof import("node:sqlite");
+    const original = DatabaseSync.prototype.close;
+    let closes = 0;
+    DatabaseSync.prototype.close = function (this: InstanceType<typeof DatabaseSync>) {
+      closes += 1;
+      return original.call(this);
+    };
+    try {
+      expect(() => openMappingStore({ path, keyProvider: new InMemoryMappingKeyProvider(Buffer.alloc(32, 0x11)) })).toThrow();
+    } finally {
+      DatabaseSync.prototype.close = original;
+    }
+    expect(closes).toBe(1);
+  });
+});
+
 describe("core seedSession (B3)", () => {
   it("rebuilds a session that restores both v2 and v1 tokens exactly", () => {
     const ps = createPseudonymizer(baseConfig);

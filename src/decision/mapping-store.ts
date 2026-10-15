@@ -294,12 +294,14 @@ export function openMappingStore(options: OpenMappingStoreOptions): MappingStore
   // zeroes freed pages for any deleting handle (writer or erase), busy_timeout
   // bounds lock waits instead of instant SQLITE_BUSY. journal_mode is a FILE
   // property: only writers may set it (a probe must never write the header).
-  db.exec("PRAGMA foreign_keys = ON");
-  db.exec("PRAGMA secure_delete = ON");
-  db.exec("PRAGMA busy_timeout = 5000");
-  if (!options.readOnly) db.exec("PRAGMA journal_mode = WAL");
   let epochAtOpen = 0;
   try {
+    // Inside the close-on-failure boundary: a corrupt/non-SQLite file or a
+    // filesystem error here must not leak the handle (fd/lock) either.
+    db.exec("PRAGMA foreign_keys = ON");
+    db.exec("PRAGMA secure_delete = ON");
+    db.exec("PRAGMA busy_timeout = 5000");
+    if (!options.readOnly) db.exec("PRAGMA journal_mode = WAL");
     const metaTable = db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'meta'")
       .get() as { name: string } | undefined;

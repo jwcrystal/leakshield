@@ -825,7 +825,13 @@ export function createTransparentSessionGuard(
       // R3-F2: the absent look carries the session's tombstone generation —
       // a delete that happens since (create→forget, sweep, eviction) must
       // make this handle's insert a conflict, never a resurrection.
-      persistVersions.set(sessionID, -(store.absentGeneration(sessionID) + 1));
+      try {
+        persistVersions.set(sessionID, -(store.absentGeneration(sessionID) + 1));
+      } catch {
+        // Same contract as loadSession above: a store that fails mid-flight
+        // disables persistence for the process, never the conversation.
+        disableStore("persistence: store read failed; disabled for this process, memory-only");
+      }
       return;
     }
     if (seed.entries.length === 0) {

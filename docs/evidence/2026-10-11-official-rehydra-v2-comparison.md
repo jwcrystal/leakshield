@@ -1,5 +1,7 @@
 # 目前 Sensitive Guard、官方 Rehydra 與 EightDoor：OpenCode V2 對照
 
+> **數字已更新（2026-10-14）：** 以同一 harness 在 v2.0.28 重跑的結果見 [三方重測](2026-10-14-three-way-comparison.md)；本文保留 10/11 的測試方法與 EightDoor 發現。
+
 日期：2026-10-11。Host：OpenCode v2.0.25。
 
 ## 結論

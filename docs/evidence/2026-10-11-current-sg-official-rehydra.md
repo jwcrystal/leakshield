@@ -1,5 +1,7 @@
 # SG 與官方 Rehydra：目前差異與日常體驗
 
+> **已被取代（2026-10-14）：** 本文是純 hook-only 前的快照，其中「既有對話分叉被阻擋」已解決，現況見 [三方重測](2026-10-14-three-way-comparison.md) 與 [容量與刪除回收重測](2026-10-14-live-capacity-and-lifecycle-retest.md)。
+
 日期：2026-10-11。使用比較表，分開「在你的 V2 環境實際發生什麼」與「程式設計提供什麼」。
 
 > 本比較是純 hook-only 修正前的快照。後續使用者批准並已實作 false 不掛出站傳輸／SDK 守門、不改 provider transport，保留入站 best-effort 還原；見 [最新契約與驗證](2026-10-11-pure-hook-only-verification.md)。這個模式修正不代表原始歷史遮罩拒絕已解決。

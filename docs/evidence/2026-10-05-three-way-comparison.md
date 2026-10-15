@@ -1,5 +1,7 @@
 # 三家差異比較 + 正常對話流程驗證
 
+> **已被取代（2026-10-14）：** 現行比較與數據見 [三方重測](2026-10-14-three-way-comparison.md)。本文的 VibeGuard／opencode-vibeguard 欄位來自 10/05 原始碼研究，從未實測，也未重跑。
+
 日期：2026-10-05
 分支：`feat/22-transparent-pseudonymization`（未推送）
 本文件回答兩個問題：

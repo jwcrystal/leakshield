@@ -1,8 +1,16 @@
 # Agent Transparent Pseudonymization — OpenCode V2
 
-Status: Specification approved for publication; implementation and runtime capabilities are not yet verified.
+Status: Specification approved for publication. The implementation is on branch `feat/22-transparent-pseudonymization` and has been verified on OpenCode v2.0.28 against synthetic loopback providers (HTTP, WebSocket, AI SDK, hook-only and wire modes) and, for the long-history fork, once against a real OpenAI model on 2026-10-14; see the [evidence index](../evidence/README.md). **Not yet verified:** OS keychain key custody on a real host, a real Anthropic Messages provider, other providers' long-history replay, and long-running soak. The Revision Log supersedes older requirements below where it says so; the 2026-10-06b refusal policy and later revisions differ in places from the contract recorded in #21.
 
 ## Revision Log
+
+### 2026-10-14 (owner-requested — provider-opaque reasoning state integrity)
+
+1. Provider-authenticated state is replayed byte-for-byte: an assistant message's reasoning/compaction `encrypted`, and `providerMetadata.<provider>.{reasoningEncryptedContent, encryptedContent, signature, redactedData, thoughtSignature}`. Scanning it rewrote bytes the provider authenticates when a detector matched inside the base64 and the replay failed with `invalid_encrypted_content`.
+2. The exemption needs both position (assistant message only) and shape (a single base64/base64url run whose decoded bytes are at most 75% printable, so readable or merely base64-encoded text is still scanned). Reasoning `text` and every other leaf are masked as before; a placeholder that moves or disappears during the transaction refuses the request.
+3. The wire remaskers already preserved Responses `encrypted_content`; this aligns the session-hook layer. Anthropic `signature` is verified over the thinking text, so masking that text can still invalidate it; this is not changed.
+
+Implementation/evidence: [capacity and lifecycle retest](../evidence/2026-10-14-live-capacity-and-lifecycle-retest.md), regression `tests/opencode-transparent-opaque-state.test.ts`.
 
 ### 2026-10-14 (owner-requested — bounded history capacity and explicit deletion reclamation)
 

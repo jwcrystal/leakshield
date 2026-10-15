@@ -365,3 +365,22 @@ describe("scanText() — zero-width characters flag only when they hide a findin
     expect(result.safe).toBe(false);
   });
 });
+
+describe("scanText() — zero-width characters cannot hide encoded secrets", () => {
+  const encodingConfig: GuardConfig = { ...defaultConfig, settings: { ...defaultConfig.settings, encoding_detection: true } };
+  const secret = "api key sk-Abcdef1234567890abcdef";
+  const sprinkle = (text: string, every: number) => text.replace(new RegExp(`(.{${every}})`, "g"), "$1\u200B");
+
+  it.each([
+    ["Base64 split once", sprinkle(Buffer.from(secret).toString("base64"), 12).replace(/\u200B/g, (m, offset) => (offset === 12 ? m : ""))],
+    ["Base64 split every 12 characters", sprinkle(Buffer.from(secret).toString("base64"), 12)],
+    ["hex split every 20 characters", sprinkle(Buffer.from(secret).toString("hex"), 20)],
+  ])("flags %s", (_name, encoded) => {
+    expect(scanText(`data: ${encoded}`, encodingConfig).safe).toBe(false);
+  });
+
+  it("does not flag harmless encoded text next to an emoji ZWJ sequence", () => {
+    const harmless = Buffer.from("just an ordinary sentence here").toString("base64");
+    expect(scanText(`\u{1F468}\u200D\u{1F4BB} ${harmless}`, encodingConfig).safe).toBe(true);
+  });
+});

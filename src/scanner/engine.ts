@@ -108,7 +108,7 @@ function honorDirectives(opts?: ScanOptions): boolean {
 }
 
 /** Invisible format characters that can splice a value so the rules miss it. */
-const ZERO_WIDTH_CHARS = /[​-‍﻿⁠᠎]/g;
+export const ZERO_WIDTH_CHARS = /[\u200B-\u200D\uFEFF\u2060\u180E]/g;
 
 /** Rule and exact-value findings for one text, in rule order. */
 function collectRuleFindings(
@@ -158,7 +158,7 @@ function collectRuleFindings(
 /**
  * Zero-width characters are common in harmless text: emoji ZWJ sequences, a
  * BOM at the start of a file, ZWNJ in Persian. They only matter when they
- * splice a sensitive value so the rules miss it (`pass‍word=…`, a key
+ * splice a sensitive value so the rules miss it (`pass\u200Dword=…`, a key
  * split by ZWSP). Strip them, rescan, and report only when the stripped text
  * yields a finding the raw text does not. Line breaks are untouched, so the
  * raw text's ignored lines still apply.

@@ -548,6 +548,14 @@ describe("fail-closed content hazards", () => {
     expect(ps.protectText("s", longUnicode)).toEqual({ ok: true, text: longUnicode });
   });
 
+  it("refuses an encoded secret split by zero-width characters", () => {
+    const ps = makeService();
+    const encoded = Buffer.from(`api key ${KEY1}`).toString("base64");
+    const split = `${encoded.slice(0, 12)}\u200B${encoded.slice(12)}`;
+    const result = ps.protectText("s", `data: ${split}`);
+    expect(result.ok).toBe(false);
+  });
+
   it("dedups identical spans from different rules and unions real overlaps", () => {
     const overlapping = createPseudonymizer(
       configWith({}, [{ description: "overlap-inner", pattern: "Abcdef1234567890", severity: "LOW" }]),

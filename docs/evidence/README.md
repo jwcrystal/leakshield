@@ -28,6 +28,7 @@
 | [2026-10-11 EightDoor 可用性實測](2026-10-11-rehydra-v2-usability-comparison.md) | 歷史 |
 | [2026-10-05 三家差異（VibeGuard／opencode-vibeguard／Rehydra）](2026-10-05-three-way-comparison.md) | 已被取代（VibeGuard 兩家為原始碼研究，從未實測） |
 | [2026-10-05 Provider／transport 參考研究](2026-10-05-provider-transport-reference-research.md) | 歷史（固定 SHA 的原始碼研究） |
+| [2026-10-15 Coding agent 攔截能力調查](2026-10-15-agent-interception-capabilities.md) | 研究（尚未實作；hook／local proxy adapter 的選型依據，只讀文件與原始碼） |
 
 ## 驗證與重測（依時間）
 

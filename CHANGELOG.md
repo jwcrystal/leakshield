@@ -8,6 +8,10 @@ All notable changes are listed here.
 
 - Releases ship the npm package only (the OpenCode plugin and the `leakshield` CLI). Standalone binaries are no longer attached; run the `Build binaries` workflow manually and download one from its artifacts when needed.
 
+### Fixed
+
+- `npm publish` no longer warns that the `bin` entry is invalid. The path is now `dist/cli.js` instead of `./dist/cli.js`; npm 11 rewrote the old form at publish time, and 0.1.0 still installs the `leakshield` command.
+
 ## 0.1.0 — 2026-10-16
 
 The first release. It is `0.1.0` rather than `1.0.0` because defaults may still change during 0.x.

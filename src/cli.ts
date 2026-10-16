@@ -8,6 +8,7 @@
 import { initWindowsEncoding } from "./utils/win-encoding.js";
 import { runCli } from "./transports/cli.js";
 import { runWeb } from "./transports/web.js";
+import { HELP_TEXT, isHelpRequest } from "./help.js";
 
 // Re-export for tests and external consumers
 export type { GuardConfig, Finding, ScanResult, FindingType, Rule } from "./types.js";
@@ -50,7 +51,9 @@ const valueOf = (flag: string): string | undefined => {
   return index !== -1 && index + 1 < args.length ? args[index + 1] : undefined;
 };
 
-if (isForgetMode) {
+if (isHelpRequest(args)) {
+  console.log(HELP_TEXT);
+} else if (isForgetMode) {
   // W2/B5: active erasure of persisted mappings. Content-free output.
   const { runForget } = await import("./forget.js");
   const { defaultStorePath } = await import("./decision/mapping-key.js");

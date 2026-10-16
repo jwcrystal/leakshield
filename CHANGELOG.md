@@ -10,6 +10,7 @@ All notable changes are listed here. The project has no tagged release yet; `pac
 - Opt-in encrypted mapping persistence (AES-256-GCM SQLite, TTL, `--forget`), with a doctor check. Needs Node 22.13+. (#23)
 - Per-rule toggles via `settings.rule_overrides`; validated credit card (Luhn), IBAN (mod-97) and public IPv4 rules; an opt-in URL rule. (#23)
 - CI running `tsc --noEmit` and the test suite on pull requests; host E2E runners and a plugin comparison harness. (#23)
+- `--help` / `-h` lists every mode and flag. Before this, `--help` was ignored and the CLI waited on stdin.
 
 ### Changed
 
@@ -25,6 +26,10 @@ These also affect the CLI, Web UI and block mode:
 ### Removed
 
 - MCP server mode (`scan_text`, `scan_file`, `scan_dir`, `reload_config`). It relied on the model calling a scan tool after the content had already reached it; use the OpenCode plugin, the CLI, or the Web UI instead.
+
+### Security
+
+- `js-yaml` raised to `^4.3.2` to pick up fixes for quadratic-CPU DoS advisories in merge-key and `!!omap` handling (GHSA-h67p-54hq-rp68, GHSA-52cp-r559-cp3m, GHSA-5p4m-2wfm-xmqj, GHSA-2883-xcg3-v3hh). The config loader parses YAML with it.
 
 ### Fixed
 

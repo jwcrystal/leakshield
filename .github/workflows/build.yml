@@ -19,7 +19,8 @@ jobs:
           - os: macos-latest
             target: bun-darwin-arm64
             out: leakshield-macos-arm
-          - os: macos-13
+          # GitHub retired the macos-13 (Intel) runner; bun cross-compiles x64.
+          - os: macos-latest
             target: bun-darwin-x64
             out: leakshield-macos-intel
 

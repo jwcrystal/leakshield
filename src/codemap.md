@@ -1,43 +1,28 @@
 # src/
 
 ## Responsibility
-Implements the application service layer: configuration loading, detection rule construction, text scanning, MCP tool registration, CLI argument handling, recursive file collection, and terminal reporting.
+Application layer for the scanner: configuration, rule engine, decision model, pseudonymization, OpenCode plugin hooks, and the CLI / Web transports.
 
 ## Design
-- Monolithic entry module in `index.ts` with four main concerns:
-  - domain types (`GuardConfig`, `Finding`, `ScanResult`)
-  - rule engine (`BUILTIN_RULES`, `buildDynamicRules`, `scanText`)
-  - MCP transport adapter (`createMcpServer`)
-  - CLI adapter (`runCli`, `printCliResult`, `collectFiles`)
-- Uses a rule-based scanning strategy where each `Rule` binds:
-  - finding type
-  - severity
-  - human-readable description
-  - regex matcher
-- Applies redaction before output so matched secrets are not returned in raw form.
-- Uses immutable aggregation patterns for result creation except for controlled local accumulation arrays/sets inside the scanner.
+- Entrypoints: `index.ts` (OpenCode plugin, re-exports `opencode.ts`) and `cli.ts` (CLI / Web / doctor / forget).
+- Subdirectories:
+  - `config/` — YAML config loading and validation.
+  - `rules/` — built-in and dynamic rules, encoding-aware detection, unicode checks, exact `.env` values.
+  - `scanner/` — `scanText()` engine, redaction and redaction verification.
+  - `decision/` — decision model, ingress gate, pseudonymization and mapping store (encrypted persistence is opt-in), deidentify, schema-string handling.
+  - `transports/` — `cli.ts` (non-interactive CLI output and exit codes) and `web.ts` / `web-ui.ts` (Web UI and REST).
+  - `i18n/` — `en` and `zh-TW` messages, selected by `SENSITIVE_GUARD_LANG`.
+  - `utils/` — file collection, path security, Windows console encoding.
+- Plugin modules: `opencode.ts` (v1), `opencode-v2.ts` (v2), `opencode-transparent*.ts` (transparent pseudonymization over HTTP/SSE, WebSocket, AI SDK), `opencode-hooks.ts`, `opencode-env-tools.ts` / `env-queries.ts` (opt-in read-only env queries), `plugin-options.ts`, `doctor.ts`, `forget.ts`.
+- MCP server mode no longer exists.
 
 ## Flow
-1. `loadConfig()` resolves YAML configuration from known paths.
-2. `scanText()` truncates input to `max_chars`, merges built-in and dynamic rules, then iterates regex matches.
-3. `getLineCol()` computes source coordinates for user-visible findings.
-4. `redact()` masks sensitive matched values before preview emission.
-5. `createMcpServer()` registers four MCP tools:
-   - `scan_text`
-   - `scan_file`
-   - `scan_dir`
-   - `reload_config`
-6. `runCli()` parses `--text`, `--file`, `--dir`, `--ext`, and `--stdin`, then prints summarized results and exits with status codes.
+1. A hook or transport hands text to the scanner.
+2. `scanText()` truncates to `max_chars`, runs the rules, and returns findings with masked previews.
+3. The decision model maps findings to `ALLOW` / `WARN` / `CONFIRM`.
+4. In the plugin, block mode refuses; transparent mode replaces values with stable placeholders and restores them in tool inputs and replies.
 
 ## Integration
-- Depends on:
-  - `@modelcontextprotocol/sdk` for MCP server and stdio transport
-  - `zod` for tool input schemas
-  - `js-yaml` for config parsing
-  - Node `fs`, `path`, `url` for IO/runtime paths
-  - `chalk` for CLI rendering
-- Consumes:
-  - `config/guard.config.yaml` dynamic keyword/domain configuration
-- Exposes:
-  - CLI executable behavior through `dist/index.js`
-  - MCP tools to external AI orchestration environments
+- Depends on `zod`, `js-yaml`, `chalk`, and `@opencode-ai/plugin`; transparent persistence uses Node's built-in `node:sqlite` (Node 22.13+).
+- Consumes `config/guard.config.yaml`.
+- Exposes the plugin entry, the `sensitive-guard` CLI, and the local Web UI / REST endpoint.

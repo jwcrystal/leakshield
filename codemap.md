@@ -1,36 +1,32 @@
 # Repository Atlas: sensitive-guard
 
 ## Responsibility
-Provides a dual-mode sensitive content scanner that blocks or flags secrets, PII, database credentials, internal domains, and NDA keywords before content is sent to AI systems.
+Scans for secrets, PII, database credentials, internal domains, and NDA keywords before content reaches an AI model. It blocks or pseudonymizes content inside OpenCode, and also offers a CLI and a local Web UI for explicit scans.
 
 ## Design
-- Single-package TypeScript application with one runtime entrypoint in `src/index.ts`.
-- Supports two execution modes:
-  - MCP server mode for tool-based integration with AI clients.
-  - CLI mode for direct local scanning of text, files, and directories.
-- Detection is rule-based:
-  - static built-in regex rules for common secret/PII patterns
-  - dynamic rules generated from `config/guard.config.yaml`
-- Output model is normalized through `ScanResult` and `Finding` structures.
+- Single-package TypeScript application with two entrypoints:
+  - `src/index.ts` — OpenCode plugin entry (re-exports `src/opencode.ts`); importing it never starts a process.
+  - `src/cli.ts` — CLI / Web UI / `--doctor` / `--forget` entry (the `sensitive-guard` bin and release binaries).
+- MCP server mode was removed: it relied on the model voluntarily calling a scan tool after it had already received the content.
+- Detection is rule-based: built-in rules, dynamic rules from `config/guard.config.yaml`, and opt-in exact `.env` value matching.
+- Output is normalized through `ScanResult` / `Finding`, then mapped to a decision (`ALLOW` / `WARN` / `CONFIRM`).
 
 ## Flow
-1. Process starts in `src/index.ts`.
-2. Runtime mode is selected via `--cli`.
-3. `loadConfig()` resolves configuration from project-local or user-home paths.
-4. Input is scanned through `scanText()` using built-in and config-derived rules.
-5. Results are surfaced either:
-   - as MCP tool responses over stdio, or
-   - as colored terminal output with process exit codes.
+1. The plugin hooks (or the CLI/Web transport) receive text.
+2. `loadConfig()` resolves configuration from project-local or user-home paths.
+3. `scanText()` applies built-in, dynamic and exact-value rules.
+4. `toDecisionResult()` produces the decision; redaction / pseudonymization produce the safe text.
+5. The plugin substitutes or refuses; the CLI prints results and sets the exit code (0 safe, 1 findings, 2 usage error).
 
 ## Integration
 ### System Entry Points
-- `src/index.ts` — application entrypoint, scanner engine, MCP registration, CLI runtime.
+- `src/index.ts` — OpenCode plugin entry.
+- `src/cli.ts` — CLI / Web UI entry.
 - `package.json` — npm metadata, scripts, dependency manifest.
-- `tsconfig.json` — TypeScript compilation policy.
 - `config/guard.config.yaml` — operator-tunable detection inputs.
 
 ### Directory Map
 | Directory | Responsibility Summary | Detailed Map |
 |-----------|------------------------|--------------|
-| `src/` | Implements scanner domain model, rule engine, MCP server tools, and CLI command flow. | [View Map](src/codemap.md) |
-| `config/` | Stores operator-defined NDA keywords, private domains, and scanner limits. | [View Map](config/codemap.md) |
+| `src/` | Plugin, scanner, decision model, pseudonymization, CLI and Web transports. | [View Map](src/codemap.md) |
+| `config/` | Operator-defined NDA keywords, private domains, rule overrides, and scanner limits. | [View Map](config/codemap.md) |

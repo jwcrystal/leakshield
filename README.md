@@ -19,7 +19,7 @@ MCP server mode has been removed. It depended on the model voluntarily calling a
 | Mode | Start it with | Use it for |
 |------|---------------|------------|
 | OpenCode Plugin | Add the `dist` directory (v2) or `dist/opencode.js` (v1) to `opencode.json` | Automatic, fail-closed protection for OpenCode model inputs and tool outputs |
-| CLI | `npx sensitive-guard --file ./path` | Explicit local or CI scans; it never sends content to a model |
+| CLI | `npm run scan -- --file ./path` (or `sensitive-guard --file ./path` after a global install / `npm link`) | Explicit local or CI scans; it never sends content to a model |
 | Web UI | `npm run web` | Manual browser scans at `http://localhost:3000` |
 
 ## Project status
@@ -66,15 +66,11 @@ Every scan produces a **decision** that tells the caller how to handle the conte
 | `WARN` | LOW-severity findings only | MEDIUM | Minor items detected — reminder shown, content can be sent |
 | `CONFIRM` | MEDIUM or HIGH findings | HIGH / CRITICAL | Sensitive content detected — user must explicitly confirm |
 
-### CONFIRM Actions
+### CONFIRM Handling
 
-When the decision is `CONFIRM`, the CLI presents three options:
+When the decision is `CONFIRM`, the CLI is non-interactive: it prints a warning card and a next-step hint, and does not prompt you to choose. The hint points to `--format json` (read `redactedContent`) or `--redact` (sanitized output). Exit code `1` means the content was blocked.
 
-1. **cancel** — do not send this content
-2. **send redacted** — use the sanitized version with sensitive spans replaced by `[REDACTED_TYPE]` placeholders
-3. **send original** — proceed at your own risk
-
-The `CONFIRM` decision also includes:
+The `CONFIRM` decision includes:
 - `recommendedAction`: `REVIEW` (MEDIUM findings) or `BLOCK` (HIGH findings)
 - `safePreview`: a masked excerpt around the first finding
 - `redactedContent`: the full content with all sensitive spans replaced
@@ -103,24 +99,29 @@ npm install
 npm run build
 ```
 
-After building, use `npx sensitive-guard`. If installed globally, use
-`sensitive-guard` directly. `npm run scan -- ...` remains available for local
-development from this repository.
+Nothing is published to npm yet, so `npx sensitive-guard` only works after you
+install the build globally or `npm link` it; then use `sensitive-guard`
+directly. `npm run scan -- ...` works from this repository without installing.
 
 ### npm Scripts
 
 | Command | Description |
 |---------|-------------|
-| `npm run build` | Compile TypeScript → `dist/` |
+| `npm run build` | Clean, then compile TypeScript → `dist/` |
+| `npm run clean` | Remove `dist/` |
+| `npm start` | Run the built CLI (`node dist/cli.js --cli`) |
 | `npm run dev` | CLI mode (no build needed) |
 | `npm run scan` | CLI scan (no build needed) |
 | `npm run web` | Start the local Web UI (no build needed) |
 | `npm test` | Run unit tests |
+| `npm run test:watch` | Run tests in watch mode |
 | `npm run binary` | Build standalone binary for current platform (macOS ARM) |
 | `npm run binary:win` | Cross-compile for Windows x64 |
 | `npm run binary:linux` | Cross-compile for Linux x64 |
 | `npm run binary:mac-intel` | Cross-compile for macOS Intel |
+| `npm run binary:win-icon` | Build the Windows binary with the app icon (`scripts/build-win.js`) |
 | `npm run binary:all` | Build all platforms at once |
+| `npm run bundle:mac` | Build the binary and package a macOS bundle (`scripts/bundle-mac.sh`) |
 
 ---
 
@@ -175,19 +176,19 @@ See [Configuration](#configuration) section for available options.
 
 ```bash
 # Scan text
-npx sensitive-guard --text 'sk-proj-test1234567890abcdef my_password="super_secret"'
+npm run scan -- --text 'sk-proj-test1234567890abcdef my_password="super_secret"'
 
 # Scan a single file
-npx sensitive-guard --file ./src/config.ts
+npm run scan -- --file ./src/config.ts
 
 # Scan an entire directory
-npx sensitive-guard --dir ./src
+npm run scan -- --dir ./src
 
 # Scan specific file extensions only
-npx sensitive-guard --dir ./src --ext .ts .env .json
+npm run scan -- --dir ./src --ext .ts .env .json
 
 # Read from stdin
-cat .env | npx sensitive-guard --stdin
+cat .env | npm run scan -- --stdin
 
 # Global installation
 sensitive-guard --file ./config.ts
@@ -201,13 +202,13 @@ Replace sensitive content with `[REDACTED_TYPE]` placeholders instead of just re
 
 ```bash
 # Redact stdin and print to stdout
-echo 'token=sk-proj-test1234567890abcdef' | npx sensitive-guard --redact --stdin
+echo 'token=sk-proj-test1234567890abcdef' | npm run scan -- --redact --stdin
 
 # Redact a file and write result to a new file
-npx sensitive-guard --redact --file .env --out .env.redacted
+npm run scan -- --redact --file .env --out .env.redacted
 
 # Dry-run: preview what would be redacted without producing any output
-npx sensitive-guard --redact --dry-run --file .env
+npm run scan -- --redact --dry-run --file .env
 ```
 
 Redacted output goes to **stdout**; the findings summary goes to **stderr** so they can be separated in pipelines.
@@ -234,7 +235,7 @@ By default, `--file` and `--dir` only accept paths **inside the current working 
 To intentionally scan a path outside the workspace, pass `--allow-outside`:
 
 ```bash
-npx sensitive-guard --file ../shared.env --allow-outside
+npm run scan -- --file ../shared.env --allow-outside
 ```
 
 > ⚠️ Outside-workspace scanning is opt-in. Only use it when you explicitly need to scan a file that lives outside the project root.
@@ -404,7 +405,7 @@ After publishing to npm, the same plugin can be configured as `"sensitive-guard"
 #### Automated install check: `--doctor`
 
 ```bash
-npx sensitive-guard --doctor     # or: sensitive-guard --doctor after global install
+npm run scan -- --doctor     # or: sensitive-guard --doctor after global install
 ```
 
 The doctor verifies the install without sending anything anywhere: it checks the OpenCode host version, finds `opencode.json` (workspace then global), confirms Sensitive Guard is registered with options that the plugin itself would accept, verifies a local `dist` entry point actually exists (a missing one makes OpenCode silently log-and-skip the plugin — sessions look normal but are unprotected), loads the guard config, and runs the synthetic-canary smoke scan locally. Exit code 0 means `PROTECTED` (v2) or `PARTIAL` (v1: session hooks only); any other status prints the failing check with a concrete fix, including a copy-paste registration snippet when the plugin is missing.
@@ -416,10 +417,6 @@ Doctor is an install-level check that runs outside the host — it cannot see in
 Sensitive Guard protects model-conversation content: prompts, replayed history, tool outputs, and (in transparent mode) provider-bound request bodies whose shape it can parse. It is **not** a tool-egress firewall: a permitted local tool can still transmit originals over the network via `curl`, a remote MCP server, or any other channel. Controlling tool destinations requires a separate permission layer outside this plugin.
 
 Detection also has known gaps: street/postal addresses, dates, IPv6, and generic assignments outside the keyword list or below the 8-character minimum pass through undetected. Credit card and IBAN numbers are detected only when the checksum validates; IP detection covers public IPv4 only; URL detection exists but is opt-in — see [Detection Coverage](#detection-coverage).
-
-<!-- Legacy transport row intentionally hidden.
-| `scan_dir` | Scan an entire directory (recursive, skips node_modules / .git). Returns per-file results |
--->
 
 ---
 
@@ -486,7 +483,7 @@ You: Replace line 12 with a dummy key, then continue
 ### Scenario 2: CLI scan before submitting a project
 
 ```bash
-npm run cli -- --dir ./my-project
+npm run scan -- --dir ./my-project
 # If exit code = 1, there are findings — fix them before sharing with AI
 ```
 
@@ -529,10 +526,10 @@ CLI output language is controlled by the `SENSITIVE_GUARD_LANG` environment vari
 
 ```bash
 # English output (default)
-npx sensitive-guard --text "your content"
+npm run scan -- --text "your content"
 
 # Traditional Chinese output
-SENSITIVE_GUARD_LANG=zh-TW npx sensitive-guard --text "你的內容"
+SENSITIVE_GUARD_LANG=zh-TW npm run scan -- --text "你的內容"
 ```
 
 You can also set it persistently in your shell profile:

@@ -57,7 +57,6 @@
 
 - 規格：[Agent Transparent Pseudonymization（現行）](../specs/2026-09-30-agent-transparent-pseudonymization.md)、[Sensitive-content continuity（草案）](../specs/2026-09-29-sensitive-content-continuity.md)
 - 決策與計畫：[拒絕政策簡化](../plans/2026-10-06-refusal-policy-simplification-decision.md)、[體驗優先政策](../plans/2026-10-11-experience-first-policy.md)、[對話優先調整](../plans/2026-10-11-conversation-first-adjustments.md)、[持久化路線](../plans/2026-10-07-persistence-decision-db-over-t2.md)、[SGP2 與持久化執行計畫](../plans/2026-10-07-sgp2-persistence-execution-plan.md)、[偵測補強](../plans/2026-10-07-detection-hardening-plan.md)、[透明防護硬化](../plans/2026-10-05-transparent-hardening-execution-plan.md)
-- 編碼偵測提案（未採行，`encoding_detection` 預設仍關閉）：[預設值評估](../ENCODING_DETECTION_EVALUATION.md)、[優化建議](../ENCODING_OPTIMIZATION.md)
 
 ## 重現的限制
 

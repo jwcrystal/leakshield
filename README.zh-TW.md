@@ -19,7 +19,7 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 | 模式 | 啟動方式 | 適用情境 |
 |------|----------|----------|
 | OpenCode Plugin | 在 `opencode.json` 加入 `dist` 目錄（v2）或 `dist/opencode.js`（v1） | 自動且 fail-closed 地保護 OpenCode 模型輸入與工具輸出 |
-| CLI | `npx sensitive-guard --file ./path` | 明確的本機或 CI 掃描；不會把內容送到模型 |
+| CLI | `npm run scan -- --file ./path`（全域安裝或 `npm link` 後可用 `sensitive-guard --file ./path`） | 明確的本機或 CI 掃描；不會把內容送到模型 |
 | Web UI | `npm run web` | 在 `http://localhost:3000` 手動以瀏覽器掃描 |
 
 ## 目前狀態
@@ -49,11 +49,49 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 | Token | GitHub PAT、JWT、Bearer Token | 🔴 HIGH |
 | DB 連線字串 | MongoDB、PostgreSQL、MySQL、Redis 等 | 🔴 HIGH |
 | 台灣身份證字號 | 格式驗證 | 🔴 HIGH |
+| 信用卡號 | 13–19 位數字，需通過 Luhn 檢查碼 | 🔴 HIGH |
+| IBAN | 緊湊或四字一組格式，需通過 mod-97 檢查碼 | 🔴 HIGH |
+| 公共 IPv4 位址 | 排除私有／回環／CGNAT／保留段 | 🟡 MEDIUM |
 | Email 地址 | 所有 email 格式 | 🟡 MEDIUM |
 | 台灣手機號碼 | **Opt-in** —— 預設關閉（`rule_overrides: { "phone-tw": true }` 開啟）；數字段是實測的誤報來源，關閉的代價是漏偵真電話 | 🟡 MEDIUM |
 | 國際電話 | **Opt-in** —— 預設關閉（`rule_overrides: { "phone-intl": true }` 開啟）；取捨同上 | 🟢 LOW |
+| HTTP(S) URL | **Opt-in** —— 預設關閉（`rule_overrides: { "url": true }` 開啟） | 🟢 LOW |
 | NDA 關鍵字 | 自訂（見 config/guard.config.yaml） | 🔴 HIGH |
 | 私有域名 | 自訂（見 config/guard.config.yaml） | 🟡 MEDIUM |
+
+---
+
+## 決策模型
+
+每次掃描都會產生一個**決策**，告訴呼叫端該如何處理內容：
+
+| 決策 | 時機 | 風險等級 | 意義 |
+|------|------|----------|------|
+| `ALLOW` | 沒有發現 | LOW | 內容乾淨，可安全送出 |
+| `WARN` | 只有 LOW 嚴重度的發現 | MEDIUM | 偵測到次要項目，顯示提醒，內容仍可送出 |
+| `CONFIRM` | 有 MEDIUM 或 HIGH 的發現 | HIGH / CRITICAL | 偵測到敏感內容，使用者必須明確確認 |
+
+### CONFIRM 的處理方式
+
+決策為 `CONFIRM` 時，CLI 是非互動式的：會印出警告卡片與下一步提示，不會請你選擇。提示會建議使用 `--format json`（讀取 `redactedContent`）或 `--redact`（輸出脫敏版本）。Exit code `1` 表示內容已被攔截。
+
+`CONFIRM` 決策包含：
+- `recommendedAction`：`REVIEW`（MEDIUM 發現）或 `BLOCK`（HIGH 發現）
+- `safePreview`：圍繞第一個發現的遮罩摘錄
+- `redactedContent`：所有敏感片段都已取代的完整內容
+
+### JSON 輸出欄位
+
+使用 `--format json` 時，輸出包含以下與決策相關的欄位：
+
+| 欄位 | 說明 |
+|------|------|
+| `decision` | `ALLOW`、`WARN` 或 `CONFIRM` |
+| `riskLevel` | `LOW`、`MEDIUM`、`HIGH` 或 `CRITICAL` |
+| `recommendedAction` | `REVIEW` 或 `BLOCK`（僅 CONFIRM） |
+| `findings` | 已清理的發現陣列（不含內部中繼資料） |
+| `safePreview` | 遮罩摘錄（僅 CONFIRM） |
+| `redactedContent` | 完整的脫敏文字（僅 CONFIRM） |
 
 ---
 
@@ -66,23 +104,28 @@ npm install
 npm run build
 ```
 
-Build 後使用 `npx sensitive-guard`。若已全域安裝，可直接使用
-`sensitive-guard`；在此 repository 開發時仍可用 `npm run scan -- ...`。
+尚未發佈到 npm，所以 `npx sensitive-guard` 要等你全域安裝或 `npm link` 這份 build 後才能用，之後可直接使用
+`sensitive-guard`；在此 repository 內不用安裝，直接用 `npm run scan -- ...` 即可。
 
 ### npm scripts 速查
 
 | 指令 | 說明 |
 |------|------|
-| `npm run build` | 編譯 TypeScript → `dist/` |
+| `npm run build` | 先清除再編譯 TypeScript → `dist/` |
+| `npm run clean` | 移除 `dist/` |
+| `npm start` | 執行已 build 的 CLI（`node dist/cli.js --cli`） |
 | `npm run dev` | CLI 模式（不需先 build） |
 | `npm run scan` | CLI 掃描（不需先 build） |
 | `npm run web` | 啟動本機 Web UI（不需先 build） |
 | `npm test` | 執行單元測試 |
+| `npm run test:watch` | 以 watch 模式執行測試 |
 | `npm run binary` | 建置當前平台的獨立執行檔（macOS ARM） |
 | `npm run binary:win` | 跨編譯 Windows x64 |
 | `npm run binary:linux` | 跨編譯 Linux x64 |
 | `npm run binary:mac-intel` | 跨編譯 macOS Intel |
+| `npm run binary:win-icon` | 建置帶圖示的 Windows 執行檔（`scripts/build-win.js`） |
 | `npm run binary:all` | 一次建置所有平台 |
+| `npm run bundle:mac` | 建置執行檔並打包 macOS bundle（`scripts/bundle-mac.sh`） |
 
 ---
 
@@ -127,7 +170,7 @@ mkdir -p ./config
 # 編輯 ./config/guard.config.yaml
 ```
 
-詳見[設定](#設定)章節。
+詳見[設定](#設定檔)章節。
 
 ---
 
@@ -137,19 +180,19 @@ mkdir -p ./config
 
 ```bash
 # 掃描文字
-npx sensitive-guard --text 'sk-proj-test1234567890abcdef my_password="super_secret"'
+npm run scan -- --text 'sk-proj-test1234567890abcdef my_password="super_secret"'
 
 # 掃描單一檔案
-npx sensitive-guard --file ./src/config.ts
+npm run scan -- --file ./src/config.ts
 
 # 掃描整個目錄
-npx sensitive-guard --dir ./src
+npm run scan -- --dir ./src
 
 # 只掃描特定副檔名
-npx sensitive-guard --dir ./src --ext .ts .env .json
+npm run scan -- --dir ./src --ext .ts .env .json
 
 # 從 stdin 讀取
-cat .env | npx sensitive-guard --stdin
+cat .env | npm run scan -- --stdin
 
 # 全域安裝後
 sensitive-guard --file ./config.ts
@@ -163,13 +206,13 @@ Exit code：`0` = 安全，`1` = 有問題，`2` = 檔案不存在
 
 ```bash
 # 脫敏 stdin，結果輸出到 stdout
-echo 'token=sk-proj-test1234567890abcdef' | npx sensitive-guard --redact --stdin
+echo 'token=sk-proj-test1234567890abcdef' | npm run scan -- --redact --stdin
 
 # 脫敏檔案，結果寫入新檔
-npx sensitive-guard --redact --file .env --out .env.redacted
+npm run scan -- --redact --file .env --out .env.redacted
 
 # Dry-run：只預覽哪些內容會被脫敏，不產生任何輸出
-npx sensitive-guard --redact --dry-run --file .env
+npm run scan -- --redact --dry-run --file .env
 ```
 
 脫敏後的文字輸出至 **stdout**；findings 摘要輸出至 **stderr**，方便在 pipeline 中分開處理。
@@ -203,13 +246,13 @@ npx sensitive-guard --redact --dry-run --file .env
 
 ```bash
 # 啟用編碼檢測掃描
-npx sensitive-guard --enable-encoding-detection --text "c2stcHJvai1hYmMxMjM="
+npm run scan -- --enable-encoding-detection --text "c2stcHJvai1hYmMxMjM="
 
 # 結合其他選項使用
-npx sensitive-guard --enable-encoding-detection --file ./config.yaml --format json
+npm run scan -- --enable-encoding-detection --file ./config.yaml --format json
 
 # 掃描目錄時啟用
-npx sensitive-guard --enable-encoding-detection --dir ./src --ext .ts .env
+npm run scan -- --enable-encoding-detection --dir ./src --ext .ts .env
 ```
 
 **效能考量**
@@ -223,15 +266,15 @@ npx sensitive-guard --enable-encoding-detection --dir ./src --ext .ts .env
 
 ```bash
 # Base64 編碼的 API Key
-echo "c2stcHJvai1hYmMxMjM=" | npx sensitive-guard --enable-encoding-detection --stdin
+echo "c2stcHJvai1hYmMxMjM=" | npm run scan -- --enable-encoding-detection --stdin
 # → 檢測到 "sk-proj-abc123" API Key
 
 # URL 編碼的敏感內容
-echo "password%3Dsecret123" | npx sensitive-guard --enable-encoding-detection --stdin
+echo "password%3Dsecret123" | npm run scan -- --enable-encoding-detection --stdin
 # → 檢測到 password 關鍵字
 
 # 正常文字不受影響
-echo "This is safe content" | npx sensitive-guard --enable-encoding-detection --stdin
+echo "This is safe content" | npm run scan -- --enable-encoding-detection --stdin
 # → 安全，無敏感內容
 ```
 
@@ -247,7 +290,7 @@ echo "This is safe content" | npx sensitive-guard --enable-encoding-detection --
 如需掃描工作目錄以外的路徑，請明確加上 `--allow-outside`：
 
 ```bash
-npx sensitive-guard --file ../shared.env --allow-outside
+npm run scan -- --file ../shared.env --allow-outside
 ```
 
 > ⚠️ 工作目錄外的掃描為選擇性開啟功能，僅在確實需要時使用。
@@ -408,6 +451,22 @@ rm -rf "$SMOKE_DIR"
 
 發布到 npm 後，可用 `"sensitive-guard"` 取代上述本機 `dist` 路徑。
 
+#### 自動安裝檢查：`--doctor`
+
+```bash
+sensitive-guard --doctor     # 全域安裝或 npm link 後；在 repo 內可用 npm run scan -- --doctor
+```
+
+Doctor 不會把任何內容送出去。它會檢查 OpenCode host 版本、尋找 `opencode.json`（先 workspace 再全域）、確認 Sensitive Guard 已用 plugin 本身接受的選項註冊、確認本機 `dist` 進入點真的存在（缺少時 OpenCode 會靜默記錄並跳過 plugin：session 看起來正常但沒有保護）、載入 guard 設定，並在本機跑合成 canary 的 smoke scan。Exit code 0 代表 `PROTECTED`（v2）或 `PARTIAL`（v1：僅 session hooks）；其他狀態會印出失敗的檢查項與具體修正方式，plugin 未註冊時還會附上可直接複製的註冊片段。
+
+Doctor 是在 host 之外執行的安裝層檢查，看不到執行中的 session。執行期的證明來自上面的 smoke test 或 `scripts/e2e/run-boundary.mjs`。
+
+### 保護範圍與不保護的部分
+
+Sensitive Guard 保護送往模型的對話內容：prompt、重播的歷史、工具輸出，以及（transparent 模式下）可解析其結構的 provider 請求 body。它**不是**工具對外連線的防火牆：被允許的本機工具仍可透過 `curl`、遠端 MCP server 或任何其他管道把原文傳出去。要管控工具的目的地，需要此 plugin 之外的權限層。
+
+偵測也有已知缺口：街道／郵遞地址、日期、IPv6，以及關鍵字清單之外或短於 8 字元的一般賦值都不會被偵測。信用卡與 IBAN 只有在檢查碼驗證通過時才會命中；IP 偵測只涵蓋公開 IPv4；URL 偵測存在但需手動開啟，見[偵測範圍](#偵測範圍)。
+
 ## 設定檔
 
 編輯 `config/guard.config.yaml`：
@@ -465,7 +524,7 @@ OpenCode：[讀取 config.ts]
 ### 場景二：你在 CLI 掃描整個專案再送出
 
 ```bash
-npx sensitive-guard --dir ./my-project
+npm run scan -- --dir ./my-project
 # 如果 exit code = 1，表示有問題，先處理再貼給 AI
 ```
 

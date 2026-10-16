@@ -22,6 +22,10 @@ These also affect the CLI, Web UI and block mode:
 - Zero-width characters are flagged only when they hide a value the rules would otherwise detect; emoji ZWJ sequences, a BOM, ZWNJ and ZWSP between words no longer flag or refuse. A key split by a word joiner (U+2060) is now caught. ([#29](https://github.com/jwcrystal/sensitive-guard/pull/29))
 - Release binaries are built from `src/cli.ts` (the CLI entry) instead of `src/index.ts`, which is now the plugin entry. (#23)
 
+### Removed
+
+- MCP server mode (`scan_text`, `scan_file`, `scan_dir`, `reload_config`). It relied on the model calling a scan tool after the content had already reached it; use the OpenCode plugin, the CLI, or the Web UI instead.
+
 ### Fixed
 
 - Long-history replays failed with `invalid_encrypted_content` because provider-opaque reasoning state was masked; it is now replayed byte-for-byte. (#23)

@@ -1,6 +1,6 @@
 {
   "name": "leakshield",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "OpenCode plugin, CLI, and web scanner for sensitive content before sending it to AI",
   "license": "MIT",
   "repository": {

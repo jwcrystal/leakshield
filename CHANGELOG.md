@@ -1,12 +1,14 @@
 # Changelog
 
-All notable changes are listed here. The project has no tagged release yet; `package.json` still says `1.0.0`.
+All notable changes are listed here.
 
-## Unreleased
+## 0.1.0 (unreleased)
+
+The first release. It is `0.1.0` rather than `1.0.0` because defaults may still change during 0.x.
 
 ### Added
 
-- OpenCode V2 **transparent pseudonymization** (`mode: "transparent"`, opt-in; the default `mode` is still `block`): sensitive values become stable placeholders like `[SGP2:API_KEY-xxxx-xxxx-xxxx]` before model requests and are restored in tool inputs and assistant replies. Chat Completions, Anthropic Messages, Responses (HTTP/SSE and native WebSocket) and AI SDK injected fetch. `wireProtection: false` is a pure hook-only mode. ([#23](https://github.com/jwcrystal/leakshield/pull/23))
+- OpenCode V2 **transparent pseudonymization** (`mode: "transparent"`, the v2 default; see Changed): sensitive values become stable placeholders like `[SGP2:API_KEY-xxxx-xxxx-xxxx]` before model requests and are restored in tool inputs and assistant replies. Chat Completions, Anthropic Messages, Responses (HTTP/SSE and native WebSocket) and AI SDK injected fetch. `wireProtection: false` is a pure hook-only mode. ([#23](https://github.com/jwcrystal/leakshield/pull/23))
 - Opt-in encrypted mapping persistence (AES-256-GCM SQLite, TTL, `--forget`), with a doctor check. Needs Node 22.13+. (#23)
 - Per-rule toggles via `settings.rule_overrides`; validated credit card (Luhn), IBAN (mod-97) and public IPv4 rules; an opt-in URL rule. (#23)
 - CI running `tsc --noEmit` and the test suite on pull requests; host E2E runners and a plugin comparison harness. (#23)
@@ -15,6 +17,8 @@ All notable changes are listed here. The project has no tagged release yet; `pac
 ### Changed
 
 - **Renamed to LeakShield.** The unscoped npm name `sensitive-guard` belongs to another package. Everything moves to `leakshield` with no compatibility aliases, since nothing has been released: the package and `leakshield` bin, the OpenCode plugin id, the `leakshield-ignore` directive, `LEAKSHIELD_LANG`, the `~/.leakshield/` config directory, the keychain service and mapping store directory (`~/.local/share/leakshield/`), the `x-leakshield-refusal` header and `leakshield_transport_refusal` code, binary names, and the GitHub repository (`jwcrystal/leakshield`). The `[SGP2:…]` placeholder format is unchanged.
+
+- **The OpenCode v2 plugin defaults to `mode: "transparent"`** when its options omit `mode`. OpenCode v1 still defaults to `block`, since transparent is v2-only. Set `"mode": "block"` to refuse instead of pseudonymize. With the default, `envQueries` is rejected, so set `mode` explicitly to use it. `--doctor` marks a default mode as `(default)`.
 
 These also affect the CLI, Web UI and block mode:
 
@@ -31,6 +35,9 @@ These also affect the CLI, Web UI and block mode:
 - MCP server mode (`scan_text`, `scan_file`, `scan_dir`, `reload_config`). It relied on the model calling a scan tool after the content had already reached it; use the OpenCode plugin, the CLI, or the Web UI instead.
 
 ### Security
+
+- Known: `@opencode-ai/plugin` depends on `effect`, which pulls in a `toml` version with 3 high advisories (GHSA-82x6-q7mm-w9cf). LeakShield never parses user-supplied TOML, so the exposure should be low; it waits on an upstream fix.
+- Transparent mode is verified against loopback providers and one real OpenAI model. Real OS keychains, a real Anthropic provider and long-history replay on other providers are not verified yet ([#26](https://github.com/jwcrystal/leakshield/issues/26)). Routes it cannot protect are refused, not forwarded.
 
 - `js-yaml` raised to `^4.3.2` to pick up fixes for quadratic-CPU DoS advisories in merge-key and `!!omap` handling (GHSA-h67p-54hq-rp68, GHSA-52cp-r559-cp3m, GHSA-5p4m-2wfm-xmqj, GHSA-2883-xcg3-v3hh). The config loader parses YAML with it.
 

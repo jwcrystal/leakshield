@@ -1,10 +1,9 @@
-name: Build
+name: Build binaries
 
+# Standalone CLI/Web binaries are not attached to releases; releases ship
+# the npm package only. Run this manually when a binary is needed and
+# download it from the run's artifacts.
 on:
-  push:
-    tags:
-      - "v*"
-  # Manual runs build the binaries without publishing a release.
   workflow_dispatch:
 
 jobs:
@@ -50,29 +49,3 @@ jobs:
           name: ${{ matrix.out }}
           path: ${{ matrix.out }}
 
-  release:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: leakshield-*
-          merge-multiple: true
-
-      - name: Package
-        run: |
-          zip leakshield-${{ github.ref_name }}.zip \
-            leakshield.exe leakshield-linux \
-            leakshield-macos-arm leakshield-macos-intel
-
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            leakshield-${{ github.ref_name }}.zip
-            leakshield.exe
-            leakshield-linux
-            leakshield-macos-arm
-            leakshield-macos-intel

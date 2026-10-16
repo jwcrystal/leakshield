@@ -2,6 +2,12 @@
 
 All notable changes are listed here.
 
+## Unreleased
+
+### Changed
+
+- Releases ship the npm package only (the OpenCode plugin and the `leakshield` CLI). Standalone binaries are no longer attached; run the `Build binaries` workflow manually and download one from its artifacts when needed.
+
 ## 0.1.0 — 2026-10-16
 
 The first release. It is `0.1.0` rather than `1.0.0` because defaults may still change during 0.x.

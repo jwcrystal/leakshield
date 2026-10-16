@@ -23,6 +23,7 @@ These also affect the CLI, Web UI and block mode:
 - ASCII NDA keywords match whole words (`NDA` no longer matches `agenda`); CJK keywords still match as substrings. (#23)
 - Unknown ids in `settings.rule_overrides` fail the config load. (#23)
 - Zero-width characters are flagged only when they hide a value the rules would otherwise detect; emoji ZWJ sequences, a BOM, ZWNJ and ZWSP between words no longer flag or refuse. A key split by a word joiner (U+2060) is now caught. ([#29](https://github.com/jwcrystal/leakshield/pull/29))
+- `package.json` declares `exports`, so only the package root (the OpenCode plugin) and `leakshield/package.json` can be imported; deep imports such as `leakshield/dist/opencode.js` fail with `ERR_PACKAGE_PATH_NOT_EXPORTED`. Registering the plugin by a `dist` path or `file://` URL still works.
 - Release binaries are built from `src/cli.ts` (the CLI entry) instead of `src/index.ts`, which is now the plugin entry. (#23)
 
 ### Removed

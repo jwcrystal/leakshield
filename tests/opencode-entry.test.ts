@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { Part } from "@opencode-ai/sdk";
-import sensitiveGuardPlugin, * as pluginModule from "../src/opencode.js";
+import leakshieldPlugin, * as pluginModule from "../src/opencode.js";
 
 const secret = "sk-12345678901234567890";
 const temporaryDirectories: string[] = [];
@@ -28,98 +28,98 @@ afterEach(() => {
 describe("OpenCode plugin entry", () => {
   it("exports one default entry that serves both OpenCode v1 and v2 loaders", () => {
     expect(Object.keys(pluginModule)).toEqual(["default"]);
-    expect(sensitiveGuardPlugin.id).toBe("sensitive-guard");
-    expect(typeof sensitiveGuardPlugin.setup).toBe("function");
-    expect(typeof sensitiveGuardPlugin.server).toBe("function");
+    expect(leakshieldPlugin.id).toBe("leakshield");
+    expect(typeof leakshieldPlugin.setup).toBe("function");
+    expect(typeof leakshieldPlugin.server).toBe("function");
   });
 
   it("removes sensitive content before constructing a provider payload (v1 server)", async () => {
-    const hooks = await sensitiveGuardPlugin.server({} as never, { mode: "block" });
+    const hooks = await leakshieldPlugin.server({} as never, { mode: "block" });
     const parts = [textPart(`token=${secret}`)];
 
     await hooks["chat.message"]!({ sessionID: "session-1" }, { message: {} as never, parts });
     const providerPayload = JSON.stringify(parts);
 
     expect(providerPayload).not.toContain(secret);
-    expect(providerPayload).toContain("Sensitive Guard blocked message text");
+    expect(providerPayload).toContain("LeakShield blocked message text");
   });
 
   it("blocks model requests when configuration loading fails (v1 server)", async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-"));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-"));
     temporaryDirectories.push(directory);
     const configPath = path.join(directory, "invalid.yaml");
     fs.writeFileSync(configPath, "settings:\n  max_chars: invalid\n", "utf8");
 
-    const hooks = await sensitiveGuardPlugin.server({} as never, { configPath });
+    const hooks = await leakshieldPlugin.server({} as never, { configPath });
     const invokeHook = hooks["chat.message"]!({ sessionID: "session-1" }, {
       message: {} as never,
       parts: [textPart("safe text")],
     });
 
-    await expect(invokeHook).rejects.toThrow("Sensitive Guard initialization failed");
+    await expect(invokeHook).rejects.toThrow("LeakShield initialization failed");
   });
 
   it("loads configured env_files relative to the OpenCode workspace (v1 server)", async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-"));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-"));
     temporaryDirectories.push(directory);
     const configPath = path.join(directory, "guard.config.yaml");
     fs.writeFileSync(path.join(directory, ".env"), `TOKEN=${exactSecret}\n`, "utf8");
     fs.writeFileSync(configPath, "settings:\n  env_files:\n    - .env\n", "utf8");
 
-    const hooks = await sensitiveGuardPlugin.server({ worktree: directory } as never, { configPath });
+    const hooks = await leakshieldPlugin.server({ worktree: directory } as never, { configPath });
     const parts = [textPart(`token=${exactSecret}`)];
     await hooks["chat.message"]!({ sessionID: "session-1" }, { message: {} as never, parts });
 
     expect(JSON.stringify(parts)).not.toContain(exactSecret);
-    expect(JSON.stringify(parts)).toContain("Sensitive Guard blocked message text");
+    expect(JSON.stringify(parts)).toContain("LeakShield blocked message text");
   });
 
   it("fails closed when deidentify is requested on the v1 server (v1 has no de-identification)", async () => {
-    const hooks = await sensitiveGuardPlugin.server({} as never, { mode: "redact", deidentify: true });
+    const hooks = await leakshieldPlugin.server({} as never, { mode: "redact", deidentify: true });
 
     await expect(
       hooks["chat.message"]!({ sessionID: "session-1" }, {
         message: {} as never,
         parts: [textPart("safe text")],
       }),
-    ).rejects.toThrow("Sensitive Guard initialization failed");
+    ).rejects.toThrow("LeakShield initialization failed");
   });
 
   it("blocks model requests when plugin options are invalid (v1 server)", async () => {
-    const hooks = await sensitiveGuardPlugin.server({} as never, { mode: "unsupported" });
+    const hooks = await leakshieldPlugin.server({} as never, { mode: "unsupported" });
 
     await expect(hooks["experimental.chat.messages.transform"]!({}, { messages: [] }))
-      .rejects.toThrow("Sensitive Guard initialization failed");
+      .rejects.toThrow("LeakShield initialization failed");
   });
 
   it("registers no env query tools by default (v1 server)", async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-"));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-"));
     temporaryDirectories.push(directory);
     const configPath = path.join(directory, "guard.config.yaml");
     fs.writeFileSync(path.join(directory, ".env"), "KEY=value\n", "utf8");
     fs.writeFileSync(configPath, "settings:\n  env_files:\n    - .env\n", "utf8");
 
-    const hooks = await sensitiveGuardPlugin.server({ worktree: directory } as never, { configPath });
+    const hooks = await leakshieldPlugin.server({ worktree: directory } as never, { configPath });
     expect(hooks.tool).toBeUndefined();
   });
 
   it("fails closed when envQueries has the wrong type (v1 server)", async () => {
-    const hooks = await sensitiveGuardPlugin.server({} as never, { envQueries: "yes" });
+    const hooks = await leakshieldPlugin.server({} as never, { envQueries: "yes" });
 
     await expect(hooks["chat.message"]!({ sessionID: "session-1" }, {
       message: {} as never,
       parts: [textPart("safe text")],
-    })).rejects.toThrow("Sensitive Guard initialization failed");
+    })).rejects.toThrow("LeakShield initialization failed");
   });
 
   it("exposes readonly env query tools when envQueries is enabled (v1 server)", async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-"));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-"));
     temporaryDirectories.push(directory);
     const configPath = path.join(directory, "guard.config.yaml");
     fs.writeFileSync(path.join(directory, ".env"), `API_TOKEN=${exactSecret}\nFLAG=true\n`, "utf8");
     fs.writeFileSync(configPath, "settings:\n  env_files:\n    - .env\n", "utf8");
 
-    const hooks = await sensitiveGuardPlugin.server(
+    const hooks = await leakshieldPlugin.server(
       { worktree: directory } as never,
       { configPath, envQueries: true },
     );
@@ -169,13 +169,13 @@ describe("OpenCode plugin entry", () => {
   });
 
   it("keeps protection hooks active alongside env query tools (v1 server)", async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-"));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-"));
     temporaryDirectories.push(directory);
     const configPath = path.join(directory, "guard.config.yaml");
     fs.writeFileSync(path.join(directory, ".env"), `API_TOKEN=${exactSecret}\n`, "utf8");
     fs.writeFileSync(configPath, "settings:\n  env_files:\n    - .env\n", "utf8");
 
-    const hooks = await sensitiveGuardPlugin.server(
+    const hooks = await leakshieldPlugin.server(
       { worktree: directory } as never,
       { configPath, envQueries: true },
     );
@@ -203,7 +203,7 @@ describe("OpenCode plugin entry", () => {
       },
     };
 
-    await sensitiveGuardPlugin.setup(ctx as never);
+    await leakshieldPlugin.setup(ctx as never);
 
     expect(registered.map((r) => `${r.domain}:${r.name}`)).toEqual([
       "session:prompt",
@@ -219,7 +219,7 @@ describe("OpenCode plugin entry", () => {
     await promptHook(event);
 
     expect((event.prompt as { text: string }).text).not.toContain(secret);
-    expect((event.prompt as { text: string }).text).toContain("Sensitive Guard blocked message text");
+    expect((event.prompt as { text: string }).text).toContain("LeakShield blocked message text");
   });
 
   it("registers fail-closed hooks when plugin options are invalid (v2 setup)", async () => {
@@ -241,12 +241,12 @@ describe("OpenCode plugin entry", () => {
       },
     };
 
-    await sensitiveGuardPlugin.setup(ctx as never);
+    await leakshieldPlugin.setup(ctx as never);
 
     expect(registered.length).toBe(6);
     const promptHook = registered[0].callback as (event: unknown) => Promise<void>;
     await expect(promptHook({ prompt: { text: "safe text" } })).rejects.toThrow(
-      "Sensitive Guard initialization failed",
+      "LeakShield initialization failed",
     );
   });
 
@@ -269,7 +269,7 @@ describe("OpenCode plugin entry", () => {
       },
     };
 
-    await sensitiveGuardPlugin.setup(ctx as never);
+    await leakshieldPlugin.setup(ctx as never);
 
     expect(registered.map((r) => `${r.domain}:${r.name}`)).toEqual([
       "session:prompt",
@@ -312,12 +312,12 @@ describe("OpenCode plugin entry", () => {
       },
     };
 
-    await sensitiveGuardPlugin.setup(ctx as never);
+    await leakshieldPlugin.setup(ctx as never);
 
     expect(registered.length).toBe(6);
     const promptHook = registered[0].callback as (event: unknown) => Promise<void>;
     await expect(promptHook({ prompt: { text: "safe text" } })).rejects.toThrow(
-      "Sensitive Guard initialization failed",
+      "LeakShield initialization failed",
     );
   });
 
@@ -340,12 +340,12 @@ describe("OpenCode plugin entry", () => {
       },
     };
 
-    await sensitiveGuardPlugin.setup(ctx as never);
+    await leakshieldPlugin.setup(ctx as never);
 
     expect(registered.length).toBe(6);
     const promptHook = registered[0].callback as (event: unknown) => Promise<void>;
     await expect(promptHook({ prompt: { text: "safe text" } })).rejects.toThrow(
-      "Sensitive Guard initialization failed",
+      "LeakShield initialization failed",
     );
   });
 
@@ -368,12 +368,12 @@ describe("OpenCode plugin entry", () => {
       },
     };
 
-    await sensitiveGuardPlugin.setup(ctx as never);
+    await leakshieldPlugin.setup(ctx as never);
 
     expect(registered.length).toBe(6);
     const promptHook = registered[0].callback as (event: unknown) => Promise<void>;
     await expect(promptHook({ prompt: { text: "safe text" } })).rejects.toThrow(
-      "Sensitive Guard initialization failed",
+      "LeakShield initialization failed",
     );
   });
 
@@ -394,13 +394,13 @@ describe("OpenCode plugin entry", () => {
       },
     };
 
-    await sensitiveGuardPlugin.setup(ctx as never);
+    await leakshieldPlugin.setup(ctx as never);
 
     expect(transforms).toHaveLength(0);
   });
 
   it("registers readonly env query tools when envQueries is enabled (v2 setup)", async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-"));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-"));
     temporaryDirectories.push(directory);
     const configPath = path.join(directory, "guard.config.yaml");
     fs.writeFileSync(path.join(directory, ".env"), `API_TOKEN=${exactSecret}\nFLAG=true\n`, "utf8");
@@ -424,7 +424,7 @@ describe("OpenCode plugin entry", () => {
       },
     };
 
-    await sensitiveGuardPlugin.setup(ctx as never);
+    await leakshieldPlugin.setup(ctx as never);
 
     expect(addedTools.map((t) => t.name).sort()).toEqual([
       "guard_env_compare",
@@ -477,7 +477,7 @@ describe("OpenCode plugin entry", () => {
       provider: { transform: async () => ({ dispose: async () => {} }) },
     };
 
-    await sensitiveGuardPlugin.setup(ctx as never);
+    await leakshieldPlugin.setup(ctx as never);
 
     expect(registered.map((r) => `${r.domain}:${r.name}`)).toEqual([
       "session:context",
@@ -514,7 +514,7 @@ describe("OpenCode plugin entry", () => {
       callbacks.set(`${domain}:${name}`, callback);
       return { dispose: async () => {} };
     };
-    const cleanup = await sensitiveGuardPlugin.setup({
+    const cleanup = await leakshieldPlugin.setup({
       options: { mode: "transparent", wireProtection: false },
       location: { directory: process.cwd() },
       session: { hook: hookFor("session") }, tool: { hook: hookFor("tool") },
@@ -532,7 +532,7 @@ describe("OpenCode plugin entry", () => {
       callbacks.set(`${domain}:${name}`, callback);
       return { dispose: async () => {} };
     };
-    const cleanup = await sensitiveGuardPlugin.setup({
+    const cleanup = await leakshieldPlugin.setup({
       options: { mode: "transparent", ...(wireProtection === undefined ? {} : { wireProtection }) },
       location: { directory: process.cwd() },
       session: { hook: hookFor("session") }, tool: { hook: hookFor("tool") }, aisdk: { hook: hookFor("aisdk") },
@@ -562,13 +562,13 @@ describe("OpenCode plugin entry", () => {
       callbacks.set(`${domain}:${name}`, callback);
       return { dispose: async () => {} };
     };
-    const cleanup = await sensitiveGuardPlugin.setup({
+    const cleanup = await leakshieldPlugin.setup({
       options: { mode: "transparent", wireProtection: "false" },
       location: { directory: process.cwd() },
       session: { hook: hookFor("session") }, tool: { hook: hookFor("tool") }, aisdk: { hook: hookFor("aisdk") },
     } as never);
     for (const name of ["session:context", "session:http.request", "session:http.response", "session:experimental.ws.handshake", "aisdk:language", "tool:execute.before"]) {
-      expect(() => callbacks.get(name)!({})).toThrow("Sensitive Guard initialization failed");
+      expect(() => callbacks.get(name)!({})).toThrow("LeakShield initialization failed");
     }
     await cleanup?.();
   });
@@ -589,7 +589,7 @@ describe("OpenCode plugin entry", () => {
       aisdk: { hook: hookFor("aisdk") },
     };
 
-    const cleanup = await sensitiveGuardPlugin.setup(ctx as never);
+    const cleanup = await leakshieldPlugin.setup(ctx as never);
 
     // Transparent fallback must cover the transport routes (http/ws/aisdk),
     // not only the redact-mode hooks — a partial fallback leaves them open.
@@ -609,7 +609,7 @@ describe("OpenCode plugin entry", () => {
     ]);
     for (const record of registered) {
       await expect((async () => record.callback({ sessionID: "s" }))()).rejects.toThrow(
-        "Sensitive Guard initialization failed",
+        "LeakShield initialization failed",
       );
     }
     expect(typeof cleanup).toBe("function");
@@ -631,19 +631,19 @@ describe("OpenCode plugin entry", () => {
       aisdk: { hook: hookFor("aisdk") },
     };
 
-    const cleanup = await sensitiveGuardPlugin.setup(ctx as never);
+    const cleanup = await leakshieldPlugin.setup(ctx as never);
 
     expect(registered).toHaveLength(12);
     for (const record of registered) {
       await expect((async () => record.callback({ sessionID: "s" }))()).rejects.toThrow(
-        "Sensitive Guard initialization failed",
+        "LeakShield initialization failed",
       );
     }
     expect(typeof cleanup).toBe("function");
   });
 
   it("fails closed across all routes when transparent config loading fails (v2 setup)", async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-"));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-"));
     temporaryDirectories.push(directory);
     const configPath = path.join(directory, "invalid.yaml");
     fs.writeFileSync(configPath, "settings:\n  max_chars: invalid\n", "utf8");
@@ -663,14 +663,14 @@ describe("OpenCode plugin entry", () => {
       aisdk: { hook: hookFor("aisdk") },
     };
 
-    const cleanup = await sensitiveGuardPlugin.setup(ctx as never);
+    const cleanup = await leakshieldPlugin.setup(ctx as never);
 
     expect(registered).toHaveLength(12);
     const httpHook = registered.find((r) => r.name === "http.request")!.callback as (
       event: unknown,
     ) => Promise<void>;
     await expect((async () => httpHook({ sessionID: "s" }))()).rejects.toThrow(
-      "Sensitive Guard initialization failed",
+      "LeakShield initialization failed",
     );
     expect(typeof cleanup).toBe("function");
   });
@@ -689,7 +689,7 @@ describe("OpenCode plugin entry", () => {
       provider: { transform: async () => ({ dispose: async () => void disposed.push("provider:transform") }) },
     };
 
-    const cleanup = await sensitiveGuardPlugin.setup(ctx as never);
+    const cleanup = await leakshieldPlugin.setup(ctx as never);
     expect(typeof cleanup).toBe("function");
 
     await (cleanup as () => Promise<void>)();
@@ -721,7 +721,7 @@ describe("OpenCode plugin entry", () => {
         return { dispose: async () => { disposed = true; } };
       } },
     };
-    const cleanup = await sensitiveGuardPlugin.setup(ctx as never);
+    const cleanup = await leakshieldPlugin.setup(ctx as never);
     expect(providers.map((provider) => (provider.settings as { transport?: string }).transport)).toEqual([
       "http", "http", "websocket", "websocket",
     ]);
@@ -744,24 +744,24 @@ describe("OpenCode plugin entry", () => {
       session: { hook }, tool: { hook }, aisdk: { hook },
       provider: { transform: async () => { throw new Error("synthetic registration failure"); } },
     };
-    const cleanup = await sensitiveGuardPlugin.setup(ctx as never);
+    const cleanup = await leakshieldPlugin.setup(ctx as never);
     expect(disposed).toBe(12);
     expect(callbacks).toHaveLength(24);
     for (const callback of callbacks.slice(12)) {
-      expect(() => callback({ sessionID: "s" })).toThrow("Sensitive Guard initialization failed");
+      expect(() => callback({ sessionID: "s" })).toThrow("LeakShield initialization failed");
     }
     await (cleanup as () => Promise<void>)();
     expect(disposed).toBe(24);
   });
 
   it("fails closed when transparent is requested on the v1 server (v1 has no transport hooks)", async () => {
-    const hooks = await sensitiveGuardPlugin.server({} as never, { mode: "transparent" });
+    const hooks = await leakshieldPlugin.server({} as never, { mode: "transparent" });
 
     await expect(
       hooks["chat.message"]!({ sessionID: "session-1" }, {
         message: {} as never,
         parts: [textPart("safe text")],
       }),
-    ).rejects.toThrow("Sensitive Guard initialization failed");
+    ).rejects.toThrow("LeakShield initialization failed");
   });
 });

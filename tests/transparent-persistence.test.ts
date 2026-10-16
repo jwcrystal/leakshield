@@ -119,7 +119,7 @@ describe("guard persistence (B4)", () => {
     const spy = vi.spyOn(console, "info").mockImplementation((message?: unknown) => logs.push(String(message)));
     try {
       const { guard } = await arm(persistenceAt("status"));
-      expect(logs).toContain("[sensitive-guard] persistence: active; key=injected; ttl=7d; cleanup=on-store-open");
+      expect(logs).toContain("[leakshield] persistence: active; key=injected; ttl=7d; cleanup=on-store-open");
       expect(logs.join("\n")).not.toContain(EMAIL);
       await guard.dispose();
     } finally { spy.mockRestore(); }

@@ -1,16 +1,16 @@
 {
-  "name": "sensitive-guard",
+  "name": "leakshield",
   "version": "1.0.0",
   "description": "OpenCode plugin, CLI, and web scanner for sensitive content before sending it to AI",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jwcrystal/sensitive-guard.git"
+    "url": "git+https://github.com/jwcrystal/leakshield.git"
   },
   "bugs": {
-    "url": "https://github.com/jwcrystal/sensitive-guard/issues"
+    "url": "https://github.com/jwcrystal/leakshield/issues"
   },
-  "homepage": "https://github.com/jwcrystal/sensitive-guard#readme",
+  "homepage": "https://github.com/jwcrystal/leakshield#readme",
   "keywords": [
     "opencode",
     "opencode-plugin",
@@ -30,7 +30,7 @@
     "node": ">=20"
   },
   "bin": {
-    "sensitive-guard": "./dist/cli.js"
+    "leakshield": "./dist/cli.js"
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
@@ -42,11 +42,11 @@
     "web": "tsx src/cli.ts --web",
     "test": "vitest run",
     "test:watch": "vitest",
-    "binary": "bun build --compile --target=bun-darwin-arm64 ./src/cli.ts --outfile=sensitive-guard",
-    "binary:win": "bun build --compile --target=bun-windows-x64 ./src/cli.ts --outfile=sensitive-guard.exe",
+    "binary": "bun build --compile --target=bun-darwin-arm64 ./src/cli.ts --outfile=leakshield",
+    "binary:win": "bun build --compile --target=bun-windows-x64 ./src/cli.ts --outfile=leakshield.exe",
     "binary:win-icon": "node scripts/build-win.js",
-    "binary:linux": "bun build --compile --target=bun-linux-x64 ./src/cli.ts --outfile=sensitive-guard-linux",
-    "binary:mac-intel": "bun build --compile --target=bun-darwin-x64 ./src/cli.ts --outfile=sensitive-guard-intel",
+    "binary:linux": "bun build --compile --target=bun-linux-x64 ./src/cli.ts --outfile=leakshield-linux",
+    "binary:mac-intel": "bun build --compile --target=bun-darwin-x64 ./src/cli.ts --outfile=leakshield-intel",
     "binary:all": "npm run binary && npm run binary:win && npm run binary:linux && npm run binary:mac-intel",
     "bundle:mac": "npm run binary && bash scripts/bundle-mac.sh"
   },

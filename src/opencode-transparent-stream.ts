@@ -39,7 +39,7 @@ export function createRecoveringSseStream(
   const recover = (controller: ReadableStreamDefaultController<Uint8Array>): void => {
     bypass = true;
     // Static, once per stream. Never include an exception or frame contents.
-    console.warn("[sensitive-guard] degraded: SSE restoration stopped; undelivered original frames kept literal");
+    console.warn("[leakshield] degraded: SSE restoration stopped; undelivered original frames kept literal");
     abandon();
     for (const part of [...originals, ...frameParts, ...lineParts]) controller.enqueue(part);
     clear();

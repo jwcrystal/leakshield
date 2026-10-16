@@ -12,16 +12,16 @@ jobs:
         include:
           - os: ubuntu-latest
             target: bun-linux-x64
-            out: sensitive-guard-linux
+            out: leakshield-linux
           - os: windows-latest
             target: bun-windows-x64
-            out: sensitive-guard.exe
+            out: leakshield.exe
           - os: macos-latest
             target: bun-darwin-arm64
-            out: sensitive-guard-macos-arm
+            out: leakshield-macos-arm
           - os: macos-13
             target: bun-darwin-x64
-            out: sensitive-guard-macos-intel
+            out: leakshield-macos-intel
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -34,7 +34,7 @@ jobs:
 
       - name: Embed icon (Windows)
         if: matrix.os == 'windows-latest'
-        run: bun build --compile --target=bun-windows-x64 --windows-icon=icon.ico ./src/cli.ts --outfile=sensitive-guard.exe
+        run: bun build --compile --target=bun-windows-x64 --windows-icon=icon.ico ./src/cli.ts --outfile=leakshield.exe
         shell: bash
 
       - uses: actions/upload-artifact@v4
@@ -50,20 +50,20 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: sensitive-guard-*
+          pattern: leakshield-*
           merge-multiple: true
 
       - name: Package
         run: |
-          zip sensitive-guard-${{ github.ref_name }}.zip \
-            sensitive-guard.exe sensitive-guard-linux \
-            sensitive-guard-macos-arm sensitive-guard-macos-intel
+          zip leakshield-${{ github.ref_name }}.zip \
+            leakshield.exe leakshield-linux \
+            leakshield-macos-arm leakshield-macos-intel
 
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            sensitive-guard-${{ github.ref_name }}.zip
-            sensitive-guard.exe
-            sensitive-guard-linux
-            sensitive-guard-macos-arm
-            sensitive-guard-macos-intel
+            leakshield-${{ github.ref_name }}.zip
+            leakshield.exe
+            leakshield-linux
+            leakshield-macos-arm
+            leakshield-macos-intel

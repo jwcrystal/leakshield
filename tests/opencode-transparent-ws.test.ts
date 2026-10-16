@@ -204,7 +204,7 @@ describe("Responses-family WebSocket hooks", () => {
       await handshake();
       const frame = JSON.stringify(body);
       const event = { ...route, frame };
-      await expect(call("send", event)).rejects.toThrow("Sensitive Guard");
+      await expect(call("send", event)).rejects.toThrow("LeakShield");
       expect(event.frame).toBe(frame);
     }
   });
@@ -261,7 +261,7 @@ describe("Responses-family WebSocket hooks", () => {
     const { guard, call, route, handshake, send, receive } = await arm();
     await handshake();
     const event = Object.freeze({ ...route, frame: JSON.stringify({ type: "response.create", input: EMAIL }) });
-    await expect(call("send", event)).rejects.toThrow("Sensitive Guard");
+    await expect(call("send", event)).rejects.toThrow("LeakShield");
     await handshake();
     await send({ type: "response.create", input: EMAIL });
     await guard.dispose();

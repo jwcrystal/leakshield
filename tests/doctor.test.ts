@@ -12,7 +12,7 @@ function makeFixture(overrides: {
   distFiles?: boolean;
 }): { deps: DoctorDeps; tmp: string } {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sg-doctor-"));
-  const pluginRoot = path.join(tmp, "sensitive-guard");
+  const pluginRoot = path.join(tmp, "leakshield");
   if (overrides.distFiles) {
     fs.mkdirSync(path.join(pluginRoot, "dist"), { recursive: true });
     fs.writeFileSync(path.join(pluginRoot, "dist", "index.js"), "export {};");
@@ -55,7 +55,7 @@ function makeFixture(overrides: {
   return { deps, tmp };
 }
 
-const distRef = (tmp: string) => path.join(tmp, "sensitive-guard", "dist");
+const distRef = (tmp: string) => path.join(tmp, "leakshield", "dist");
 
 describe("parseJsonc", () => {
   it("parses plain JSON", () => {
@@ -65,11 +65,11 @@ describe("parseJsonc", () => {
     const text = `{
       // schema comment
       "$schema": "https://opencode.ai/config.json",
-      "plugins": [ { "package": "/x/sensitive-guard/dist", }, ],
+      "plugins": [ { "package": "/x/leakshield/dist", }, ],
     }`;
     expect(parseJsonc(text)).toEqual({
       $schema: "https://opencode.ai/config.json",
-      plugins: [{ package: "/x/sensitive-guard/dist" }],
+      plugins: [{ package: "/x/leakshield/dist" }],
     });
   });
 });
@@ -105,7 +105,7 @@ describe("runDoctor", () => {
   });
 
   it("skips the dist check for package-name registration", async () => {
-    const { deps } = makeFixture({ config: () => ({ plugins: ["sensitive-guard"] }) });
+    const { deps } = makeFixture({ config: () => ({ plugins: ["leakshield"] }) });
     const report = await runDoctor(deps);
     expect(report.status).toBe("PROTECTED");
     expect(report.checks.find((c) => c.id === "dist")?.state).toBe("skip");

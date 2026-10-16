@@ -7,7 +7,7 @@ import { readFileWithEncoding } from "../src/utils/win-encoding.js";
 const tempDirs: string[] = [];
 
 function writeTempFile(bytes: Buffer): string {
-  const directory = mkdtempSync(join(tmpdir(), "sensitive-guard-"));
+  const directory = mkdtempSync(join(tmpdir(), "leakshield-"));
   tempDirs.push(directory);
   const file = join(directory, "input.txt");
   writeFileSync(file, bytes);

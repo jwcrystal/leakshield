@@ -30,7 +30,7 @@ export const zhTW = {
   "cli.dryrun_location": " 第 {line} 行, 欄 {col}",
   "cli.dryrun_preview": "    預覽：{preview} → [REDACTED_{type}]",
   "cli.redact_written": "✅ 已將脫敏內容寫入：{path}",
-  "cli.redact_footer": "[sensitive-guard] {summary}",
+  "cli.redact_footer": "[leakshield] {summary}",
   "cli.redact_incomplete": "⛔ 脫敏不完整：redact 後仍有 {residual} 個殘留命中。輸出已停止。",
   "cli.redact_verified": "✅ 脫敏已驗證 — 無殘留命中。",
 
@@ -50,22 +50,22 @@ export const zhTW = {
   "cli.confirm_next_step": "下一步：使用 --format json 取得 redactedContent，或用 --redact 輸出脫敏版本。Exit code 1 = 已攔截。",
 
   // cli — usage
-  "cli.usage_title": "\n🛡️  sensitive-guard — 敏感內容守門員\n",
+  "cli.usage_title": "\n🛡️  leakshield — 敏感內容守門員\n",
   "cli.usage_heading": "用法：",
-  "cli.usage_text": "  sensitive-guard --text '你的內容'",
-  "cli.usage_file": "  sensitive-guard --file ./path/to/file.ts",
-  "cli.usage_dir": "  sensitive-guard --dir ./src",
-  "cli.usage_dir_ext": "  sensitive-guard --dir ./src --ext .ts .env .json",
-  "cli.usage_stdin": "  cat file.ts | sensitive-guard --stdin",
-  "cli.usage_web": "  sensitive-guard --web [--port 3000]      啟動本機 Web UI",
+  "cli.usage_text": "  leakshield --text '你的內容'",
+  "cli.usage_file": "  leakshield --file ./path/to/file.ts",
+  "cli.usage_dir": "  leakshield --dir ./src",
+  "cli.usage_dir_ext": "  leakshield --dir ./src --ext .ts .env .json",
+  "cli.usage_stdin": "  cat file.ts | leakshield --stdin",
+  "cli.usage_web": "  leakshield --web [--port 3000]      啟動本機 Web UI",
   "cli.usage_redact_heading": "\n脫敏模式：",
-  "cli.usage_redact_text": "  sensitive-guard --redact --text '你的內容'",
-  "cli.usage_redact_file": "  sensitive-guard --redact --file ./secret.env",
+  "cli.usage_redact_text": "  leakshield --redact --text '你的內容'",
+  "cli.usage_redact_file": "  leakshield --redact --file ./secret.env",
   "cli.usage_redact_out":
-    "  sensitive-guard --redact --file ./secret.env --out ./redacted.env",
-  "cli.usage_redact_stdin": "  cat file.ts | sensitive-guard --redact --stdin",
+    "  leakshield --redact --file ./secret.env --out ./redacted.env",
+  "cli.usage_redact_stdin": "  cat file.ts | leakshield --redact --stdin",
   "cli.usage_redact_dryrun":
-    "  sensitive-guard --redact --dry-run --file ./secret.env   # 只預覽，不輸出",
+    "  leakshield --redact --dry-run --file ./secret.env   # 只預覽，不輸出",
   "cli.usage_options_heading": "\n選項：",
   "cli.usage_opt_format": "  --format json          輸出 JSON（適合 CI/CD）",
   "cli.usage_opt_severity": "  --min-severity high    只回報 HIGH（或 medium / low）",
@@ -77,7 +77,7 @@ export const zhTW = {
   "cli.usage_opt_port": "  --port <port>          指定 Web UI 埠號（搭配 --web）",
   "cli.usage_opt_encoding": "  --enable-encoding-detection  啟用 Base64/URL/Hex 解碼檢測（預設關閉）",
   // web — server start
-  "web.server_title": "🛡️  sensitive-guard web UI",
+  "web.server_title": "🛡️  leakshield web UI",
   "web.server_url": "   http://localhost:{port}",
   "web.server_stop": "   Ctrl+C 停止",
 };

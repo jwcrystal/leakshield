@@ -43,11 +43,11 @@ const phoneConfig: GuardConfig = {
   settings: { ...baseConfig.settings, rule_overrides: { "phone-tw": true } },
 };
 
-const PROTECT_FAILED = "Sensitive Guard transparent mode failed to protect a model request.";
-const INIT_FAILED = "Sensitive Guard initialization failed";
-const ATTRIBUTION_FAILED = "Sensitive Guard transparent mode blocked a response without verified request attribution.";
-const UNSUPPORTED_ROUTE = "Sensitive Guard transparent mode blocked an unsupported model transport route";
-const TOOL_REFUSED = "Sensitive Guard transparent mode blocked this tool call";
+const PROTECT_FAILED = "LeakShield transparent mode failed to protect a model request.";
+const INIT_FAILED = "LeakShield initialization failed";
+const ATTRIBUTION_FAILED = "LeakShield transparent mode blocked a response without verified request attribution.";
+const UNSUPPORTED_ROUTE = "LeakShield transparent mode blocked an unsupported model transport route";
+const TOOL_REFUSED = "LeakShield transparent mode blocked this tool call";
 
 interface RecordedHook {
   domain: string;

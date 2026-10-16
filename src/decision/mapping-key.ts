@@ -43,7 +43,7 @@ export interface KeyStoreProbe {
   write(hexKey: string): void;
 }
 
-const SERVICE = "sensitive-guard";
+const SERVICE = "leakshield";
 const ACCOUNT = "sgp-mapping-key";
 const HEX_KEY = /^[0-9a-f]{64}$/;
 
@@ -125,7 +125,7 @@ export function createLinuxSecretProbe(): KeyStoreProbe | null {
       });
     },
     write(hexKey: string): void {
-      const result = run("secret-tool", ["store", "--label=sensitive-guard mappings", ...attrs], hexKey ?? "");
+      const result = run("secret-tool", ["store", "--label=leakshield mappings", ...attrs], hexKey ?? "");
       if (result.status !== 0) throw new Error("libsecret store failed");
     },
   };
@@ -138,7 +138,7 @@ export function createLinuxSecretProbe(): KeyStoreProbe | null {
  */
 export function createWindowsDpapiProbe(): KeyStoreProbe | null {
   if (process.platform !== "win32") return null;
-  const blobPath = join(homedir(), "AppData", "Local", "sensitive-guard", "sgp.key.dpapi");
+  const blobPath = join(homedir(), "AppData", "Local", "leakshield", "sgp.key.dpapi");
   const ps = (script: string) =>
     run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
   return {
@@ -344,5 +344,5 @@ export function defaultStorePath(): string {
 }
 
 function defaultDataDir(): string {
-  return join(homedir(), ".local", "share", "sensitive-guard");
+  return join(homedir(), ".local", "share", "leakshield");
 }

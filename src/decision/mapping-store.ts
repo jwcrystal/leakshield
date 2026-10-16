@@ -139,7 +139,7 @@ export class MappingKeyMismatchError extends Error {
   constructor() {
     super(
       "resolved key does not match this store's pinned key identity (key source changed?); " +
-        "degrading to memory-only — run `sensitive-guard --forget --all` to reset, or restore the original key source",
+        "degrading to memory-only — run `leakshield --forget --all` to reset, or restore the original key source",
     );
     this.name = "MappingKeyMismatchError";
   }

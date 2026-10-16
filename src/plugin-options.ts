@@ -48,7 +48,7 @@ export const PluginOptionsSchema = z
         enabled: z.boolean().default(false),
         /** Session TTL in days; 0 = never expire (manual forget only). */
         ttlDays: z.number().int().min(0).max(3650).default(7),
-        /** Store path. Default: ~/.local/share/sensitive-guard/SGP.db */
+        /** Store path. Default: ~/.local/share/leakshield/SGP.db */
         path: z.string().min(1).optional(),
         /** Opt-in weaker fallback when no OS keychain is available. */
         keyFile: z.boolean().default(false),

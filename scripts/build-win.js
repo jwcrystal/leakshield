@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 
-const outfile = "sensitive-guard.exe";
+const outfile = "leakshield.exe";
 
 console.log("Building Windows exe...");
 execSync(
@@ -16,7 +16,7 @@ if (existsSync("icon.ico")) {
     console.log("Icon embedded.");
   } catch {
     console.log("Icon embed skipped (rcedit needs Wine on macOS/Linux).");
-    console.log("Run on Windows: npx rcedit sensitive-guard.exe --set-icon icon.ico");
+    console.log("Run on Windows: npx rcedit leakshield.exe --set-icon icon.ico");
   }
 } else {
   console.log("icon.ico not found, skipping icon.");

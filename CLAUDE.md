@@ -48,7 +48,7 @@ This project is indexed by GitNexus as **sensitive-guard** (37 symbols, 53 relat
 
 ### Issue tracker
 
-Issues and specs are tracked in GitHub Issues for `jwcrystal/sensitive-guard`. See `docs/agents/issue-tracker.md`.
+Issues and specs are tracked in GitHub Issues for `jwcrystal/leakshield`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

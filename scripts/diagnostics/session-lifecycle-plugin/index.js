@@ -69,7 +69,7 @@ export default {
       return JSON.parse(event.frame);
     };
     const makeSession = async () => {
-      const session = await ctx.session.create({ title: "Synthetic Sensitive Guard lifecycle verification" });
+      const session = await ctx.session.create({ title: "Synthetic LeakShield lifecycle verification" });
       created.push(session.id);
       remaining.add(session.id);
       return session.id;

@@ -58,26 +58,26 @@ describe("getIgnoredLines()", () => {
     expect(getIgnoredLines("no ignore here")).toEqual(new Set());
   });
 
-  it("偵測 // sensitive-guard-ignore（行內尾部）", () => {
-    const text = "line1\nconst x = 'secret'; // sensitive-guard-ignore\nline3";
+  it("偵測 // leakshield-ignore（行內尾部）", () => {
+    const text = "line1\nconst x = 'secret'; // leakshield-ignore\nline3";
     expect(getIgnoredLines(text)).toEqual(new Set([2]));
   });
 
-  it("偵測 # sensitive-guard-ignore（Python/YAML/Shell 風格）", () => {
-    const text = "line1\nAPI_KEY=secret # sensitive-guard-ignore\nline3";
+  it("偵測 # leakshield-ignore（Python/YAML/Shell 風格）", () => {
+    const text = "line1\nAPI_KEY=secret # leakshield-ignore\nline3";
     expect(getIgnoredLines(text)).toEqual(new Set([2]));
   });
 
   it("大小寫不敏感", () => {
-    const text = "// SENSITIVE-GUARD-IGNORE\nline2";
+    const text = "// LEAKSHIELD-IGNORE\nline2";
     expect(getIgnoredLines(text)).toEqual(new Set([1]));
   });
 
   it("多行各自標記", () => {
     const text = [
-      "line1 // sensitive-guard-ignore",
+      "line1 // leakshield-ignore",
       "line2",
-      "line3 # sensitive-guard-ignore",
+      "line3 # leakshield-ignore",
     ].join("\n");
     expect(getIgnoredLines(text)).toEqual(new Set([1, 3]));
   });

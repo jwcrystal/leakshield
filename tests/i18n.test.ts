@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 async function loadT(lang: string) {
   vi.resetModules();
-  vi.stubEnv("SENSITIVE_GUARD_LANG", lang);
+  vi.stubEnv("LEAKSHIELD_LANG", lang);
   const mod = await import("../src/i18n/index.js");
   return mod.t;
 }
@@ -42,7 +42,7 @@ describe("i18n — English (default)", () => {
     );
   });
 
-  it("falls back to en when SENSITIVE_GUARD_LANG is unrecognised", async () => {
+  it("falls back to en when LEAKSHIELD_LANG is unrecognised", async () => {
     const t = await loadT("fr");
     expect(t("scan.safe_summary")).toBe(
       "✅ No sensitive content detected, safe to send."
@@ -60,7 +60,7 @@ describe("i18n — Traditional Chinese (zh-TW)", () => {
     expect(t("scan.safe_summary")).toBe("✅ 未偵測到敏感內容，可以安全傳送。");
   });
 
-  it("also resolves when SENSITIVE_GUARD_LANG=zh", async () => {
+  it("also resolves when LEAKSHIELD_LANG=zh", async () => {
     const t = await loadT("zh");
     expect(t("scan.safe_summary")).toBe("✅ 未偵測到敏感內容，可以安全傳送。");
   });
@@ -98,6 +98,6 @@ describe("i18n — interpolation", () => {
     const t = await loadT("en");
     // cli.redact_footer contains {summary} once — verify substitution works
     const msg = t("cli.redact_footer", { summary: "ok" });
-    expect(msg).toBe("[sensitive-guard] ok");
+    expect(msg).toBe("[leakshield] ok");
   });
 });

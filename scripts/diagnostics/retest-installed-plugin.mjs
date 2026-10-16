@@ -32,7 +32,7 @@ const beforeConfig = hash(readFileSync(configFile));
 const beforeLog = readFileSync(logFile).length;
 const options = {
   mode: "transparent",
-  configPath: flag("--config") ?? resolve(homedir(), ".config/opencode/sensitive-guard.yaml"),
+  configPath: flag("--config") ?? resolve(homedir(), ".config/opencode/leakshield.yaml"),
   wireProtection: false,
   attachments: "block",
   persistence: { enabled: false },
@@ -48,7 +48,7 @@ if (!guardEntry || JSON.stringify(guardEntry.options) !== JSON.stringify(options
 const password = randomBytes(24).toString("hex");
 const env = { ...process.env, OPENCODE_CONFIG: resolve(pluginConfig),
   OPENCODE_SERVER_PASSWORD: password, OPENCODE_PASSWORD: password };
-const refusal = "Sensitive Guard transparent mode failed to protect a model request.";
+const refusal = "LeakShield transparent mode failed to protect a model request.";
 const marker = "SG_LIVE_RETEST_OK";
 const prompt = `This is a bounded availability test, not a development task. Do not use tools, execute commands, change files, or continue earlier tasks. Reply with exactly ${marker} and nothing else.`;
 const result = {
@@ -91,7 +91,7 @@ async function api(path) {
 
 async function test(name, fork) {
   const commandArgs = ["run", "--server", serverURL, "--model", model, "--format", "json",
-    "--title", `Sensitive Guard live retest: ${name}`];
+    "--title", `LeakShield live retest: ${name}`];
   if (fork) commandArgs.push("--session", sourceSession, "--fork");
   commandArgs.push(prompt);
   const output = await command(commandArgs, 120_000);
@@ -140,10 +140,10 @@ try {
     const response = await api(pluginPath);
     if (!Array.isArray(response.data)) throw new Error("Unexpected plugin list shape.");
     plugins = response.data;
-    if (plugins.some((plugin) => plugin.id === "sensitive-guard" && plugin.state?.status === "active")) break;
+    if (plugins.some((plugin) => plugin.id === "leakshield" && plugin.state?.status === "active")) break;
     await new Promise((done) => setTimeout(done, 250));
   }
-  const guard = plugins.find((plugin) => plugin.id === "sensitive-guard");
+  const guard = plugins.find((plugin) => plugin.id === "leakshield");
   result.plugin = { id: guard?.id, status: guard?.state?.status, totalPlugins: plugins.length };
   if (guard?.state?.status !== "active") throw new Error("SG was not active; no model test was run.");
   if (await test("short-new-session", false)) await test("source-history-fork", true);
@@ -166,7 +166,7 @@ try {
   result.globalConfigUnchanged = hash(readFileSync(configFile)) === beforeConfig;
   const appended = readFileSync(logFile).subarray(beforeLog).toString("utf8");
   result.newPreparationRefusals = appended.split("\n").filter((line) => line.includes(refusal)).length;
-  result.wsDegradationObserved = serverText.includes("[sensitive-guard] degraded:");
+  result.wsDegradationObserved = serverText.includes("[leakshield] degraded:");
   result.compiledGuardUnchanged = hash(readFileSync(resolve(root, "dist/opencode-transparent.js"))) ===
     result.compiledGuardSha256;
   result.passed = Boolean(result.passed && result.privateServerStopped && result.globalConfigUnchanged &&

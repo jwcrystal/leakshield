@@ -1,6 +1,6 @@
 # Security Policy
 
-sensitive-guard is a guard for what reaches an AI model, so a bypass is a security bug even when no credential is involved.
+leakshield is a guard for what reaches an AI model, so a bypass is a security bug even when no credential is involved.
 
 ## Reporting a vulnerability
 

@@ -9,7 +9,7 @@ const OPAQUE_VALUE = "unclassified-opaque-value-987654321";
 let projectRoot: string | undefined;
 
 function createProject(config: string, env = ""): string {
-  projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-env-"));
+  projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-env-"));
   fs.mkdirSync(path.join(projectRoot, "config"));
   fs.writeFileSync(path.join(projectRoot, "config", "guard.config.yaml"), config, "utf8");
   fs.writeFileSync(path.join(projectRoot, ".env"), env, "utf8");

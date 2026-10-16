@@ -36,7 +36,7 @@ describe("AI SDK injected HTTP transport", () => {
     await call("aisdk:sdk", { options });
     const response = await options.fetch("https://gateway.example/alpha/generate");
     expect(response.status).toBe(400);
-    expect((await response.json()).error.code).toBe("sensitive_guard_transport_refusal");
+    expect((await response.json()).error.code).toBe("leakshield_transport_refusal");
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -107,7 +107,7 @@ describe("AI SDK injected HTTP transport", () => {
     const { call } = await arm();
     const request = new Request("https://gateway.example/v1/responses", { method: "POST", body: JSON.stringify({ input: [item] }) });
     const event = { sessionID: "s", kind: "primary", request };
-    await expect(call("session:http.request", event)).rejects.toThrow("Sensitive Guard");
+    await expect(call("session:http.request", event)).rejects.toThrow("LeakShield");
     expect(event.request).toBe(request);
   });
 

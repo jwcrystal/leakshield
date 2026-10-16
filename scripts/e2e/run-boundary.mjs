@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Boundary-evidence orchestrator for GitHub issue #19 (sensitive-guard).
+ * Boundary-evidence orchestrator for GitHub issue #19 (leakshield).
  *
  * Runs real `opencode run --standalone` sessions against a local capture
  * server that stands in for the model provider, and records — per case —
@@ -10,28 +10,28 @@
  *   3. the run's own stdout.
  *
  * Cases:
- *   C1 block        sensitive-guard {mode:"block"}    + canary prompt
- *   C2 redact       sensitive-guard {mode:"redact"}   + canary prompt
- *   C3 tool-output  sensitive-guard {mode:"redact"}   + notes.txt canaries
+ *   C1 block        leakshield {mode:"block"}    + canary prompt
+ *   C2 redact       leakshield {mode:"redact"}   + canary prompt
+ *   C3 tool-output  leakshield {mode:"redact"}   + notes.txt canaries
  *                  (capture server forces a read tool_call on reply #1)
- *   C4a order1      [sensitive-guard(redact), canary-injector] "Say hi."
- *   C4b order2      [canary-injector, sensitive-guard(redact)] "Say hi."
- *   C5 invalid      sensitive-guard {mode:"bogus"}    + canary prompt (fail-closed)
+ *   C4a order1      [leakshield(redact), canary-injector] "Say hi."
+ *   C4b order2      [canary-injector, leakshield(redact)] "Say hi."
+ *   C5 invalid      leakshield {mode:"bogus"}    + canary prompt (fail-closed)
  *   C6 absent       no plugins                        + canary prompt (expected leak;
  *                  documents the deployment boundary, NOT a product failure)
- *   C7 deidentify   sensitive-guard {mode:"redact",
+ *   C7 deidentify   leakshield {mode:"redact",
  *                  deidentify:true} + email-twice prompt (issue #20 trial:
  *                  stable per-session [SG-EMAIL-… placeholders, no canary)
- *   C8 ignore       sensitive-guard {mode:"redact"} + canary prompt carrying
+ *   C8 ignore       leakshield {mode:"redact"} + canary prompt carrying
  *                  '// sg-ignore' on the same line (in-text ignore directives
  *                  must not bypass the model boundary)
- *   C9 resume       sensitive-guard {mode:"redact",deidentify:true}, TWO
+ *   C9 resume       leakshield {mode:"redact",deidentify:true}, TWO
  *                  standalone invocations (run 2 uses --continue in the same
  *                  workdir): replayed history + new prompt stay canary-free;
  *                  documents placeholder rotation across server restarts
  *                  (new process = new master key; placeholder stability is
  *                  scoped to one live session/server)
- *   C10 transparent sensitive-guard {mode:"transparent"} + canary prompt
+ *   C10 transparent leakshield {mode:"transparent"} + canary prompt
  *                  (issue #22): canaries replaced by [SGP1:… tokens at the
  *                  provider boundary; none reach it raw
  *   C11 transparent-tool
@@ -97,7 +97,7 @@ const CAPTURED_DIR = path.join(OUT_DIR, "captured");
 // Case workdirs live OUTSIDE the repo: OpenCode's config discovery walks up from
 // cwd, and a repo-internal workdir would pick up this repo's own `.opencode/`
 // directory (plugins, worktree state), contaminating or stalling the runs.
-const WORK_ROOT = path.join(os.tmpdir(), "sensitive-guard-e2e-work");
+const WORK_ROOT = path.join(os.tmpdir(), "leakshield-e2e-work");
 const LOGS_DIR = path.join(OUT_DIR, "logs");
 const EVIDENCE_PATH = path.join(OUT_DIR, "evidence.json");
 const SERVER_SCRIPT = path.join(E2E_DIR, "capture-server.mjs");
@@ -115,7 +115,7 @@ const CANARIES = [
   { key: "high-key", value: "sk-CANARYTEST1234567890abcdef" },
 ];
 const MARKERS = {
-  blockedNotice: "[Sensitive Guard blocked",
+  blockedNotice: "[LeakShield blocked",
   redacted: "[REDACTED_",
   deidentified: "[SG-EMAIL-",
   transparentToken: "[SGP1:",
@@ -176,7 +176,7 @@ const CASES = [
   },
   {
     id: "C4a-order1",
-    description: "plugin order [sensitive-guard(redact), canary-injector]: does injected canary reach provider?",
+    description: "plugin order [leakshield(redact), canary-injector]: does injected canary reach provider?",
     plugins: [
       { package: DIST_DIR, options: { mode: "redact" } },
       { package: INJECTOR_DIR },
@@ -192,7 +192,7 @@ const CASES = [
   },
   {
     id: "C4b-order2",
-    description: "plugin order [canary-injector, sensitive-guard(redact)]: does injected canary reach provider?",
+    description: "plugin order [canary-injector, leakshield(redact)]: does injected canary reach provider?",
     plugins: [
       { package: INJECTOR_DIR },
       { package: DIST_DIR, options: { mode: "redact" } },

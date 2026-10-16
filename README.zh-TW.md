@@ -1,9 +1,9 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./icon.svg">
-  <img alt="sensitive-guard" src="./icon.svg" width="64">
+  <img alt="leakshield" src="./icon.svg" width="64">
 </picture>
 
-# sensitive-guard
+# leakshield
 
 > 🌐 [English](./README.md) | 繁體中文
 
@@ -19,7 +19,7 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 | 模式 | 啟動方式 | 適用情境 |
 |------|----------|----------|
 | OpenCode Plugin | 在 `opencode.json` 加入 `dist` 目錄（v2）或 `dist/opencode.js`（v1） | 自動且 fail-closed 地保護 OpenCode 模型輸入與工具輸出 |
-| CLI | `npm run scan -- --file ./path`（全域安裝或 `npm link` 後可用 `sensitive-guard --file ./path`） | 明確的本機或 CI 掃描；不會把內容送到模型 |
+| CLI | `npm run scan -- --file ./path`（全域安裝或 `npm link` 後可用 `leakshield --file ./path`） | 明確的本機或 CI 掃描；不會把內容送到模型 |
 | Web UI | `npm run web` | 在 `http://localhost:3000` 手動以瀏覽器掃描 |
 
 ## 目前狀態
@@ -27,8 +27,8 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 **實驗性，尚未正式發佈。** 還沒發佈到 npm：請在本機建置（`npm ci && npm run build`），再讓 OpenCode 指向 `dist` 目錄。
 
 - Transparent 模式已在 OpenCode v2.0.28 搭配本機替身 provider 驗證，並用真實 OpenAI 模型驗證過一次。它**不保證**敏感內容絕不會送到模型：建議的 hook-first 設定在 `--doctor` 顯示為 `PARTIAL`，hook 之後才加入的內容，以及被允許的工具外送（curl、遠端 MCP），都不在保護範圍內。
-- 尚未驗證：OS keychain 持久化、真實 Anthropic provider、其他 provider 的長對話、長時間使用（[#26](https://github.com/jwcrystal/sensitive-guard/issues/26)）。
-- 第一個正式版本前，預設值仍可能調整（[#24](https://github.com/jwcrystal/sensitive-guard/issues/24)、[#27](https://github.com/jwcrystal/sensitive-guard/issues/27)），變更見 [CHANGELOG](CHANGELOG.md)。
+- 尚未驗證：OS keychain 持久化、真實 Anthropic provider、其他 provider 的長對話、長時間使用（[#26](https://github.com/jwcrystal/leakshield/issues/26)）。
+- 第一個正式版本前，預設值仍可能調整（[#24](https://github.com/jwcrystal/leakshield/issues/24)、[#27](https://github.com/jwcrystal/leakshield/issues/27)），變更見 [CHANGELOG](CHANGELOG.md)。
 - 驗證紀錄：[docs/evidence](docs/evidence/README.md)。漏洞請私下回報：[SECURITY.md](SECURITY.md)。授權：[MIT](LICENSE)。
 
 ---
@@ -98,14 +98,14 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 ## 安裝
 
 ```bash
-git clone https://github.com/jwcrystal/sensitive-guard.git
-cd sensitive-guard
+git clone https://github.com/jwcrystal/leakshield.git
+cd leakshield
 npm install
 npm run build
 ```
 
-尚未發佈到 npm，所以 `npx sensitive-guard` 要等你全域安裝或 `npm link` 這份 build 後才能用，之後可直接使用
-`sensitive-guard`；在此 repository 內不用安裝，直接用 `npm run scan -- ...` 即可。
+尚未發佈到 npm，所以 `npx leakshield` 要等你全域安裝或 `npm link` 這份 build 後才能用，之後可直接使用
+`leakshield`；在此 repository 內不用安裝，直接用 `npm run scan -- ...` 即可。
 
 ### npm scripts 速查
 
@@ -138,15 +138,15 @@ npm run build
 npm run binary
 
 # 跨平台編譯
-npm run binary:win     # Windows x64  → sensitive-guard.exe
-npm run binary:linux   # Linux x64    → sensitive-guard-linux
+npm run binary:win     # Windows x64  → leakshield.exe
+npm run binary:linux   # Linux x64    → leakshield-linux
 npm run binary:all     # 全平台
 ```
 
 或直接用 Bun：
 
 ```bash
-bun build --compile --target=bun-windows-x64 ./src/cli.ts --outfile=sensitive-guard.exe
+bun build --compile --target=bun-windows-x64 ./src/cli.ts --outfile=leakshield.exe
 ```
 
 產出單一執行檔，直接交給任何人，無任何相依套件。
@@ -158,12 +158,12 @@ bun build --compile --target=bun-windows-x64 ./src/cli.ts --outfile=sensitive-gu
 | 位置 | 範圍 |
 |------|------|
 | `./config/guard.config.yaml` | 當前工作目錄 |
-| `~/.sensitive-guard/guard.config.yaml` | 所有位置（家目錄） |
+| `~/.leakshield/guard.config.yaml` | 所有位置（家目錄） |
 
 ```bash
 # 快速開始：把設定放到家目錄
-mkdir -p ~/.sensitive-guard
-cp config/guard.config.yaml ~/.sensitive-guard/
+mkdir -p ~/.leakshield
+cp config/guard.config.yaml ~/.leakshield/
 
 # 或依專案放置
 mkdir -p ./config
@@ -195,7 +195,7 @@ npm run scan -- --dir ./src --ext .ts .env .json
 cat .env | npm run scan -- --stdin
 
 # 全域安裝後
-sensitive-guard --file ./config.ts
+leakshield --file ./config.ts
 ```
 
 Exit code：`0` = 安全，`1` = 有問題，`2` = 檔案不存在
@@ -356,7 +356,7 @@ OpenCode plugin 成功載入後會成為強制性整合：它會在 OpenCode 儲
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     {
-      "package": "/絕對路徑/sensitive-guard/dist",
+      "package": "/絕對路徑/leakshield/dist",
       "options": { "mode": "block" }
     }
   ]
@@ -371,7 +371,7 @@ OpenCode plugin 成功載入後會成為強制性整合：它會在 OpenCode 儲
 {
   "plugin": [
     [
-      "file:///絕對路徑/sensitive-guard/dist/opencode.js",
+      "file:///絕對路徑/leakshield/dist/opencode.js",
       { "mode": "block" }
     ]
   ]
@@ -388,20 +388,20 @@ OpenCode plugin 成功載入後會成為強制性整合：它會在 OpenCode 儲
 
 **AI SDK provider：** true 要求 SDK 使用 OpenCode 注入的 `options.fetch`，以 request-scoped HTTP hooks 提供歸屬與 wire 保護，不依 provider 品牌設 allowlist。Wrapper 檢查 HTTP／HTTPS、支援路徑；缺 fetch、accessor／proxy 或不可寫設定拒絕。false 不註冊 SDK wrapper，不要求 injected fetch，只保留 content/tool hooks 與可選入站還原。私有傳輸不在 final-wire 覆蓋內，也不保證被擋。Commandcode 的 Go／403 fallback `/alpha/generate` 在 false 不受 SG 傳輸守門，true 仍拒絕；沒有 legacy 回覆 adapter。參數、abort 與真實 provider 錯誤維持 host 行為。
 
-Wire 模式的 wrapper 把自身拒絕表示為 **本地 HTTP 400 錯誤回覆**，附 `error.code: "sensitive_guard_transport_refusal"` 與不含原值的 WARN；被拒請求不外送。Hook-only 沒有此 wrapper 或傳輸 admission。真正網路錯誤、abort 與 provider 回覆不改，也不捏造 provider 成功。Responses easy-input 可省略 `type: "message"`，不擅自補 type。
+Wire 模式的 wrapper 把自身拒絕表示為 **本地 HTTP 400 錯誤回覆**，附 `error.code: "leakshield_transport_refusal"` 與不含原值的 WARN；被拒請求不外送。Hook-only 沒有此 wrapper 或傳輸 admission。真正網路錯誤、abort 與 provider 回覆不改，也不捏造 provider 成功。Responses easy-input 可省略 `type: "message"`，不擅自補 type。
 
 **兩種模式共用回覆降級：** SG 的歸屬、JSON／SSE／WS 還原或解析失敗會停止 SG 改寫，不再因此阻斷 host 回覆；不猜其他 session／model 的 mapping。SSE 以有界交易保留尚未送出的原始 events，失敗後按原順序釋出並接續原 bytes，不重送已發內容、不丟 held tails。Provider error event 立即傳遞，來源錯誤與 consumer cancel 仍生效。使用者可能看到 placeholder，壞掉的 provider 資料仍可能被 OpenCode 拒絕。WS 只能取代單一 frame，不能重播多 channel；限制見 [降級驗證](docs/evidence/2026-10-11-experience-first-verification.md)。工具防線不隨回覆降級解除。
 
 **Native WebSocket（experimental）：** 支援 `/responses` 的 `ws:`／`wss:` 與 flat `response.create`，按協定形狀而非 OpenAI 品牌限制。出站共用 HTTP Responses masker；入站支援跨 frame 顯示文字還原，工具參數保留 token 給本機 tool gate，encrypted reasoning 與 continuation ID 不亂改。不同協定／extensions 不自動視為相容。Host 沒有 connection ID，狀態按 session、請求種類、模型，再按 response ID 與內容 channel 隔離；新 handshake／模型切換、HTTP fallback、拒絕 frame 與 dispose 清除舊狀態，terminal 清除緩衝，並限制 frame／channel／總緩衝大小。若 provider 缺最後一個文字 delta，保留並還原 `.done` 完整欄位、顯示固定警告，不擅自改成 delta；只讀 delta 的 consumer 可能顯示不完整。未知顯示 token 保持 literal，不因此中斷回答；不安全或未知寫入映射仍拒絕。原有 native OpenAI HTTP preference 為相容性保留，明確 WS 設定現在可走支援路線。這不是系統網路防火牆或所有 WS provider 的支援承諾。[驗證與限制](docs/evidence/2026-10-11-responses-ws-verification.md)。
 
-**選擇性映射持久化（W2，2026-10-07）：** transparent 模式設定 `"persistence": { "enabled": true }` 後，已保存映射以 per-entry AES-256-GCM（AAD 綁 session＋token）加密持久於 SQLite（預設 `~/.local/share/sensitive-guard/SGP.db`），session 首次觸及時水合，供跨重啟還原。需要 Node.js 22.13 以上（內建 `node:sqlite`）；較舊的 runtime 無法開啟 store，映射維持僅在記憶體並記錄 WARN。選項：`ttlDays`（預設 7；0＝僅手動清除）、`path`（儲存位置）、`keyFile`/`keyfilePath`（無 OS keychain 環境的較弱降級）。金鑰走 OS keychain（macOS Keychain／Windows DPAPI／Linux libsecret）→ 明確啟用的 keyfile → 記憶體降級。Runtime log 在成功開啟 store 時記錄 `persistence: active; key=os-keychain|keyfile`，後續降級另有 WARN；缺金鑰不直接拒絕對話，但未保存的舊 token 仍可能被工具防線拒絕。`--doctor` 只查設定／DB 可讀性，標示 **尚未驗證 runtime 啟用與解密**，不碰真實 keychain。TTL 在 writer 開啟 store 時清理，非定時刪除；保存變動映射會延長期限，單純讀取不延長，7 天不是嚴格刪除期限。啟用不能找回先前已遺失的映射。主動清除：`sensitive-guard --forget --all`（或 `--session <id>`）刪除持久映射，輸出僅計數。擦除為邏輯層＋檔內盡力（`secure_delete` 清零釋放頁、`forget --all` 另做 VACUUM 與 WAL 截斷）；實體媒體與備份殘留（SSD wear-leveling、快照、還原）不在保證範圍。開啟後若切換金鑰來源（keychain↔keyfile），store 會拒開並降級 memory-only，直到 `forget --all` 重置——不靜默換 key。
+**選擇性映射持久化（W2，2026-10-07）：** transparent 模式設定 `"persistence": { "enabled": true }` 後，已保存映射以 per-entry AES-256-GCM（AAD 綁 session＋token）加密持久於 SQLite（預設 `~/.local/share/leakshield/SGP.db`），session 首次觸及時水合，供跨重啟還原。需要 Node.js 22.13 以上（內建 `node:sqlite`）；較舊的 runtime 無法開啟 store，映射維持僅在記憶體並記錄 WARN。選項：`ttlDays`（預設 7；0＝僅手動清除）、`path`（儲存位置）、`keyFile`/`keyfilePath`（無 OS keychain 環境的較弱降級）。金鑰走 OS keychain（macOS Keychain／Windows DPAPI／Linux libsecret）→ 明確啟用的 keyfile → 記憶體降級。Runtime log 在成功開啟 store 時記錄 `persistence: active; key=os-keychain|keyfile`，後續降級另有 WARN；缺金鑰不直接拒絕對話，但未保存的舊 token 仍可能被工具防線拒絕。`--doctor` 只查設定／DB 可讀性，標示 **尚未驗證 runtime 啟用與解密**，不碰真實 keychain。TTL 在 writer 開啟 store 時清理，非定時刪除；保存變動映射會延長期限，單純讀取不延長，7 天不是嚴格刪除期限。啟用不能找回先前已遺失的映射。主動清除：`leakshield --forget --all`（或 `--session <id>`）刪除持久映射，輸出僅計數。擦除為邏輯層＋檔內盡力（`secure_delete` 清零釋放頁、`forget --all` 另做 VACUUM 與 WAL 截斷）；實體媒體與備份殘留（SSD wear-leveling、快照、還原）不在保證範圍。開啟後若切換金鑰來源（keychain↔keyfile），store 會拒開並降級 memory-only，直到 `forget --all` 重置——不靜默換 key。
 
 **持久化風險須知（開啟前必讀）：** 設計為雙秘密——單獨拿到 DB 檔或金鑰都解不開，兩者同時才行。備份（Time Machine、雲端同步）會複製 `SGP.db`：`forget` 無法回收備份已抄走的內容，還原備份＋尚存的金鑰可再識別舊 session——備份保留政策請一併考量。keychain 防**離線竊取**（偷磁碟、偷備份、複製 `SGP.db`）；不防已在你登入 session 內執行的惡意程式。keyfile 選項把門檻降為「同目錄樹的兩個檔案」，僅建議無 keychain 服務的伺服器/無頭環境使用。
 
 **僅限 OpenCode v2 — Email 去識別化試驗：** 選擇性開啟的 `deidentify` 選項（必須搭配 `mode: "redact"`）會將重複出現的 MEDIUM 等級 email 命中改為穩定且不透明的 `[SG-EMAIL-…]` 佔位符，讓 agent 能關聯多筆記錄而不會看到原始地址。對應金鑰在每次 plugin setup（即一個 OpenCode session）產生一次、僅存在記憶體、永不持久化——佔位符在同一個 live session 內穩定，重新啟動後即改變，且不存在反查映射。其他行為維持不變：HIGH 憑證仍會被脫敏或攔截，截斷、編碼或無法驗證的內容會攔截整個單元。
 
 ```jsonc
-{ "package": "/絕對路徑/sensitive-guard/dist", "options": { "mode": "redact", "deidentify": true } }
+{ "package": "/絕對路徑/leakshield/dist", "options": { "mode": "redact", "deidentify": true } }
 ```
 
 **選擇性開啟的唯讀 env 查詢（兩個版本皆支援）：** `envQueries` 選項（預設 `false`）針對 `settings.env_files` 所列檔案提供三個唯讀工具，讓 agent 能回答設定問題而不看到任何 value：
@@ -413,7 +413,7 @@ Wire 模式的 wrapper 把自身拒絕表示為 **本地 HTTP 400 錯誤回覆**
 | `guard_env_compare(left_file_id, left_key, right_file_id, right_key)` | key 對 key（同檔或跨檔）相等性比較，回傳 `equal` \| `different` \| `unavailable`。缺少的 key 或無法讀取的檔案回 `unavailable`。 |
 
 ```jsonc
-{ "package": "/絕對路徑/sensitive-guard/dist", "options": { "mode": "block", "envQueries": true } }
+{ "package": "/絕對路徑/leakshield/dist", "options": { "mode": "block", "envQueries": true } }
 ```
 
 基本規則：只有 `settings.env_files` 內的檔案可查（最多 16 個、各 1 MiB）。file id 只在列出它的 session 有效。每次呼叫都重新讀檔，比較的兩個運算元取自同一份單次呼叫快照。任何輸出都不會出現原始 value、value 長度、預覽、指紋或反查映射。若 setup 後 guard 設定檔變更，工具會回傳固定的「請重啟」錯誤直到 OpenCode 重啟——絕不悄悄退回新舊任一份授權。
@@ -422,7 +422,7 @@ Wire 模式的 wrapper 把自身拒絕表示為 **本地 HTTP 400 錯誤回覆**
 
 附件：transparent 模式支援 `attachments` 政策，動作為 DLP 標準命名。**`"block"`（預設）** 會略過 media／file parts——以通知文字取代，二進位永不離開本機，對話照常繼續（模型讀不到圖片）。**`"allow"`** 會將附件未掃描送出並附加一則可見通知——這是明確的設定層決定，代表你為圖片內容作保（`"allow"` 需搭配 `mode: "transparent"`）。三家參考產品都直接放行附件且無選項。block／redact 模式下附件照舊攔截。既有 session 可能已存有原文，安裝 plugin 後請建立新 session。此 plugin 僅保護 OpenCode 發出的模型請求，不涵蓋其他 AI client 或本機工具。
 
-OpenCode 目前會記錄並跳過在 plugin factory 執行前就載入失敗的模組，例如套件缺失或 JavaScript 語法錯誤。安裝或升級後，請先用 `sk-` 加至少 20 個英數字元的合成測試 key 執行 smoke test，確認訊息已被 Sensitive Guard 替換，再處理真實機敏資料。
+OpenCode 目前會記錄並跳過在 plugin factory 執行前就載入失敗的模組，例如套件缺失或 JavaScript 語法錯誤。安裝或升級後，請先用 `sk-` 加至少 20 個英數字元的合成測試 key 執行 smoke test，確認訊息已被 LeakShield 替換，再處理真實機敏資料。
 
 **Shell 參數還原：** macOS／Linux 的 POSIX shell 支援占位符作為完整的未加引號、單引號或雙引號參數；保留原引號，並檢查原值不會破壞該引號語境，含空格的原值仍是一個參數。支援單一、結尾的 `>`／`>>`，目標須為靜態字面檔名。命令／變數賦值位置、帶 token 的重新導向檔名、展開、引號拼接、管線、inline script、會跳出引號或以 `-` 起始的原值，仍在修改參數前拒絕該次工具呼叫。不含 token 的命令不受影響。Windows 不啟用新增的引號／重新導向支援；這不是通用 shell parser。`wireProtection` 的兩種設定不會改變此工具防線。
 
@@ -447,23 +447,23 @@ EOF
 rm -rf "$SMOKE_DIR"
 ```
 
-模型可見的訊息必須包含 Sensitive Guard 的攔截通知，且不可包含該合成 token。不要用真實憑證執行此測試。
+模型可見的訊息必須包含 LeakShield 的攔截通知，且不可包含該合成 token。不要用真實憑證執行此測試。
 
-發布到 npm 後，可用 `"sensitive-guard"` 取代上述本機 `dist` 路徑。
+發布到 npm 後，可用 `"leakshield"` 取代上述本機 `dist` 路徑。
 
 #### 自動安裝檢查：`--doctor`
 
 ```bash
-sensitive-guard --doctor     # 全域安裝或 npm link 後；在 repo 內可用 npm run scan -- --doctor
+leakshield --doctor     # 全域安裝或 npm link 後；在 repo 內可用 npm run scan -- --doctor
 ```
 
-Doctor 不會把任何內容送出去。它會檢查 OpenCode host 版本、尋找 `opencode.json`（先 workspace 再全域）、確認 Sensitive Guard 已用 plugin 本身接受的選項註冊、確認本機 `dist` 進入點真的存在（缺少時 OpenCode 會靜默記錄並跳過 plugin：session 看起來正常但沒有保護）、載入 guard 設定，並在本機跑合成 canary 的 smoke scan。Exit code 0 代表 `PROTECTED`（v2）或 `PARTIAL`（v1：僅 session hooks）；其他狀態會印出失敗的檢查項與具體修正方式，plugin 未註冊時還會附上可直接複製的註冊片段。
+Doctor 不會把任何內容送出去。它會檢查 OpenCode host 版本、尋找 `opencode.json`（先 workspace 再全域）、確認 LeakShield 已用 plugin 本身接受的選項註冊、確認本機 `dist` 進入點真的存在（缺少時 OpenCode 會靜默記錄並跳過 plugin：session 看起來正常但沒有保護）、載入 guard 設定，並在本機跑合成 canary 的 smoke scan。Exit code 0 代表 `PROTECTED`（v2）或 `PARTIAL`（v1：僅 session hooks）；其他狀態會印出失敗的檢查項與具體修正方式，plugin 未註冊時還會附上可直接複製的註冊片段。
 
 Doctor 是在 host 之外執行的安裝層檢查，看不到執行中的 session。執行期的證明來自上面的 smoke test 或 `scripts/e2e/run-boundary.mjs`。
 
 ### 保護範圍與不保護的部分
 
-Sensitive Guard 保護送往模型的對話內容：prompt、重播的歷史、工具輸出，以及（transparent 模式下）可解析其結構的 provider 請求 body。它**不是**工具對外連線的防火牆：被允許的本機工具仍可透過 `curl`、遠端 MCP server 或任何其他管道把原文傳出去。要管控工具的目的地，需要此 plugin 之外的權限層。
+LeakShield 保護送往模型的對話內容：prompt、重播的歷史、工具輸出，以及（transparent 模式下）可解析其結構的 provider 請求 body。它**不是**工具對外連線的防火牆：被允許的本機工具仍可透過 `curl`、遠端 MCP server 或任何其他管道把原文傳出去。要管控工具的目的地，需要此 plugin 之外的權限層。
 
 偵測也有已知缺口：街道／郵遞地址、日期、IPv6，以及關鍵字清單之外或短於 8 字元的一般賦值都不會被偵測。信用卡與 IBAN 只有在檢查碼驗證通過時才會命中；IP 偵測只涵蓋公開 IPv4；URL 偵測存在但需手動開啟，見[偵測範圍](#偵測範圍)。
 

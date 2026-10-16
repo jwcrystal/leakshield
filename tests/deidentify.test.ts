@@ -118,7 +118,7 @@ describe("email de-identification (deidentifyText)", () => {
     const result = deidentifyText("mail alice@example.com soon", tinyConfig, sessionKey, redactOptions);
 
     expect(result.action).toBe("block");
-    expect(result.text).toContain("Sensitive Guard blocked");
+    expect(result.text).toContain("LeakShield blocked");
     expect(result.text).not.toContain("alice@example.com");
   });
 
@@ -133,7 +133,7 @@ describe("email de-identification (deidentifyText)", () => {
     );
 
     expect(result.action).toBe("block");
-    expect(result.text).toContain("Sensitive Guard blocked");
+    expect(result.text).toContain("LeakShield blocked");
     expect(result.text).not.toContain("alice@example.com");
   });
 
@@ -219,7 +219,7 @@ describe("email de-identification (deidentifyText)", () => {
     const result = deidentifyText("mail alice@example.com now", markerConfig, sessionKey, redactOptions);
 
     expect(result.action).toBe("block");
-    expect(result.text).toContain("Sensitive Guard blocked");
+    expect(result.text).toContain("LeakShield blocked");
     expect(result.text).not.toContain("alice@example.com");
   });
 

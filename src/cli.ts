@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * sensitive-guard — entry point
+ * leakshield — entry point
  * CLI 掃描模式：npx tsx src/cli.ts --cli --text "..."
  * Web 模式：npx tsx src/cli.ts --web
  */

@@ -10,18 +10,18 @@ vi.mock("@opencode-ai/plugin/tool", () => {
   throw new Error("simulated missing v1 SDK module");
 });
 
-import sensitiveGuardPlugin from "../src/opencode.js";
+import leakshieldPlugin from "../src/opencode.js";
 
 const secret = "sk-12345678901234567890";
 
 describe("v1 server — env query tool import failure", () => {
   it("keeps the full protection hooks; only the optional feature fails", async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-imp-"));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-imp-"));
     const configPath = path.join(directory, "guard.config.yaml");
     fs.writeFileSync(path.join(directory, ".env"), `API_TOKEN=${secret}\n`, "utf8");
     fs.writeFileSync(configPath, "settings:\n  env_files:\n    - .env\n", "utf8");
     try {
-      const hooks = await sensitiveGuardPlugin.server(
+      const hooks = await leakshieldPlugin.server(
         { worktree: directory } as never,
         { configPath, envQueries: true },
       );
@@ -47,7 +47,7 @@ describe("v1 server — env query tool import failure", () => {
       });
       const serialized = JSON.stringify(parts);
       expect(serialized).not.toContain(secret);
-      expect(serialized).toContain("Sensitive Guard blocked message text");
+      expect(serialized).toContain("LeakShield blocked message text");
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
     }

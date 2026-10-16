@@ -1,9 +1,9 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./icon.svg">
-  <img alt="sensitive-guard" src="./icon.svg" width="64">
+  <img alt="leakshield" src="./icon.svg" width="64">
 </picture>
 
-# sensitive-guard
+# leakshield
 
 > 🌐 English | [繁體中文](./README.zh-TW.md)
 
@@ -19,7 +19,7 @@ MCP server mode has been removed. It depended on the model voluntarily calling a
 | Mode | Start it with | Use it for |
 |------|---------------|------------|
 | OpenCode Plugin | Add the `dist` directory (v2) or `dist/opencode.js` (v1) to `opencode.json` | Automatic, fail-closed protection for OpenCode model inputs and tool outputs |
-| CLI | `npm run scan -- --file ./path` (or `sensitive-guard --file ./path` after a global install / `npm link`) | Explicit local or CI scans; it never sends content to a model |
+| CLI | `npm run scan -- --file ./path` (or `leakshield --file ./path` after a global install / `npm link`) | Explicit local or CI scans; it never sends content to a model |
 | Web UI | `npm run web` | Manual browser scans at `http://localhost:3000` |
 
 ## Project status
@@ -27,8 +27,8 @@ MCP server mode has been removed. It depended on the model voluntarily calling a
 **Experimental, pre-release.** Nothing is published to npm yet: build locally (`npm ci && npm run build`) and point OpenCode at the `dist` directory.
 
 - Transparent mode has been verified on OpenCode v2.0.28 with local loopback providers, and once against a real OpenAI model. It is **not** a guarantee that nothing sensitive reaches a model: the recommended hook-first setup is reported as `PARTIAL` by `--doctor`, and content added after the plugin's hooks or sent by permitted tools (curl, remote MCP) is outside its coverage.
-- Not yet verified: OS-keychain persistence, a real Anthropic provider, long histories on other providers, long-running use ([#26](https://github.com/jwcrystal/sensitive-guard/issues/26)).
-- Defaults may still change before the first tagged release ([#24](https://github.com/jwcrystal/sensitive-guard/issues/24), [#27](https://github.com/jwcrystal/sensitive-guard/issues/27)); see the [changelog](CHANGELOG.md).
+- Not yet verified: OS-keychain persistence, a real Anthropic provider, long histories on other providers, long-running use ([#26](https://github.com/jwcrystal/leakshield/issues/26)).
+- Defaults may still change before the first tagged release ([#24](https://github.com/jwcrystal/leakshield/issues/24), [#27](https://github.com/jwcrystal/leakshield/issues/27)); see the [changelog](CHANGELOG.md).
 - Verification records: [docs/evidence](docs/evidence/README.md). Report vulnerabilities privately: [SECURITY.md](SECURITY.md). License: [MIT](LICENSE).
 
 ---
@@ -93,14 +93,14 @@ When using `--format json`, the output includes these decision-oriented fields:
 ## Installation
 
 ```bash
-git clone https://github.com/jwcrystal/sensitive-guard.git
-cd sensitive-guard
+git clone https://github.com/jwcrystal/leakshield.git
+cd leakshield
 npm install
 npm run build
 ```
 
-Nothing is published to npm yet, so `npx sensitive-guard` only works after you
-install the build globally or `npm link` it; then use `sensitive-guard`
+Nothing is published to npm yet, so `npx leakshield` only works after you
+install the build globally or `npm link` it; then use `leakshield`
 directly. `npm run scan -- ...` works from this repository without installing.
 
 ### npm Scripts
@@ -134,15 +134,15 @@ Can't use Node.js or npm? Build a standalone binary with [Bun](https://bun.sh) �
 npm run binary
 
 # Cross-compile for other platforms
-npm run binary:win     # Windows x64  → sensitive-guard.exe
-npm run binary:linux   # Linux x64    → sensitive-guard-linux
+npm run binary:win     # Windows x64  → leakshield.exe
+npm run binary:linux   # Linux x64    → leakshield-linux
 npm run binary:all     # All platforms
 ```
 
 Or directly with Bun:
 
 ```bash
-bun build --compile --target=bun-windows-x64 ./src/cli.ts --outfile=sensitive-guard.exe
+bun build --compile --target=bun-windows-x64 ./src/cli.ts --outfile=leakshield.exe
 ```
 
 The output is a single executable — hand it to anyone, no dependencies required.
@@ -154,12 +154,12 @@ The binary works out of the box with built-in defaults. To customize rules (NDA 
 | Location | Scope |
 |----------|-------|
 | `./config/guard.config.yaml` | Current working directory |
-| `~/.sensitive-guard/guard.config.yaml` | All sessions (user home) |
+| `~/.leakshield/guard.config.yaml` | All sessions (user home) |
 
 ```bash
 # Quick start with custom config
-mkdir -p ~/.sensitive-guard
-cp config/guard.config.yaml ~/.sensitive-guard/
+mkdir -p ~/.leakshield
+cp config/guard.config.yaml ~/.leakshield/
 
 # Or per-project
 mkdir -p ./config
@@ -191,7 +191,7 @@ npm run scan -- --dir ./src --ext .ts .env .json
 cat .env | npm run scan -- --stdin
 
 # Global installation
-sensitive-guard --file ./config.ts
+leakshield --file ./config.ts
 ```
 
 Exit codes: `0` = safe (ALLOW), `1` = findings detected (WARN or CONFIRM), `2` = file not found
@@ -301,7 +301,7 @@ The same compiled plugin supports both OpenCode major versions: v2 hosts load th
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     {
-      "package": "/absolute/path/to/sensitive-guard/dist",
+      "package": "/absolute/path/to/leakshield/dist",
       "options": { "mode": "block" }
     }
   ]
@@ -316,7 +316,7 @@ Note that v2 only accepts plugin *directories* (it resolves `dist/index.js`) or 
 {
   "plugin": [
     [
-      "file:///absolute/path/to/sensitive-guard/dist/opencode.js",
+      "file:///absolute/path/to/leakshield/dist/opencode.js",
       { "mode": "block" }
     ]
   ]
@@ -333,7 +333,7 @@ Note that v2 only accepts plugin *directories* (it resolves `dist/index.js`) or 
 
 **AI SDK providers:** with `wireProtection: true`, providers must honor OpenCode's injected `options.fetch`; request-scoped HTTP hooks provide attribution and wire enforcement without a provider-brand allowlist. The wrapper checks HTTP/HTTPS and supported paths; missing/accessor/nonwritable fetch options refuse. With false, SG installs no SDK wrapper and imposes none of those transport requirements; only content/tool hooks and optional ingress restoration apply. Bypass transports are **outside final-wire coverage**, not guaranteed blocked. Commandcode `/alpha/generate`, including Go/403 fallback, is untouched in false and refused in true; there is no legacy response adapter. Arguments, abort signals and real provider failures remain host-owned.
 
-In wire mode, the wrapper represents its route/content refusals as a **local HTTP 400 error response**, with `error.code: "sensitive_guard_transport_refusal"` and a content-free WARN. Rejected requests do not reach the network. Hook-only has no such wrapper or transport admission. SDKs can distinguish a refusal from a retryable network failure; genuine network errors, aborts and provider responses remain unchanged. Responses easy-input messages may omit `type: "message"`; recognized roles and supported content are masked without inserting a type into their wire body.
+In wire mode, the wrapper represents its route/content refusals as a **local HTTP 400 error response**, with `error.code: "leakshield_transport_refusal"` and a content-free WARN. Rejected requests do not reach the network. Hook-only has no such wrapper or transport admission. SDKs can distinguish a refusal from a retryable network failure; genuine network errors, aborts and provider responses remain unchanged. Responses easy-input messages may omit `type: "message"`; recognized roles and supported content are masked without inserting a type into their wire body.
 
 **Reply-side recovery in both levels:** SG attribution or JSON/SSE/WS restoration failures stop SG rewriting rather than interrupting the host's response. Unattributed replies stay original; no session/model mapping is guessed. SSE keeps a bounded transaction of undelivered original events, releases them in order on failure, then passes subsequent bytes through without duplicates or dropped tails. Provider error events are released immediately; upstream errors and consumer cancellation still propagate. This can show literal placeholders, and invalid provider data may still fail in OpenCode. Tool arguments still pass the unchanged safety gate. WS can replace only one frame, not replay multiple held channels; see the documented WS limitations and [recovery evidence](docs/evidence/2026-10-11-experience-first-verification.md).
 
@@ -341,7 +341,7 @@ In wire mode, the wrapper represents its route/content refusals as a **local HTT
 
 **Shell argument restoration:** on macOS/Linux POSIX shells, a known placeholder may occupy a complete unquoted, single-quoted, or double-quoted argument. Existing quotes are preserved, and originals must be safe in that quote context; quoted space-containing values remain one argument. A single trailing `>`/`>>` redirect to a static literal filename is supported. Command/assignment positions, tokenized redirect filenames, expansions, quote concatenation, pipelines, inline scripts, quote-breaking originals, and leading-option values still refuse the affected tool call before mutation. Token-free commands are unchanged. The new quoting/redirect support is not enabled on Windows; it is not a general shell parser. Neither `wireProtection` setting changes this tool gate.
 
-**Opt-in mapping persistence (W2, 2026-10-07):** set `"persistence": { "enabled": true }` in transparent mode to survive restarts — mappings persist encrypted (per-entry AES-256-GCM, AAD-bound) in a SQLite store (default `~/.local/share/sensitive-guard/SGP.db`) and rehydrate on a session's first touch, so previously saved placeholders in resumed sessions keep restoring. Requires Node.js 22.13+ (built-in `node:sqlite`); on an older runtime the store cannot open and mappings stay memory-only with a WARN. Options: `ttlDays` (default 7; 0 = manual erasure only), `path` (store location), `keyFile`/`keyfilePath` (weaker fallback when no OS keychain exists). Key custody resolves down a ladder — OS keychain (macOS Keychain / Windows DPAPI / Linux libsecret) → explicit keyfile → memory-only degrade. Runtime logs report `persistence: active; key=os-keychain|keyfile` when the store opens successfully; later degradation emits a WARN. Missing keys do not directly refuse conversations, but an unsaved old token can still fail the tool gate. `--doctor` reports configuration/store readability as **unverified**, not runtime activation or decryptability, and never touches the real keychain. TTL cleanup runs when a writer opens the store, not on a timer; saving a changed mapping snapshot extends expiry, while reads do not. Seven days is not a hard deletion deadline. Persistence cannot recover mappings already lost before activation. Active erasure: `sensitive-guard --forget --all` (or `--session <id>`) deletes persisted mappings, counts only in output. Erasure is logical plus in-file best effort (`secure_delete` zeroes freed pages, `forget --all` also vacuums and truncates the WAL); physical-media and backup residue (SSD wear leveling, snapshots, restores) are out of scope. Switching the key source after enabling (keychain ↔ keyfile) refuses to open the store — it degrades memory-only until `forget --all` resets — rather than silently re-keying history.
+**Opt-in mapping persistence (W2, 2026-10-07):** set `"persistence": { "enabled": true }` in transparent mode to survive restarts — mappings persist encrypted (per-entry AES-256-GCM, AAD-bound) in a SQLite store (default `~/.local/share/leakshield/SGP.db`) and rehydrate on a session's first touch, so previously saved placeholders in resumed sessions keep restoring. Requires Node.js 22.13+ (built-in `node:sqlite`); on an older runtime the store cannot open and mappings stay memory-only with a WARN. Options: `ttlDays` (default 7; 0 = manual erasure only), `path` (store location), `keyFile`/`keyfilePath` (weaker fallback when no OS keychain exists). Key custody resolves down a ladder — OS keychain (macOS Keychain / Windows DPAPI / Linux libsecret) → explicit keyfile → memory-only degrade. Runtime logs report `persistence: active; key=os-keychain|keyfile` when the store opens successfully; later degradation emits a WARN. Missing keys do not directly refuse conversations, but an unsaved old token can still fail the tool gate. `--doctor` reports configuration/store readability as **unverified**, not runtime activation or decryptability, and never touches the real keychain. TTL cleanup runs when a writer opens the store, not on a timer; saving a changed mapping snapshot extends expiry, while reads do not. Seven days is not a hard deletion deadline. Persistence cannot recover mappings already lost before activation. Active erasure: `leakshield --forget --all` (or `--session <id>`) deletes persisted mappings, counts only in output. Erasure is logical plus in-file best effort (`secure_delete` zeroes freed pages, `forget --all` also vacuums and truncates the WAL); physical-media and backup residue (SSD wear leveling, snapshots, restores) are out of scope. Switching the key source after enabling (keychain ↔ keyfile) refuses to open the store — it degrades memory-only until `forget --all` resets — rather than silently re-keying history.
 
 **Persistence risk notes (read before enabling):** the design is dual-secret — the DB file alone or the key alone exposes nothing; both together do. Backups (Time Machine, cloud sync) copy `SGP.db`: `forget` cannot reclaim what a backup already captured, and a restored backup plus a surviving key can re-identify old sessions — treat backup retention accordingly. The keychain defends offline file theft (stolen disk, stolen backups, a copied `SGP.db`); it does not defend malware already running inside your login session. The keyfile option lowers the bar to "both files from the same directory tree" and is intended for headless/server environments without a keychain service.
 
@@ -354,7 +354,7 @@ In wire mode, the wrapper represents its route/content refusals as a **local HTT
 **OpenCode v2 only — email de-identification trial:** the opt-in `deidentify` option (valid only together with `mode: "redact"`) additionally replaces repeated MEDIUM email findings with stable, opaque `[SG-EMAIL-…]` placeholders so an agent can correlate records without seeing the addresses. The mapping key is generated once per plugin setup (one OpenCode session), held in memory only, and never persisted — placeholders are stable within a live session but change after a restart, and no reverse mapping exists. Everything else keeps its existing disposition: HIGH credentials are still redacted/blocked, and truncated, encoded, or unverifiable content blocks the whole unit.
 
 ```jsonc
-{ "package": "/absolute/path/to/sensitive-guard/dist", "options": { "mode": "redact", "deidentify": true } }
+{ "package": "/absolute/path/to/leakshield/dist", "options": { "mode": "redact", "deidentify": true } }
 ```
 
 **Opt-in readonly env queries (both versions):** the `envQueries` option (default `false`) exposes three read-only tools over the files listed in `settings.env_files`, so an agent can answer configuration questions without ever seeing values:
@@ -366,7 +366,7 @@ In wire mode, the wrapper represents its route/content refusals as a **local HTT
 | `guard_env_compare(left_file_id, left_key, right_file_id, right_key)` | `equal` \| `different` \| `unavailable` for key-to-key, same- or cross-file equality. Missing keys and unreadable files are `unavailable`. |
 
 ```jsonc
-{ "package": "/absolute/path/to/sensitive-guard/dist", "options": { "mode": "block", "envQueries": true } }
+{ "package": "/absolute/path/to/leakshield/dist", "options": { "mode": "block", "envQueries": true } }
 ```
 
 Ground rules: only `settings.env_files` entries are queryable (at most 16 files, 1 MiB each). File ids are only valid in the session that listed them. Files are re-read on every call, and a comparison reads both operands in one per-call snapshot. Raw values, value lengths, previews, fingerprints, and reverse mappings never appear in any output. If the guard configuration file changes after setup, the tools return a fixed restart-required error until OpenCode restarts — they never silently fall back to the old or new authorization.
@@ -375,7 +375,7 @@ File access is best-effort pathname identity validation, not a sandbox. The work
 
 Attachments: transparent mode supports an `attachments` policy (plural; `attachment` is not recognized). **`"block"` (default)** omits media/file parts at content hooks and replaces them with a notice; the model cannot read those omitted images. Final wire protection also refuses residual wire attachment parts; hook-first does not inspect late-added attachments. **`"allow"`** sends attachments through unscanned and appends a visible notice part — an explicit decision that you vouch for their content (`"allow"` requires `mode: "transparent"`). In block/redact modes attachments are blocked as before. Existing conversations can replay originals, subject to the restart limitations above; starting a new conversation is not a substitute for verifying recovery. The plugin protects OpenCode model requests only, not other AI clients or local tools.
 
-OpenCode currently logs and skips modules that fail before their plugin factory can run, such as a missing package or JavaScript syntax error. After installation or upgrade, run a smoke test with a synthetic key matching `sk-` followed by at least 20 letters or digits and verify that Sensitive Guard replaces the message before using real sensitive data.
+OpenCode currently logs and skips modules that fail before their plugin factory can run, such as a missing package or JavaScript syntax error. After installation or upgrade, run a smoke test with a synthetic key matching `sk-` followed by at least 20 letters or digits and verify that LeakShield replaces the message before using real sensitive data.
 
 #### Isolated smoke test (OpenCode v2)
 
@@ -398,23 +398,23 @@ EOF
 rm -rf "$SMOKE_DIR"
 ```
 
-The model-facing message must contain the Sensitive Guard block notice and must not contain the synthetic token. Do not use a real credential for this test.
+The model-facing message must contain the LeakShield block notice and must not contain the synthetic token. Do not use a real credential for this test.
 
-After publishing to npm, the same plugin can be configured as `"sensitive-guard"` instead of the local `dist` path.
+After publishing to npm, the same plugin can be configured as `"leakshield"` instead of the local `dist` path.
 
 #### Automated install check: `--doctor`
 
 ```bash
-npm run scan -- --doctor     # or: sensitive-guard --doctor after global install
+npm run scan -- --doctor     # or: leakshield --doctor after global install
 ```
 
-The doctor verifies the install without sending anything anywhere: it checks the OpenCode host version, finds `opencode.json` (workspace then global), confirms Sensitive Guard is registered with options that the plugin itself would accept, verifies a local `dist` entry point actually exists (a missing one makes OpenCode silently log-and-skip the plugin — sessions look normal but are unprotected), loads the guard config, and runs the synthetic-canary smoke scan locally. Exit code 0 means `PROTECTED` (v2) or `PARTIAL` (v1: session hooks only); any other status prints the failing check with a concrete fix, including a copy-paste registration snippet when the plugin is missing.
+The doctor verifies the install without sending anything anywhere: it checks the OpenCode host version, finds `opencode.json` (workspace then global), confirms LeakShield is registered with options that the plugin itself would accept, verifies a local `dist` entry point actually exists (a missing one makes OpenCode silently log-and-skip the plugin — sessions look normal but are unprotected), loads the guard config, and runs the synthetic-canary smoke scan locally. Exit code 0 means `PROTECTED` (v2) or `PARTIAL` (v1: session hooks only); any other status prints the failing check with a concrete fix, including a copy-paste registration snippet when the plugin is missing.
 
 Doctor is an install-level check that runs outside the host — it cannot see inside a live session. Runtime proof comes from the smoke test above or `scripts/e2e/run-boundary.mjs`.
 
 ### What this protects — and what it does not
 
-Sensitive Guard protects model-conversation content: prompts, replayed history, tool outputs, and (in transparent mode) provider-bound request bodies whose shape it can parse. It is **not** a tool-egress firewall: a permitted local tool can still transmit originals over the network via `curl`, a remote MCP server, or any other channel. Controlling tool destinations requires a separate permission layer outside this plugin.
+LeakShield protects model-conversation content: prompts, replayed history, tool outputs, and (in transparent mode) provider-bound request bodies whose shape it can parse. It is **not** a tool-egress firewall: a permitted local tool can still transmit originals over the network via `curl`, a remote MCP server, or any other channel. Controlling tool destinations requires a separate permission layer outside this plugin.
 
 Detection also has known gaps: street/postal addresses, dates, IPv6, and generic assignments outside the keyword list or below the 8-character minimum pass through undetected. Credit card and IBAN numbers are detected only when the checksum validates; IP detection covers public IPv4 only; URL detection exists but is opt-in — see [Detection Coverage](#detection-coverage).
 
@@ -435,7 +435,7 @@ settings:
     - .env.local
 ```
 
-Paths are relative to the workspace root and must remain inside it. Sensitive Guard reads non-empty values of at least eight characters, then detects exact occurrences in text sent to the model. It does not automatically read `.env`, process environment variables, or send, log, or serialize the loaded values. Restart OpenCode after changing an enabled env file. The opt-in `envQueries` plugin tools (see OpenCode Plugin) query these same files and never return their values.
+Paths are relative to the workspace root and must remain inside it. LeakShield reads non-empty values of at least eight characters, then detects exact occurrences in text sent to the model. It does not automatically read `.env`, process environment variables, or send, log, or serialize the loaded values. Restart OpenCode after changing an enabled env file. The opt-in `envQueries` plugin tools (see OpenCode Plugin) query these same files and never return their values.
 
 ```yaml
 # NDA keywords (case-insensitive)
@@ -517,7 +517,7 @@ All secret previews in scan results are **fully masked** as `****`, regardless o
 
 ## Internationalization (i18n)
 
-CLI output language is controlled by the `SENSITIVE_GUARD_LANG` environment variable.
+CLI output language is controlled by the `LEAKSHIELD_LANG` environment variable.
 
 | Value | Language |
 |-------|----------|
@@ -529,13 +529,13 @@ CLI output language is controlled by the `SENSITIVE_GUARD_LANG` environment vari
 npm run scan -- --text "your content"
 
 # Traditional Chinese output
-SENSITIVE_GUARD_LANG=zh-TW npm run scan -- --text "你的內容"
+LEAKSHIELD_LANG=zh-TW npm run scan -- --text "你的內容"
 ```
 
 You can also set it persistently in your shell profile:
 
 ```bash
-export SENSITIVE_GUARD_LANG=zh-TW
+export LEAKSHIELD_LANG=zh-TW
 ```
 
 ## Notes

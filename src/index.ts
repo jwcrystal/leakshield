@@ -6,7 +6,7 @@
  * - The default export is the dual-version plugin definition: v2 hosts read
  *   `id` + `setup(ctx)`, v1 hosts (1.18.29+) call `server(input, options)`.
  *
- * The CLI/web entrypoint lives in `./cli.js` (published as the `sensitive-guard`
+ * The CLI/web entrypoint lives in `./cli.js` (published as the `leakshield`
  * bin) so importing this module never starts an interactive process.
  */
 export { default } from "./opencode.js";

@@ -65,7 +65,7 @@ export function findConfigPath(overridePath?: string): string | undefined {
     : [
         path.resolve(process.cwd(), "config/guard.config.yaml"),
         path.resolve(__dirname, "../../config/guard.config.yaml"),
-        path.resolve(process.env.HOME ?? "~", ".sensitive-guard/guard.config.yaml"),
+        path.resolve(process.env.HOME ?? "~", ".leakshield/guard.config.yaml"),
       ];
 
   for (const p of configPaths) {

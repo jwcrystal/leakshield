@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Capture server for the sensitive-guard e2e boundary harness (issue #19).
+ * Capture server for the leakshield e2e boundary harness (issue #19).
  *
  * Node stdlib only. Implements the minimal OpenAI-compatible surface that
  * `opencode run` needs from a custom provider backed by

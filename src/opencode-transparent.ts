@@ -77,25 +77,25 @@ type RecordLike = { [key: string]: unknown };
 // ─── Static failure messages (no content ever included) ─────────────────────
 
 const INITIALIZATION_ERROR =
-  "Sensitive Guard initialization failed. Model request blocked before content was sent.";
+  "LeakShield initialization failed. Model request blocked before content was sent.";
 const PROTECT_FAILED_ERROR =
-  "Sensitive Guard transparent mode failed to protect a model request.";
+  "LeakShield transparent mode failed to protect a model request.";
 const ATTRIBUTION_ERROR =
-  "Sensitive Guard transparent mode blocked a response without verified request attribution.";
+  "LeakShield transparent mode blocked a response without verified request attribution.";
 const UNSUPPORTED_ROUTE_ERROR =
-  "Sensitive Guard transparent mode blocked an unsupported model transport route.";
+  "LeakShield transparent mode blocked an unsupported model transport route.";
 const TOOL_REFUSAL_ERROR =
-  "Sensitive Guard transparent mode blocked this tool call because its arguments could not be safely restored. Refresh the affected arguments and retry.";
+  "LeakShield transparent mode blocked this tool call because its arguments could not be safely restored. Refresh the affected arguments and retry.";
 const TOOL_UNKNOWN_MAPPING_ERROR =
-  "Sensitive Guard transparent mode blocked this tool call because a placeholder has no mapping in this session. Re-read the source in this session, refresh the affected arguments, and retry.";
+  "LeakShield transparent mode blocked this tool call because a placeholder has no mapping in this session. Re-read the source in this session, refresh the affected arguments, and retry.";
 const TOOL_RESTORE_LIMIT_ERROR =
-  "Sensitive Guard transparent mode blocked this tool call because its arguments exceed the safe restoration limit. Reduce the arguments and retry.";
+  "LeakShield transparent mode blocked this tool call because its arguments exceed the safe restoration limit. Reduce the arguments and retry.";
 const TOOL_SHELL_CONTEXT_ERROR =
-  "Sensitive Guard transparent mode blocked this tool call because the shell command does not use a supported literal-argument form. Rewrite it as a simple command or use a non-shell tool.";
+  "LeakShield transparent mode blocked this tool call because the shell command does not use a supported literal-argument form. Rewrite it as a simple command or use a non-shell tool.";
 const TOOL_INPUT_SHAPE_ERROR =
-  "Sensitive Guard transparent mode blocked this tool call because its argument structure cannot be safely restored. Refresh the arguments using plain JSON values and retry.";
+  "LeakShield transparent mode blocked this tool call because its argument structure cannot be safely restored. Refresh the arguments using plain JSON values and retry.";
 const STRUCTURAL_SENSITIVE_ERROR =
-  "Sensitive Guard transparent mode refused this model request: a structural identifier (message or tool id, name, role, or part type) scans as sensitive, and masking cannot rewrite it without breaking the protocol. Adjust the matching rule in the guard config or change the identifier, then retry.";
+  "LeakShield transparent mode refused this model request: a structural identifier (message or tool id, name, role, or part type) scans as sensitive, and masking cannot rewrite it without breaking the protocol. Adjust the matching rule in the guard config or change the identifier, then retry.";
 
 function toolRestoreError(reason: PseudonymFailureReason): string {
   if (reason === "unknown_token" || reason === "malformed_token") return TOOL_UNKNOWN_MAPPING_ERROR;
@@ -281,7 +281,7 @@ const READ_ONLY_TOOLS = new Set([
  * provider-body notices (P1, 2026-10-06b).
  */
 const warnDegradation = (context: string): void => {
-  console.warn(`[sensitive-guard] degraded: ${context}`);
+  console.warn(`[leakshield] degraded: ${context}`);
 };
 /** Preserve the existing quote context; never add quoting or reinterpret the
  * original as code. Leading '-' stays forbidden even when quoted (options are
@@ -477,10 +477,10 @@ function withOpaqueProviderState(plain: RecordLike, fn: (input: RecordLike) => R
  * value) is an unexpected shape and still fails closed.
  */
 const ATTACHMENT_PLACEHOLDER_TEXT =
-  "[sensitive-guard: attachment omitted — binary content is never sent to the model]";
+  "[leakshield: attachment omitted — binary content is never sent to the model]";
 
 const ATTACHMENT_ALLOW_NOTICE_TEXT =
-  "[sensitive-guard: attachment(s) allowed through unscanned per configuration — the user vouches for their content]";
+  "[leakshield: attachment(s) allowed through unscanned per configuration — the user vouches for their content]";
 
 /**
  * Applies the attachment policy to a live event field.
@@ -768,7 +768,7 @@ export function createTransparentSessionGuard(
           keyProvider,
           ttlDays: persistence.ttlDays,
         });
-        console.info(`[sensitive-guard] persistence: active; key=${keyProvider.source ?? "injected"}; ttl=${persistence.ttlDays}d; cleanup=on-store-open`);
+        console.info(`[leakshield] persistence: active; key=${keyProvider.source ?? "injected"}; ttl=${persistence.ttlDays}d; cleanup=on-store-open`);
       } catch (error) {
         store = null;
         warnDegradation(
@@ -1449,7 +1449,7 @@ export function createTransparentSessionGuard(
                   try { webSocket.reset(event); } catch { /* Invalid attribution has no lane to reset. */ }
                   // Adapter diagnostics are static. Do not surface native URL/
                   // Headers errors, which may embed a credential or raw value.
-                  const message = error instanceof Error && error.message.startsWith("Sensitive Guard ")
+                  const message = error instanceof Error && error.message.startsWith("LeakShield ")
                     ? error.message : PROTECT_FAILED_ERROR;
                   throw new Error(`${message} [hook=${name}]`);
                 }

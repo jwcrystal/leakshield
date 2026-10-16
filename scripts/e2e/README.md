@@ -1,6 +1,6 @@
 # Boundary Evidence Harness (issue #19)
 
-Real-session evidence for the sensitive-guard OpenCode plugin: runs `opencode
+Real-session evidence for the leakshield OpenCode plugin: runs `opencode
 run --standalone` against a local capture server that pretends to be the model
 provider, and records whether synthetic canary values cross the trust boundary
 (provider request bodies, session storage, logs).
@@ -13,7 +13,7 @@ Everything here is **verification tooling only** — no product code is touched.
 |---|---|
 | `capture-server.mjs` | Node-stdlib OpenAI-compatible mock provider. Records every `/v1/chat/completions` body to `out/captured/`, answers with a minimal completion (plain or SSE stream). `POST /control` lets the orchestrator arm a one-shot `read` tool_call (case C3) and set the reply label. |
 | `run-boundary.mjs` | Orchestrator. Boots the capture server, runs each case in a fresh isolated workdir, attributes captures to cases by time window, scans storage/logs, writes `out/evidence.json` + prints a summary table. |
-| `fixtures/second-plugin/` | `canary-injector` — a second OpenCode v2 plugin whose `session.prompt` hook appends `SECOND-PLUGIN-MARKER contact carol.injector@example-test.invalid` to the prompt (mutated in place, same duck-typed style as sensitive-guard). Used for the plugin-ordering cases C4a/C4b. |
+| `fixtures/second-plugin/` | `canary-injector` — a second OpenCode v2 plugin whose `session.prompt` hook appends `SECOND-PLUGIN-MARKER contact carol.injector@example-test.invalid` to the prompt (mutated in place, same duck-typed style as leakshield). Used for the plugin-ordering cases C4a/C4b. |
 | `out/` | Generated artifacts: `captured/` request envelopes, `work/<case>/` isolated run dirs, `logs/` per-case stdout/stderr, `evidence.json`. Safe to delete anytime. |
 
 ## Run
@@ -34,11 +34,11 @@ Env knobs: `OPENCODE_BIN`, `E2E_TIMEOUT_MS` (default 240000), `E2E_PRINT_LOGS=1`
 
 | Case | Config | Expectation |
 |---|---|---|
-| C1-block | `{mode:"block"}` + canary prompt | no canary in any provider request; `[Sensitive Guard blocked …]` present |
+| C1-block | `{mode:"block"}` + canary prompt | no canary in any provider request; `[LeakShield blocked …]` present |
 | C2-redact | `{mode:"redact"}` + canary prompt | no canary; `[REDACTED_…]` present |
 | C3-tool-output | `{mode:"redact"}` + `notes.txt` with canaries; server forces a `read {path:"notes.txt"}` tool_call on the first main-agent reply | tool output scrubbed in the follow-up request (no canary, scrub marker present) |
-| C4a-order1 | plugins `[sensitive-guard(redact), canary-injector]`, prompt "Say hi." | **observe**: does the second plugin's injected canary reach the provider? |
-| C4b-order2 | plugins `[canary-injector, sensitive-guard(redact)]`, same | **observe**: same question with reversed order |
+| C4a-order1 | plugins `[leakshield(redact), canary-injector]`, prompt "Say hi." | **observe**: does the second plugin's injected canary reach the provider? |
+| C4b-order2 | plugins `[canary-injector, leakshield(redact)]`, same | **observe**: same question with reversed order |
 | C5-invalid-options | `{mode:"bogus"}` + canary prompt | fail-closed: no canary reaches provider (ideally no request at all) |
 | C6-absent | no plugins + canary prompt | **expected leak** — documents the deployment boundary: without the plugin, canaries reach the provider. This is not a product failure. |
 | C7-deidentify | `{mode:"redact",deidentify:true}` + prompt with alice×2 / bob×1 / HIGH key (issue #20 trial) | no canary in any provider request; ≥2 distinct `[SG-EMAIL-…]` placeholders with alice's two occurrences mapping to one stable placeholder |
@@ -102,7 +102,7 @@ boot probes:
   re-spawns `opencode serve --stdio` via PATH.
 - **Spawn with `stdio: ["ignore", …]`** — a piped-open stdin makes `opencode run`
   wait for EOF and hang forever with zero output.
-- **Case data lives under temporary workdirs** (`$(TMPDIR)/sensitive-guard-e2e-work`) with isolated XDG dirs. OpenCode still resolves this repository as the project root; C13 places its synthetic fixture under generated `scripts/e2e/out/` and addresses it relative to that root.
+- **Case data lives under temporary workdirs** (`$(TMPDIR)/leakshield-e2e-work`) with isolated XDG dirs. OpenCode still resolves this repository as the project root; C13 places its synthetic fixture under generated `scripts/e2e/out/` and addresses it relative to that root.
 
 ## Expected output shape
 
@@ -130,7 +130,7 @@ node scripts/e2e/manual-tui.mjs guard-first
 node scripts/e2e/manual-tui.mjs injector-first
 ```
 
-Each launch starts a loopback-only capture provider and an interactive OpenCode TUI. It uses a fresh XDG config/data/state/cache profile, the local capture provider, the local Sensitive Guard build in `redact` mode, and the synthetic second-plugin canary injector. It strips inherited OpenCode config/plugin variables and credential-like environment variables; the fake capture API key is local-only. No global OpenCode config or credentials are changed/read.
+Each launch starts a loopback-only capture provider and an interactive OpenCode TUI. It uses a fresh XDG config/data/state/cache profile, the local capture provider, the local LeakShield build in `redact` mode, and the synthetic second-plugin canary injector. It strips inherited OpenCode config/plugin variables and credential-like environment variables; the fake capture API key is local-only. No global OpenCode config or credentials are changed/read.
 
 Use synthetic input only. After exiting the TUI, the launcher reports whether the injector ran and whether its synthetic canary reached the provider; capture files are retained under `scripts/e2e/out/manual-tui/`. Running `run-boundary.mjs` clears the generated `out/` directory, including these manual profiles and captures.
 

@@ -6,7 +6,7 @@ All notable changes are listed here. The project has no tagged release yet; `pac
 
 ### Added
 
-- OpenCode V2 **transparent pseudonymization** (`mode: "transparent"`, opt-in; the default `mode` is still `block`): sensitive values become stable placeholders like `[SGP2:API_KEY-xxxx-xxxx-xxxx]` before model requests and are restored in tool inputs and assistant replies. Chat Completions, Anthropic Messages, Responses (HTTP/SSE and native WebSocket) and AI SDK injected fetch. `wireProtection: false` is a pure hook-only mode. ([#23](https://github.com/jwcrystal/sensitive-guard/pull/23))
+- OpenCode V2 **transparent pseudonymization** (`mode: "transparent"`, opt-in; the default `mode` is still `block`): sensitive values become stable placeholders like `[SGP2:API_KEY-xxxx-xxxx-xxxx]` before model requests and are restored in tool inputs and assistant replies. Chat Completions, Anthropic Messages, Responses (HTTP/SSE and native WebSocket) and AI SDK injected fetch. `wireProtection: false` is a pure hook-only mode. ([#23](https://github.com/jwcrystal/leakshield/pull/23))
 - Opt-in encrypted mapping persistence (AES-256-GCM SQLite, TTL, `--forget`), with a doctor check. Needs Node 22.13+. (#23)
 - Per-rule toggles via `settings.rule_overrides`; validated credit card (Luhn), IBAN (mod-97) and public IPv4 rules; an opt-in URL rule. (#23)
 - CI running `tsc --noEmit` and the test suite on pull requests; host E2E runners and a plugin comparison harness. (#23)
@@ -14,13 +14,15 @@ All notable changes are listed here. The project has no tagged release yet; `pac
 
 ### Changed
 
+- **Renamed to LeakShield.** The unscoped npm name `sensitive-guard` belongs to another package. Everything moves to `leakshield` with no compatibility aliases, since nothing has been released: the package and `leakshield` bin, the OpenCode plugin id, the `leakshield-ignore` directive, `LEAKSHIELD_LANG`, the `~/.leakshield/` config directory, the keychain service and mapping store directory (`~/.local/share/leakshield/`), the `x-leakshield-refusal` header and `leakshield_transport_refusal` code, binary names, and the GitHub repository (`jwcrystal/leakshield`). The `[SGP2:…]` placeholder format is unchanged.
+
 These also affect the CLI, Web UI and block mode:
 
 - Phone rules (`phone-tw`, `phone-intl`) are **off by default**; enable them with `rule_overrides`. (#23)
 - Credit card, IBAN and public IPv4 rules are **on by default**, so text containing them is now flagged. (#23)
 - ASCII NDA keywords match whole words (`NDA` no longer matches `agenda`); CJK keywords still match as substrings. (#23)
 - Unknown ids in `settings.rule_overrides` fail the config load. (#23)
-- Zero-width characters are flagged only when they hide a value the rules would otherwise detect; emoji ZWJ sequences, a BOM, ZWNJ and ZWSP between words no longer flag or refuse. A key split by a word joiner (U+2060) is now caught. ([#29](https://github.com/jwcrystal/sensitive-guard/pull/29))
+- Zero-width characters are flagged only when they hide a value the rules would otherwise detect; emoji ZWJ sequences, a BOM, ZWNJ and ZWSP between words no longer flag or refuse. A key split by a word joiner (U+2060) is now caught. ([#29](https://github.com/jwcrystal/leakshield/pull/29))
 - Release binaries are built from `src/cli.ts` (the CLI entry) instead of `src/index.ts`, which is now the plugin entry. (#23)
 
 ### Removed

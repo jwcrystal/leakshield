@@ -1,6 +1,6 @@
 # 外掛比較測試
 
-在真實 OpenCode host 上，用同一組情境比較 baseline（無插件）、Sensitive Guard、官方 `@rehydra/opencode` 與 EightDoor `opencode-rehydar`。模型端是本機 loopback 替身，資料全為合成值，**不需要任何憑證，也不會呼叫真實模型**。每個案例使用獨立的 HOME／XDG，不讀寫你的 OpenCode 設定。
+在真實 OpenCode host 上，用同一組情境比較 baseline（無插件）、LeakShield、官方 `@rehydra/opencode` 與 EightDoor `opencode-rehydar`。模型端是本機 loopback 替身，資料全為合成值，**不需要任何憑證，也不會呼叫真實模型**。每個案例使用獨立的 HOME／XDG，不讀寫你的 OpenCode 設定。
 
 | 腳本 | 內容 |
 |---|---|

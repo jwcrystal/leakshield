@@ -1,4 +1,4 @@
-# Repository Atlas: sensitive-guard
+# Repository Atlas: leakshield
 
 ## Responsibility
 Scans for secrets, PII, database credentials, internal domains, and NDA keywords before content reaches an AI model. It blocks or pseudonymizes content inside OpenCode, and also offers a CLI and a local Web UI for explicit scans.
@@ -6,7 +6,7 @@ Scans for secrets, PII, database credentials, internal domains, and NDA keywords
 ## Design
 - Single-package TypeScript application with two entrypoints:
   - `src/index.ts` — OpenCode plugin entry (re-exports `src/opencode.ts`); importing it never starts a process.
-  - `src/cli.ts` — CLI / Web UI / `--doctor` / `--forget` entry (the `sensitive-guard` bin and release binaries).
+  - `src/cli.ts` — CLI / Web UI / `--doctor` / `--forget` entry (the `leakshield` bin and release binaries).
 - MCP server mode was removed: it relied on the model voluntarily calling a scan tool after it had already received the content.
 - Detection is rule-based: built-in rules, dynamic rules from `config/guard.config.yaml`, and opt-in exact `.env` value matching.
 - Output is normalized through `ScanResult` / `Finding`, then mapped to a decision (`ALLOW` / `WARN` / `CONFIRM`).

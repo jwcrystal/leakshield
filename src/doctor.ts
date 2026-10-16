@@ -1,9 +1,9 @@
 /**
- * `sensitive-guard --doctor` — install-level verification for the OpenCode
+ * `leakshield --doctor` — install-level verification for the OpenCode
  * plugin (Phase 1a of the transparent-hardening plan).
  *
  * The doctor answers one question: "is this machine's OpenCode configured so
- * that Sensitive Guard is actually loaded, with valid options and a working
+ * that LeakShield is actually loaded, with valid options and a working
  * scanner?" It runs OUTSIDE the OpenCode host, so it can verify configuration,
  * registration shape, plugin options, and the local scanner — but it cannot
  * see inside a live session. Runtime registration is proven by the boundary
@@ -14,7 +14,7 @@
  * - PARTIAL       v1 host: session hooks only (no transport layer, no transparent/deidentify)
  * - BROKEN        something is registered but would not work (dist missing / invalid options /
  *                 guard config broken / smoke fails / v2-only mode on v1)
- * - NOT_REGISTERED host found, config found or absent, but Sensitive Guard is not in it
+ * - NOT_REGISTERED host found, config found or absent, but LeakShield is not in it
  * - HOST_MISSING  no usable `opencode` binary on PATH
  */
 
@@ -139,9 +139,9 @@ interface RegistrationMatch {
   isLocalDistPath: boolean;
 }
 
-function matchesSensitiveGuard(entry: string): boolean {
-  if (entry === "sensitive-guard") return true;
-  return /\/sensitive-guard(\/dist(\/opencode\.js)?)?$/.test(entry);
+function matchesLeakshield(entry: string): boolean {
+  if (entry === "leakshield") return true;
+  return /\/leakshield(\/dist(\/opencode\.js)?)?$/.test(entry);
 }
 
 function findRegistration(generation: "v1" | "v2", config: unknown): RegistrationMatch | null {
@@ -152,12 +152,12 @@ function findRegistration(generation: "v1" | "v2", config: unknown): Registratio
     const plugins = record.plugins;
     if (Array.isArray(plugins)) {
       for (const entry of plugins) {
-        if (typeof entry === "string" && matchesSensitiveGuard(entry)) {
+        if (typeof entry === "string" && matchesLeakshield(entry)) {
           return { packageRef: entry, options: {}, isLocalDistPath: entry.includes("/") };
         }
         if (entry && typeof entry === "object" && !Array.isArray(entry)) {
           const pkg = (entry as Record<string, unknown>).package;
-          if (typeof pkg === "string" && matchesSensitiveGuard(pkg)) {
+          if (typeof pkg === "string" && matchesLeakshield(pkg)) {
             const options = (entry as Record<string, unknown>).options ?? {};
             return { packageRef: pkg, options, isLocalDistPath: pkg.includes("/") };
           }
@@ -171,7 +171,7 @@ function findRegistration(generation: "v1" | "v2", config: unknown): Registratio
   const legacy = record.plugin;
   if (Array.isArray(legacy)) {
     for (const entry of legacy) {
-      if (typeof entry === "string" && matchesSensitiveGuard(entry)) {
+      if (typeof entry === "string" && matchesLeakshield(entry)) {
         return { packageRef: entry, options: {}, isLocalDistPath: true };
       }
     }
@@ -248,7 +248,7 @@ export function persistenceCheck(
       id: "persistence",
       state: "warn",
       detail: `${base}; store unreadable (${probe.error}) — the plugin degrades to memory-only; conversations are not blocked.`,
-      fix: "Run `sensitive-guard --forget --all` to reset the store (erases persisted mappings), or restore the file.",
+      fix: "Run `leakshield --forget --all` to reset the store (erases persisted mappings), or restore the file.",
     };
   }
   return {
@@ -292,7 +292,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       id: "host",
       state: "fail",
       detail: "opencode binary not found on PATH (or `opencode --version` failed).",
-      fix: "Install OpenCode, or add it to PATH, then rerun `sensitive-guard --doctor`.",
+      fix: "Install OpenCode, or add it to PATH, then rerun `leakshield --doctor`.",
     });
     return { status: "HOST_MISSING", hostVersion: null, hostGeneration: null, configPath: null, checks };
   }
@@ -340,7 +340,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     checks.push({
       id: "registration",
       state: "fail",
-      detail: "Sensitive Guard is not registered in the OpenCode config.",
+      detail: "LeakShield is not registered in the OpenCode config.",
       fix: "Add it (snippet below), then rerun this doctor.",
     });
     return {
@@ -467,7 +467,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
 export function formatDoctorReport(report: DoctorReport): string {
   const icon = { ok: "[OK]  ", warn: "[WARN]", fail: "[FAIL]", skip: "[SKIP]" } as const;
   const lines: string[] = [];
-  lines.push(`sensitive-guard doctor — ${new Date().toISOString()}`);
+  lines.push(`leakshield doctor — ${new Date().toISOString()}`);
   for (const check of report.checks) {
     lines.push(`${icon[check.state]} ${check.id}: ${check.detail}`);
     if (check.fix) lines.push(`       fix: ${check.fix}`);
@@ -488,7 +488,7 @@ export function formatDoctorReport(report: DoctorReport): string {
         : report.status === "BROKEN"
           ? "BROKEN — registered but would not protect; fix the [FAIL] items above."
           : report.status === "NOT_REGISTERED"
-            ? "NOT REGISTERED — Sensitive Guard is not in the OpenCode config; sessions are unprotected."
+            ? "NOT REGISTERED — LeakShield is not in the OpenCode config; sessions are unprotected."
             : "HOST MISSING — no OpenCode binary found.";
   lines.push(verdict);
   lines.push("");

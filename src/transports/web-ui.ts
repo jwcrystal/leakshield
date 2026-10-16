@@ -4,7 +4,7 @@ export const WEB_UI_HTML = String.raw`<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="dark">
-<title>Sensitive Guard | Local Redaction Workbench</title>
+<title>LeakShield | Local Redaction Workbench</title>
 <style>
   :root {
     --bg: #090b0d;
@@ -238,7 +238,7 @@ export const WEB_UI_HTML = String.raw`<!DOCTYPE html>
     <div class="brand">
       <div class="mark" aria-hidden="true">SG</div>
       <div>
-        <h1>Sensitive Guard</h1>
+        <h1>LeakShield</h1>
         <p class="tagline"><span class="tagline-part">本機敏感內容檢查台</span> <span class="tagline-part" lang="en">/ Local redaction workbench</span></p>
       </div>
     </div>

@@ -1,37 +1,37 @@
-# sensitive-guard — Binary Quick Start
+# leakshield — Binary Quick Start
 
-You have a single `sensitive-guard` (or `sensitive-guard.exe`) executable. No Node.js, no npm, nothing else needed.
+You have a single `leakshield` (or `leakshield.exe`) executable. No Node.js, no npm, nothing else needed.
 
 ## Run
 
 ```bash
 # Scan text
-./sensitive-guard --text 'OPENAI_KEY=sk-xxxx secret="supersecret"'
+./leakshield --text 'OPENAI_KEY=sk-xxxx secret="supersecret"'
 
 # Scan a file
-./sensitive-guard --file ./config.ts
+./leakshield --file ./config.ts
 
 # Scan a directory
-./sensitive-guard --dir ./src
+./leakshield --dir ./src
 
 # Read from stdin
-cat .env | ./sensitive-guard --stdin
+cat .env | ./leakshield --stdin
 
 # Start Web UI (default port 3000)
-./sensitive-guard --web
+./leakshield --web
 ```
 
 ## Redact (sanitize before sharing)
 
 ```bash
 # Redact stdin
-cat .env | ./sensitive-guard --redact --stdin
+cat .env | ./leakshield --redact --stdin
 
 # Redact file to new file
-./sensitive-guard --redact --file .env --out .env.redacted
+./leakshield --redact --file .env --out .env.redacted
 
 # Preview what would be redacted (no output)
-./sensitive-guard --redact --dry-run --file .env
+./leakshield --redact --dry-run --file .env
 ```
 
 ## Exit Codes
@@ -49,19 +49,19 @@ The binary works out of the box. To add custom rules (NDA keywords, private doma
 | Path | Scope |
 |------|-------|
 | `./config/guard.config.yaml` | Current directory |
-| `~/.sensitive-guard/guard.config.yaml` | All sessions (home) |
+| `~/.leakshield/guard.config.yaml` | All sessions (home) |
 
 ```bash
 # Create a custom config at home (works everywhere)
-mkdir -p ~/.sensitive-guard
+mkdir -p ~/.leakshield
 # Copy the example or create your own
-# See: https://github.com/jwcrystal/sensitive-guard/blob/main/config/guard.config.example.yaml
+# See: https://github.com/jwcrystal/leakshield/blob/main/config/guard.config.example.yaml
 ```
 
-See full options: [Configuration Reference](https://github.com/jwcrystal/sensitive-guard#configuration)
+See full options: [Configuration Reference](https://github.com/jwcrystal/leakshield#configuration)
 
 ## Help
 
 ```bash
-./sensitive-guard    # shows usage and all options
+./leakshield    # shows usage and all options
 ```

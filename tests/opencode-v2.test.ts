@@ -87,7 +87,7 @@ describe("OpenCode v2 plugin", () => {
     await findHook(hooks, "session:prompt")(event);
 
     expect(event.prompt.text).not.toContain(secret);
-    expect(event.prompt.text).toContain("Sensitive Guard blocked message text");
+    expect(event.prompt.text).toContain("LeakShield blocked message text");
     expect(event.prompt.text).toContain("blocked an attachment");
     expect(event.prompt.files).toEqual([]);
   });
@@ -122,9 +122,9 @@ describe("OpenCode v2 plugin", () => {
 
     const serialized = JSON.stringify(event);
     expect(serialized).not.toContain(secret);
-    expect(event.system[0].text).toContain("Sensitive Guard blocked system prompt");
+    expect(event.system[0].text).toContain("LeakShield blocked system prompt");
     const textPart = event.messages[0].content[0] as { text: string };
-    expect(textPart.text).toContain("Sensitive Guard blocked message text");
+    expect(textPart.text).toContain("LeakShield blocked message text");
     const mediaReplacement = event.messages[0].content[2] as { type: string; text: string };
     expect(mediaReplacement.type).toBe("text");
     expect(mediaReplacement.text).toContain("blocked an attachment");
@@ -208,7 +208,7 @@ describe("OpenCode v2 plugin", () => {
     for (const hook of hooks) {
       await expect(
         hook.callback({ prompt: { text: "safe text" }, system: [], messages: [], tools: {} }),
-      ).rejects.toThrow("Sensitive Guard initialization failed");
+      ).rejects.toThrow("LeakShield initialization failed");
     }
   });
 });
@@ -318,7 +318,7 @@ describe("OpenCode v2 plugin — email de-identification", () => {
     const serialized = JSON.stringify(contextEvent);
     expect(serialized).not.toContain(lookalike);
     expect(serialized).not.toContain("[REDACTED_");
-    expect(serialized).toContain("Sensitive Guard blocked");
+    expect(serialized).toContain("LeakShield blocked");
   });
 
   it("rejects a placeholder issued in another session", async () => {
@@ -342,7 +342,7 @@ describe("OpenCode v2 plugin — email de-identification", () => {
 
     const serialized = JSON.stringify(contextEvent);
     expect(serialized).not.toContain(issued);
-    expect(serialized).toContain("Sensitive Guard blocked");
+    expect(serialized).toContain("LeakShield blocked");
   });
 
   it("uses the same placeholder for the same email across prompt and tool output hooks", async () => {
@@ -434,7 +434,7 @@ describe("OpenCode v2 plugin — email de-identification", () => {
       prompt: { text: `reach ${emailB} now`, files: [] },
     };
     await expect((async () => findHook(hooks, "session:prompt")(rejected))()).rejects.toThrow(
-      "Sensitive Guard de-identification session capacity reached",
+      "LeakShield de-identification session capacity reached",
     );
 
     const replay = {
@@ -464,7 +464,7 @@ describe("OpenCode v2 plugin — readonly env query tools", () => {
   const secretValue = "unclassified-opaque-value-987654321";
 
   function makeEnvWorkspace(): { root: string; configPath: string } {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-v2env-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-v2env-"));
     temporaryDirectories.push(root);
     const configPath = path.join(root, "guard.config.yaml");
     fs.writeFileSync(path.join(root, ".env"), `API_TOKEN=${secretValue}\nFLAG=true\n`, "utf8");

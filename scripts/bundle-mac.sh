@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-BINARY="${1:-sensitive-guard}"
+BINARY="${1:-leakshield}"
 VERSION="${2:-1.0.0}"
 APP_DIR="${BINARY}.app"
 CONTENTS="${APP_DIR}/Contents"
@@ -10,8 +10,8 @@ RESOURCES="${CONTENTS}/Resources"
 
 mkdir -p "${MACOS}" "${RESOURCES}"
 
-cp "${BINARY}" "${MACOS}/sensitive-guard"
-chmod +x "${MACOS}/sensitive-guard"
+cp "${BINARY}" "${MACOS}/leakshield"
+chmod +x "${MACOS}/leakshield"
 
 cp icon.icns "${RESOURCES}/icon.icns"
 
@@ -21,11 +21,11 @@ cat > "${CONTENTS}/Info.plist" <<EOF
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key>
-  <string>sensitive-guard</string>
+  <string>leakshield</string>
   <key>CFBundleIdentifier</key>
-  <string>com.sensitive-guard.app</string>
+  <string>com.leakshield.app</string>
   <key>CFBundleName</key>
-  <string>Sensitive Guard</string>
+  <string>LeakShield</string>
   <key>CFBundleVersion</key>
   <string>${VERSION}</string>
   <key>CFBundleShortVersionString</key>

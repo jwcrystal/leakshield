@@ -16,7 +16,7 @@ export function getLineCol(text: string, index: number): { line: number; col: nu
  * Multiple ignore patterns to prevent bypass attempts.
  *
  * Supported formats:
- * - // sensitive-guard-ignore
+ * - // leakshield-ignore
  * - // guard:skip
  * - // guard:ignore
  * - // sg-ignore
@@ -24,12 +24,12 @@ export function getLineCol(text: string, index: number): { line: number; col: nu
  * - // skip-guard
  *
  * All patterns are word-boundary protected to prevent:
- * - sensitive-guard-ignored (won't match)
- * - sensitive_guard_ignore (won't match)
- * - sensitiveguardignore (won't match)
+ * - leakshield-ignored (won't match)
+ * - leakshield_ignore (won't match)
+ * - leakshieldignore (won't match)
  */
 const IGNORE_PATTERNS = [
-  /\bsensitive-guard-ignore\b/i,           // Original format
+  /\bleakshield-ignore\b/i,           // Original format
   /\bguard:\s*skip\b/i,                     // Short format
   /\bguard:\s*ignore\b/i,                   // Short format alternative
   /\bsg-ignore\b/i,                         // Abbreviated

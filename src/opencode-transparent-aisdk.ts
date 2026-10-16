@@ -6,9 +6,9 @@
 import { types } from "node:util";
 import { classifyModelRoute } from "./opencode-transparent-http.js";
 
-const ADMISSION_ERROR = "Sensitive Guard transparent mode blocked an unsupported model transport route. AI SDK providers must honor OpenCode's injected HTTP fetch.";
-const DISPOSED_ERROR = "Sensitive Guard transparent mode blocked an inactive AI SDK transport.";
-const PROTECTION_ERROR = "Sensitive Guard transparent mode blocked an AI SDK HTTP request. Check its protocol, metadata and content before retrying.";
+const ADMISSION_ERROR = "LeakShield transparent mode blocked an unsupported model transport route. AI SDK providers must honor OpenCode's injected HTTP fetch.";
+const DISPOSED_ERROR = "LeakShield transparent mode blocked an inactive AI SDK transport.";
+const PROTECTION_ERROR = "LeakShield transparent mode blocked an AI SDK HTTP request. Check its protocol, metadata and content before retrying.";
 type RecordLike = Record<string, unknown>;
 type InjectedFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -46,14 +46,14 @@ export function createAISDKTransportAdmission(wireProtection = true) {
   const refuse = (message: string): Response => {
     if (!notices.has(message)) {
       notices.add(message);
-      console.warn(`[sensitive-guard] local AI SDK HTTP 400 refusal: ${message}`);
+      console.warn(`[leakshield] local AI SDK HTTP 400 refusal: ${message}`);
     }
     // SDKs classify thrown fetch errors as retryable network failures. A local
     // non-2xx response makes the refusal actionable/non-retryable; it is NOT
     // returned through the network or represented as a provider success.
     return new Response(JSON.stringify({ type: "error", error: {
-      type: "invalid_request_error", code: "sensitive_guard_transport_refusal", message,
-    } }), { status: 400, headers: { "content-type": "application/json", "x-sensitive-guard-refusal": "1" } });
+      type: "invalid_request_error", code: "leakshield_transport_refusal", message,
+    } }), { status: 400, headers: { "content-type": "application/json", "x-leakshield-refusal": "1" } });
   };
   return {
     admit(event: RecordLike): void {
@@ -74,7 +74,7 @@ export function createAISDKTransportAdmission(wireProtection = true) {
         catch (error) {
           // Only SG's static refusal family is converted. Genuine networking,
           // cancellation and provider failures keep their original behavior.
-          if (error instanceof Error && error.message.startsWith("Sensitive Guard ")) return refuse(PROTECTION_ERROR);
+          if (error instanceof Error && error.message.startsWith("LeakShield ")) return refuse(PROTECTION_ERROR);
           throw error;
         }
       };

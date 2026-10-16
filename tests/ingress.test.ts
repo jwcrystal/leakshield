@@ -31,7 +31,7 @@ describe("protectText()", () => {
 
     expect(result.action).toBe("block");
     expect(result.text).not.toContain(secret);
-    expect(result.text).toContain("Sensitive Guard blocked tool output");
+    expect(result.text).toContain("LeakShield blocked tool output");
   });
 
   it("redacts direct matches only when redaction mode is explicitly enabled", () => {

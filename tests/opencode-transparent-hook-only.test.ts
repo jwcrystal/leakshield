@@ -201,7 +201,7 @@ describe("pure hook-only transparent mode", () => {
     const invalid = { ...config, settings: { ...config.settings, max_chars: 0 } };
     const { hooks, prepare, emit } = await arm(false, [], invalid, true);
     expect([...hooks.keys()].sort()).toEqual(["session:compaction", "session:context", "session:generate", "session:title", "tool:execute.before"]);
-    await expect(prepare()).rejects.toThrow("Sensitive Guard initialization failed");
-    await expect(emit("tool:execute.before", { sessionID: "s", tool: "write", input: {} })).rejects.toThrow("Sensitive Guard initialization failed");
+    await expect(prepare()).rejects.toThrow("LeakShield initialization failed");
+    await expect(emit("tool:execute.before", { sessionID: "s", tool: "write", input: {} })).rejects.toThrow("LeakShield initialization failed");
   });
 });

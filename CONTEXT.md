@@ -1,4 +1,4 @@
-# Sensitive Guard
+# LeakShield
 
 敏感內容掃描後的處置語言。以下用語描述設計概念；列入詞彙表不代表功能已實作。
 

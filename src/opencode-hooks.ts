@@ -9,7 +9,7 @@ import {
 import type { GuardConfig } from "./types.js";
 
 const INITIALIZATION_ERROR =
-  "Sensitive Guard initialization failed. Model request blocked before content was sent.";
+  "LeakShield initialization failed. Model request blocked before content was sent.";
 
 function blockedAttachment(part: Part): Part {
   return {
@@ -17,7 +17,7 @@ function blockedAttachment(part: Part): Part {
     sessionID: part.sessionID,
     messageID: part.messageID,
     type: "text",
-    text: "[Sensitive Guard blocked an attachment. Attachments are not forwarded because their content cannot be safely scanned.]",
+    text: "[LeakShield blocked an attachment. Attachments are not forwarded because their content cannot be safely scanned.]",
     synthetic: true,
   };
 }

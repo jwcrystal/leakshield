@@ -8,7 +8,7 @@ const SUPPORTED_LOCALES = ["en", "zh-TW"] as const;
 type Locale = (typeof SUPPORTED_LOCALES)[number];
 
 function resolveLocale(): Locale {
-  const lang = process.env.SENSITIVE_GUARD_LANG ?? "en";
+  const lang = process.env.LEAKSHIELD_LANG ?? "en";
   if (lang === "zh-TW" || lang === "zh") return "zh-TW";
   return "en";
 }

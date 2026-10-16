@@ -88,23 +88,23 @@ export interface TransportMaskingService {
  * WARN line with a fixed context word, never response/request content.
  */
 const warnDegradation = (context: string): void => {
-  console.warn(`[sensitive-guard] degraded: ${context}`);
+  console.warn(`[leakshield] degraded: ${context}`);
 };
 
 const UNSUPPORTED_REQUEST_BODY =
-  "Sensitive Guard transparent mode blocked a model request with an unsupported or unidentifiable body.";
+  "LeakShield transparent mode blocked a model request with an unsupported or unidentifiable body.";
 const UNSUPPORTED_TRANSPORT =
-  "Sensitive Guard transparent mode blocked a request on an unsupported model transport route.";
+  "LeakShield transparent mode blocked a request on an unsupported model transport route.";
 const MASK_FAILURE =
-  "Sensitive Guard transparent mode failed to mask a model request.";
+  "LeakShield transparent mode failed to mask a model request.";
 const UNSUPPORTED_RESPONSE =
-  "Sensitive Guard transparent mode blocked a response it cannot restore safely.";
+  "LeakShield transparent mode blocked a response it cannot restore safely.";
 const RESTORE_FAILURE =
-  "Sensitive Guard transparent mode failed to restore a model response.";
+  "LeakShield transparent mode failed to restore a model response.";
 const MALFORMED_STREAM =
-  "Sensitive Guard transparent mode blocked a malformed or incomplete streaming response.";
+  "LeakShield transparent mode blocked a malformed or incomplete streaming response.";
 const STREAM_BUFFER_LIMIT =
-  "Sensitive Guard transparent mode blocked an oversized streaming buffer.";
+  "LeakShield transparent mode blocked an oversized streaming buffer.";
 
 /**
  * Content-free refusal classification (2026-10-08): every request refusal

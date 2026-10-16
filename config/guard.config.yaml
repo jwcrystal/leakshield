@@ -1,4 +1,4 @@
-# sensitive-guard 設定檔
+# leakshield 設定檔
 # 修改這個檔案來自訂你的 NDA 關鍵字與私有域名
 
 # NDA / 機密關鍵字（大小寫不敏感）

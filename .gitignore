@@ -26,12 +26,12 @@ coverage/
 /.ptmp*
 
 # Generated release archives and executables
-/sensitive-guard
-/sensitive-guard.exe
-/sensitive-guard-linux
-/sensitive-guard-intel
-/sensitive-guard*.zip
-/sensitive-guard*.tgz
+/leakshield
+/leakshield.exe
+/leakshield-linux
+/leakshield-intel
+/leakshield*.zip
+/leakshield*.tgz
 *.app/
 
 # Logs and temporary files

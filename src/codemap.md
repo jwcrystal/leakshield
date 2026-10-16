@@ -11,7 +11,7 @@ Application layer for the scanner: configuration, rule engine, decision model, p
   - `scanner/` — `scanText()` engine, redaction and redaction verification.
   - `decision/` — decision model, ingress gate, pseudonymization and mapping store (encrypted persistence is opt-in), deidentify, schema-string handling.
   - `transports/` — `cli.ts` (non-interactive CLI output and exit codes) and `web.ts` / `web-ui.ts` (Web UI and REST).
-  - `i18n/` — `en` and `zh-TW` messages, selected by `SENSITIVE_GUARD_LANG`.
+  - `i18n/` — `en` and `zh-TW` messages, selected by `LEAKSHIELD_LANG`.
   - `utils/` — file collection, path security, Windows console encoding.
 - Plugin modules: `opencode.ts` (v1), `opencode-v2.ts` (v2), `opencode-transparent*.ts` (transparent pseudonymization over HTTP/SSE, WebSocket, AI SDK), `opencode-hooks.ts`, `opencode-env-tools.ts` / `env-queries.ts` (opt-in read-only env queries), `plugin-options.ts`, `doctor.ts`, `forget.ts`.
 - MCP server mode no longer exists.
@@ -25,4 +25,4 @@ Application layer for the scanner: configuration, rule engine, decision model, p
 ## Integration
 - Depends on `zod`, `js-yaml`, `chalk`, and `@opencode-ai/plugin`; transparent persistence uses Node's built-in `node:sqlite` (Node 22.13+).
 - Consumes `config/guard.config.yaml`.
-- Exposes the plugin entry, the `sensitive-guard` CLI, and the local Web UI / REST endpoint.
+- Exposes the plugin entry, the `leakshield` CLI, and the local Web UI / REST endpoint.

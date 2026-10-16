@@ -283,7 +283,7 @@ export default { id: "sg-lost-send-test", async setup(ctx) {
     });
     const rejectionProven = !result.timedOut && (FORCE_UPGRADE ? captures.length > 0 && originalsAbsent : captures.length === 0) && unexpectedRequests.length === 0
       && !existsSync(outputFile) && !existsSync(shellFile)
-      && /Sensitive Guard transparent mode blocked an unsupported model transport route/.test(result.stderr + result.stdout);
+      && /LeakShield transparent mode blocked an unsupported model transport route/.test(result.stderr + result.stdout);
     // Hook-only ingress starts from response.created; a missing send hook is
     // normal there, not a restoration failure. Wire mode still needs it.
     const expectedDegradedReply = hookOnlyReply || (LOST_WS_SEND && transport === "websocket" && wireProtection);

@@ -346,7 +346,7 @@ describe("hook-only outbound passthrough and scoped ingress", () => {
   it("keeps unknown routes and sensitive transport metadata refused with wire protection", async () => {
     const { call, route, prepare } = await arm(true);
     await prepare();
-    await expect(call("session:http.request", { ...route, request: new Request("https://gateway.example/alpha/generate", { method: "POST", body: "{}" }) })).rejects.toThrow("Sensitive Guard");
+    await expect(call("session:http.request", { ...route, request: new Request("https://gateway.example/alpha/generate", { method: "POST", body: "{}" }) })).rejects.toThrow("LeakShield");
   });
 
   it("does not inspect transport metadata in hook-only mode", async () => {
@@ -358,11 +358,11 @@ describe("hook-only outbound passthrough and scoped ingress", () => {
   it.each([false, true])("leaves opaque WS routes untouched only in hook-only mode (%s)", async (wireProtection) => {
     const { call, route, prepare } = await arm(wireProtection);
     const handshake = { ...route, url: "wss://gateway.example/alpha/generate", headers: {} };
-    if (wireProtection) await expect(call("session:experimental.ws.handshake", handshake)).rejects.toThrow("Sensitive Guard");
+    if (wireProtection) await expect(call("session:experimental.ws.handshake", handshake)).rejects.toThrow("LeakShield");
     else await expect(call("session:experimental.ws.handshake", handshake)).resolves.toBeUndefined();
     await prepare();
     if (wireProtection) {
-      await expect(call("session:experimental.ws.handshake", handshake)).rejects.toThrow("Sensitive Guard");
+      await expect(call("session:experimental.ws.handshake", handshake)).rejects.toThrow("LeakShield");
       return;
     }
     await call("session:experimental.ws.handshake", handshake);
@@ -379,7 +379,7 @@ describe("hook-only outbound passthrough and scoped ingress", () => {
     const { call, route, prepare } = await arm(false);
     const request = () => ({ ...route, request: new Request("https://gateway.example/private", { method: "POST", body: "{}" }) });
     await prepare();
-    await expect(call("session:context", { ...route, system: Object.freeze([EMAIL]), messages: [], options: {} })).rejects.toThrow("Sensitive Guard");
+    await expect(call("session:context", { ...route, system: Object.freeze([EMAIL]), messages: [], options: {} })).rejects.toThrow("LeakShield");
     await expect(call("session:http.request", request())).resolves.toBeUndefined();
     const token = "[SGP2:PII_EMAIL-abcd-efgh-ijkl]";
     const checkLiteral = async () => {

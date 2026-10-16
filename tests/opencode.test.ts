@@ -36,7 +36,7 @@ describe("OpenCode plugin", () => {
 
     expect(parts[0]).toMatchObject({ type: "text" });
     expect((parts[0] as Extract<Part, { type: "text" }>).text).not.toContain(secret);
-    expect((parts[0] as Extract<Part, { type: "text" }>).text).toContain("Sensitive Guard blocked message text");
+    expect((parts[0] as Extract<Part, { type: "text" }>).text).toContain("LeakShield blocked message text");
   });
 
   it("blocks unscannable attachments", async () => {
@@ -108,7 +108,7 @@ describe("OpenCode plugin", () => {
     await hooks["experimental.chat.messages.transform"]!({}, { messages: [{ info: {} as never, parts }] });
 
     expect(JSON.stringify(parts)).not.toContain(secret);
-    expect(JSON.stringify(parts)).toContain("Sensitive Guard blocked reasoning text");
+    expect(JSON.stringify(parts)).toContain("LeakShield blocked reasoning text");
   });
 
   it("scrubs system prompts before they are sent to the model", async () => {
@@ -118,7 +118,7 @@ describe("OpenCode plugin", () => {
     await hooks["experimental.chat.system.transform"]!({ model: {} as never }, output);
 
     expect(JSON.stringify(output)).not.toContain(secret);
-    expect(output.system[0]).toContain("Sensitive Guard blocked system prompt");
+    expect(output.system[0]).toContain("LeakShield blocked system prompt");
   });
 
   it("scrubs tool definitions before they are sent to the model", async () => {

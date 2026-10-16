@@ -60,7 +60,7 @@ export function buildDynamicRules(config: GuardConfig): Rule[] {
 
   for (const rule of config.custom_rules) {
     if (!isSafePattern(rule.pattern)) {
-      console.warn(`[sensitive-guard] custom_rules: 略過不安全或無效的 pattern —「${rule.description}」`);
+      console.warn(`[leakshield] custom_rules: 略過不安全或無效的 pattern —「${rule.description}」`);
       continue;
     }
     rules.push({

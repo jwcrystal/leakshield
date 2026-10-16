@@ -1,4 +1,4 @@
-# sensitive-guard 新成員 3 分鐘 Onboarding
+# leakshield 新成員 3 分鐘 Onboarding
 
 > 目標：讓新成員在 3 分鐘內理解這個專案能做什麼、怎麼跑、何時用。
 > 專案目前是**實驗性、尚未正式發佈**（未上 npm），細節與限制以 [README.zh-TW.md](../README.zh-TW.md) 的「目前狀態」為準。
@@ -22,8 +22,8 @@
 ## 1) 30 秒安裝
 
 ```bash
-git clone https://github.com/jwcrystal/sensitive-guard.git
-cd sensitive-guard
+git clone https://github.com/jwcrystal/leakshield.git
+cd leakshield
 npm install
 npm run build
 ```
@@ -37,7 +37,7 @@ npm test                       # 單元測試
 npx tsc --noEmit               # 型別檢查
 ```
 
-> 還沒發佈到 npm，所以不要直接 `npx sensitive-guard`；在 repo 內用 `npm run scan -- ...`，或全域安裝 / `npm link` 後使用 `sensitive-guard`。
+> 還沒發佈到 npm，所以不要直接 `npx leakshield`；在 repo 內用 `npm run scan -- ...`，或全域安裝 / `npm link` 後使用 `leakshield`。
 
 ---
 

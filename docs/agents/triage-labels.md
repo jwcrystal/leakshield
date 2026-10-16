@@ -1,6 +1,6 @@
 # Triage Labels
 
-Map five canonical triage roles to GitHub labels for `jwcrystal/sensitive-guard`.
+Map five canonical triage roles to GitHub labels for `jwcrystal/leakshield`.
 
 | Role | Label | Meaning |
 |---|---|---|

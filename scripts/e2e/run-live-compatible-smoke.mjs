@@ -69,7 +69,7 @@ export default { id: "sg-synthetic-egress-observer", async setup(ctx) {
   // The loader's plugin records vary across host versions. A successful model
   // request AND an SG placeholder in the scoped egress probe is the stronger
   // runtime proof; record registration presence without inventing loaded state.
-  const sgRegistered = JSON.stringify(plugins).includes("sensitive-guard");
+  const sgRegistered = JSON.stringify(plugins).includes("leakshield");
   for (const model of models) {
     const created = api("post", "/api/session", { title: `SG synthetic live ${model.route} ${wireProtection ? "wire" : "hook"}`,
       model: { providerID: "commandcode", id: model.id }, location: { directory } }, directory);

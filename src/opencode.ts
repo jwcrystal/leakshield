@@ -180,10 +180,10 @@ const v1Server = async (
  * Dual-version OpenCode plugin entry. OpenCode v2 reads `id` and `setup(ctx)`;
  * OpenCode v1 (1.18.29+) calls `server(input, options)` and uses the returned hooks.
  */
-const sensitiveGuardPlugin = {
-  id: "sensitive-guard",
+const leakshieldPlugin = {
+  id: "leakshield",
   setup: v2Setup,
   server: v1Server,
 } satisfies PluginModule & V2Plugin;
 
-export default sensitiveGuardPlugin;
+export default leakshieldPlugin;

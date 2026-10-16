@@ -15,10 +15,10 @@ type V2Plugin = PluginNamespace.Plugin;
 type PluginContext = PluginNamespace.Context;
 
 const INITIALIZATION_ERROR =
-  "Sensitive Guard initialization failed. Model request blocked before content was sent.";
+  "LeakShield initialization failed. Model request blocked before content was sent.";
 
 const BLOCKED_ATTACHMENT_NOTICE =
-  "[Sensitive Guard blocked an attachment. Attachments are not forwarded because their content cannot be safely scanned.]";
+  "[LeakShield blocked an attachment. Attachments are not forwarded because their content cannot be safely scanned.]";
 
 /**
  * Structural views of the OpenCode v2 message schema. The scanner intentionally
@@ -219,7 +219,7 @@ export interface DeidentifyOptions {
 
 const PLACEHOLDER_SESSION_LIMIT = 256;
 const PLACEHOLDER_CAPACITY_ERROR =
-  "Sensitive Guard de-identification session capacity reached; existing placeholders remain valid. Continue in an active session.";
+  "LeakShield de-identification session capacity reached; existing placeholders remain valid. Continue in an active session.";
 
 type PlaceholderSessionState = { key: Buffer; placeholders: Set<string> };
 

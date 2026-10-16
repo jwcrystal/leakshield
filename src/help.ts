@@ -1,14 +1,14 @@
 // ─── CLI help text ───────────────────────────────────────────────────────────
 
-export const HELP_TEXT = `sensitive-guard — scan text for secrets and PII before sending it to AI
+export const HELP_TEXT = `leakshield — scan text for secrets and PII before sending it to AI
 
 Usage:
-  sensitive-guard [--cli] [scan options]   Scan text, a file, a directory or stdin
-  sensitive-guard --web [--port <n>]       Start the local Web UI (default port 3000)
-  sensitive-guard --doctor                 Check the OpenCode plugin installation
-  sensitive-guard --forget --all           Delete all persisted transparent-mode mappings
-  sensitive-guard --forget --session <id>  Delete persisted mappings for one session
-  sensitive-guard --help                   Show this help
+  leakshield [--cli] [scan options]   Scan text, a file, a directory or stdin
+  leakshield --web [--port <n>]       Start the local Web UI (default port 3000)
+  leakshield --doctor                 Check the OpenCode plugin installation
+  leakshield --forget --all           Delete all persisted transparent-mode mappings
+  leakshield --forget --session <id>  Delete persisted mappings for one session
+  leakshield --help                   Show this help
 
 Scan input (stdin is read when none is given):
   --text <text>                  Scan the given text
@@ -29,7 +29,7 @@ Redaction:
   --redact --dry-run             Report what would be redacted without writing output
 
 Forget options:
-  --path <file>                  Mapping store location (default: ~/.local/share/sensitive-guard/SGP.db)
+  --path <file>                  Mapping store location (default: ~/.local/share/leakshield/SGP.db)
 
 Exit codes: 0 = safe, 1 = findings detected, 2 = file not found
 `;

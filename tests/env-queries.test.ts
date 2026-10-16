@@ -28,7 +28,7 @@ function makeWorkspace(envFiles: Record<string, string>): {
   configPath: string;
   writeConfig: (yaml: string) => void;
 } {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-env-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-env-"));
   temporaryDirectories.push(root);
   for (const [name, content] of Object.entries(envFiles)) {
     fs.writeFileSync(path.join(root, name), content, "utf8");
@@ -452,7 +452,7 @@ describe("EnvQueryService — file access limits", () => {
   });
 
   it("refuses traversal, absolute, and outside-workspace entries", () => {
-    const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-out-"));
+    const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-out-"));
     temporaryDirectories.push(outsideRoot);
     fs.writeFileSync(path.join(outsideRoot, "outside.env"), "KEY=value\n", "utf8");
 
@@ -583,7 +583,7 @@ describe("EnvQueryService — workspace identity validation", () => {
   /** Config file kept outside the workspace so a substituted root cannot
    *  masquerade as authorization drift in the before-open tests. */
   function makeExternalConfig(): { configPath: string } {
-    const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-cfg-"));
+    const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-cfg-"));
     temporaryDirectories.push(configDir);
     const configPath = path.join(configDir, "guard.config.yaml");
     fs.writeFileSync(configPath, "settings:\n  env_files:\n    - .env\n", "utf8");
@@ -591,7 +591,7 @@ describe("EnvQueryService — workspace identity validation", () => {
   }
 
   it("rejects an ancestor directory symlink that resolves outside the workspace", () => {
-    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "sensitive-guard-out-"));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-out-"));
     temporaryDirectories.push(outsideDir);
     fs.writeFileSync(path.join(outsideDir, ".env"), "OUTSIDE_SECRET=1\n", "utf8");
 

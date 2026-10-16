@@ -16,10 +16,10 @@ import {
 } from "./opencode-transparent-http.js";
 
 type Event = Record<string, unknown>;
-const ROUTE_ERROR = "Sensitive Guard transparent mode blocked an unsupported model transport route.";
-const FRAME_ERROR = "Sensitive Guard transparent mode blocked an unsupported or malformed WebSocket frame.";
-const ATTRIBUTION_ERROR = "Sensitive Guard transparent mode blocked a WebSocket frame without matching request attribution.";
-const LIMIT_ERROR = "Sensitive Guard transparent mode blocked an oversized WebSocket buffer.";
+const ROUTE_ERROR = "LeakShield transparent mode blocked an unsupported model transport route.";
+const FRAME_ERROR = "LeakShield transparent mode blocked an unsupported or malformed WebSocket frame.";
+const ATTRIBUTION_ERROR = "LeakShield transparent mode blocked a WebSocket frame without matching request attribution.";
+const LIMIT_ERROR = "LeakShield transparent mode blocked an oversized WebSocket buffer.";
 const MAX_FRAME_BYTES = 4 * 1024 * 1024;
 const MAX_LANES = 1024;
 const MAX_CHANNELS = 256;
@@ -120,7 +120,7 @@ export function createResponsesWebSocketAdapter(
       lanes.set(key, { request, restorable, sent: false, terminal: false, holds: new Map(), counts: new Map() });
       if (!restorable && !hookOnlyNoticed) {
         hookOnlyNoticed = true;
-        console.warn("[sensitive-guard] degraded: unknown WS route admitted with scoped context hooks only; frames are not inspected or restored");
+        console.warn("[leakshield] degraded: unknown WS route admitted with scoped context hooks only; frames are not inspected or restored");
       }
     },
     async send(event: Event): Promise<string> {
@@ -200,7 +200,7 @@ export function createResponsesWebSocketAdapter(
         // extra delta. Keep done semantics and its complete restored field;
         // malformed providers that omit the final delta get a static notice.
         if (held) {
-          console.warn("[sensitive-guard] degraded: WS text ended with an incomplete delta tail; complete done field retained");
+          console.warn("[leakshield] degraded: WS text ended with an incomplete delta tail; complete done field retained");
           totalBytes -= bytes(held);
           lane.holds.delete(channel);
         }
@@ -208,7 +208,7 @@ export function createResponsesWebSocketAdapter(
       }
       restoreResponsesEventDisplay(service, String(event.sessionID), chunk);
       if (TERMINAL_TYPES.has(type)) {
-        if (lane.holds.size) console.warn("[sensitive-guard] degraded: WS terminal frame dropped incomplete placeholder tails");
+        if (lane.holds.size) console.warn("[leakshield] degraded: WS terminal frame dropped incomplete placeholder tails");
         clearBuffers(lane);
         lane.terminal = true;
       }

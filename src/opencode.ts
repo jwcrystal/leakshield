@@ -8,7 +8,7 @@ import { createFailClosedHooks, createHooks } from "./opencode-hooks.js";
 import { createV1EnvTools } from "./opencode-env-tools.js";
 import { createFailClosedV2Setup, createV2Setup } from "./opencode-v2.js";
 import { createFailClosedTransparentGuard, createTransparentSessionGuard } from "./opencode-transparent.js";
-import { PluginOptionsSchema, type PluginOptions } from "./plugin-options.js";
+import { PluginOptionsSchema, withDefaultMode, type PluginOptions } from "./plugin-options.js";
 import type { GuardConfig } from "./types.js";
 
 type V2Plugin = PluginNamespace.Plugin;
@@ -54,18 +54,20 @@ function getWorkspaceRoot(input: unknown): string {
   return process.cwd();
 }
 
-/** Whether the raw plugin options request transparent mode (even if invalid). */
+/** Whether the raw v2 plugin options select transparent mode, explicitly or
+ * by omitting `mode` (the v2 default), even if the options are invalid. */
 function rawModeIsTransparent(options: unknown): boolean {
+  const resolved = withDefaultMode(options, "v2");
   return (
-    typeof options === "object" &&
-    options !== null &&
-    (options as { mode?: unknown }).mode === "transparent"
+    typeof resolved === "object" &&
+    resolved !== null &&
+    (resolved as { mode?: unknown }).mode === "transparent"
   );
 }
 
 const v2Setup = async (ctx: V2PluginContext): Promise<PluginNamespace.Cleanup | void> => {
   try {
-    const options: PluginOptions = PluginOptionsSchema.parse(ctx.options);
+    const options: PluginOptions = PluginOptionsSchema.parse(withDefaultMode(ctx.options, "v2"));
     const loaded = loadConfigWithFingerprint(options.configPath, ctx.location.directory);
     const config = withEncodingDetection(loaded.config);
     if (options.mode === "transparent") {
@@ -142,7 +144,7 @@ const v1Server = async (
   rawOptions?: unknown,
 ) => {
   try {
-    const options: PluginOptions = PluginOptionsSchema.parse(rawOptions);
+    const options: PluginOptions = PluginOptionsSchema.parse(withDefaultMode(rawOptions, "v1"));
     if (options.deidentify) {
       // v1 has no de-identification pipeline; the shared options schema now
       // includes the flag, so v1 must explicitly reject it. The throw lands in

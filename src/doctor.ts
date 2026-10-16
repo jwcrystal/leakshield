@@ -387,7 +387,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   }
 
   // Options validation (same schema the plugin entry enforces at runtime)
-  const optionsValidation = validatePluginOptions(registration.options ?? {});
+  const optionsValidation = validatePluginOptions(registration.options ?? {}, host.generation);
   if (!optionsValidation.ok) {
     checks.push({
       id: "options",
@@ -401,7 +401,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   checks.push({
     id: "options",
     state: "ok",
-    detail: `mode=${options.mode}${options.mode === "transparent" ? ` wireProtection=${options.wireProtection ?? true}` : ""}${options.attachments === "allow" ? " attachments=allow" : ""}${options.deidentify ? " +deidentify" : ""}${options.envQueries ? " +envQueries" : ""}${options.configPath ? ` configPath=${options.configPath}` : ""}`,
+    detail: `mode=${options.mode}${(registration.options as { mode?: unknown } | undefined)?.mode === undefined ? " (default)" : ""}${options.mode === "transparent" ? ` wireProtection=${options.wireProtection ?? true}` : ""}${options.attachments === "allow" ? " attachments=allow" : ""}${options.deidentify ? " +deidentify" : ""}${options.envQueries ? " +envQueries" : ""}${options.configPath ? ` configPath=${options.configPath}` : ""}`,
   });
   checks.push(persistenceCheck(options, deps));
 

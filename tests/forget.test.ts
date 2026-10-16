@@ -90,10 +90,10 @@ describe("doctor persistence check (B5)", () => {
   });
 
   const optionsWith = (persistence: object) =>
-    validatePluginOptions({ mode: "transparent", persistence })!;
+    validatePluginOptions({ mode: "transparent", persistence }, "v2")!;
 
   it("reports OFF as a skip (default)", () => {
-    const check = persistenceCheck(validatePluginOptions({})!.options, deps());
+    const check = persistenceCheck(validatePluginOptions({}, "v2")!.options, deps());
     expect(check.state).toBe("skip");
     expect(check.detail).toContain("OFF");
   });

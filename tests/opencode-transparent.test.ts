@@ -2321,10 +2321,10 @@ describe("transparent standalone joiners in replayed tool history", () => {
 describe("attachment policy: allow", () => {
   it("schema rejects attachments allow outside transparent mode", async () => {
     const { validatePluginOptions } = await import("../src/plugin-options.js");
-    const bad = validatePluginOptions({ mode: "redact", attachments: "allow" });
+    const bad = validatePluginOptions({ mode: "redact", attachments: "allow" }, "v2");
     expect(bad.ok).toBe(false);
     if (!bad.ok) expect(bad.error).toContain('attachments "allow"');
-    const good = validatePluginOptions({ mode: "transparent", attachments: "allow" });
+    const good = validatePluginOptions({ mode: "transparent", attachments: "allow" }, "v2");
     expect(good.ok).toBe(true);
   });
 

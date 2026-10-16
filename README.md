@@ -301,8 +301,9 @@ The same compiled plugin supports both OpenCode major versions: v2 hosts load th
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     {
-      "package": "/absolute/path/to/leakshield/dist",
-      "options": { "mode": "block" }
+      "package": "/absolute/path/to/leakshield/dist"
+      // No options: mode defaults to "transparent" on v2.
+      // Add "options": { "mode": "block" } to refuse instead of pseudonymize.
     }
   ]
 }
@@ -323,13 +324,13 @@ Note that v2 only accepts plugin *directories* (it resolves `dist/index.js`) or 
 }
 ```
 
-`block` is the default and replaces unsafe content with a disclosure-free notice. Set `mode` to `redact` only when you explicitly want recognized direct matches replaced with `[REDACTED_TYPE]` placeholders.
+The default `mode` depends on the host: **`transparent` on OpenCode v2** (described below) and **`block` on v1**, since transparent is v2-only. `block` replaces unsafe content with a disclosure-free notice; set `"mode": "block"` on v2 to keep that behavior. Set `mode` to `redact` only when you explicitly want recognized direct matches replaced with `[REDACTED_TYPE]` placeholders. `--doctor` shows the mode in effect and marks it `(default)` when the options omit it.
 
-**OpenCode v2 only — transparent pseudonymization:** set `"mode": "transparent"` to replace detected sensitive values in model-request snapshots with stable opaque placeholders — category-labelled `[SGP2:<TYPE>-xxxx-xxxx-xxxx]` since W1 (2026-10-07; the legacy `[SGP1:…]` shape stays recognized for restoring pre-upgrade in-session mappings). Reverse mappings are scoped to the OpenCode session and stay in process memory by default; encrypted persistence is opt-in below. Known placeholders are restored in tool inputs before execution and in supported assistant response text. Supported HTTP protocols are selected by URL path shape: Chat Completions, Anthropic Messages, and Responses, including streaming. Native Responses-family WebSocket is also supported as described below. Wire-mode SDKs honoring injected fetch use the same request-scoped HTTP hooks. Hook-only protects content snapshots without transport admission; it does not add adapters for unknown protocols.
+**OpenCode v2 only — transparent pseudonymization (the v2 default):** omit `mode` or set `"mode": "transparent"` to replace detected sensitive values in model-request snapshots with stable opaque placeholders — category-labelled `[SGP2:<TYPE>-xxxx-xxxx-xxxx]` since W1 (2026-10-07; the legacy `[SGP1:…]` shape stays recognized for restoring pre-upgrade in-session mappings). Reverse mappings are scoped to the OpenCode session and stay in process memory by default; encrypted persistence is opt-in below. Known placeholders are restored in tool inputs before execution and in supported assistant response text. Supported HTTP protocols are selected by URL path shape: Chat Completions, Anthropic Messages, and Responses, including streaming. Native Responses-family WebSocket is also supported as described below. Wire-mode SDKs honoring injected fetch use the same request-scoped HTTP hooks. Hook-only protects content snapshots without transport admission; it does not add adapters for unknown protocols. Transparent mode has been verified against loopback providers and one real OpenAI model; real OS keychains, a real Anthropic provider and long-history replay on other providers are not verified yet ([#26](https://github.com/jwcrystal/leakshield/issues/26)). Routes it cannot protect are refused, not forwarded.
 
 **Hook-only for new transparent installs:** use [the hook-first configuration example](config/opencode.hook-first.example.json), which explicitly sets `wireProtection: false`. Content hooks protect system/messages/options/tools and the tool gate restores safe known arguments. SG registers **no outbound HTTP request, WS handshake/send, or AI SDK admission hooks**, does not inspect transport metadata, and does not change provider transport settings. Unknown routes and private SDK transports do not incur SG transport refusals. Optional incoming HTTP/WS hooks restore supported display text using successful preparation for the same session/kind/model; missing hooks or restoration failures leave placeholders literal without disabling input protection. Later-added content or attachments may leave unmasked, even with `attachments: "block"`. The doctor reports `PARTIAL`, not full-wire protection. **Content-hook masking failures still refuse the affected call**, now including a safe `[stage=prepare.mask reason=…]` code; hook-only does not silently forward unprotectable raw content. See [hook-only verification](docs/evidence/2026-10-11-pure-hook-only-verification.md).
 
-**Final wire protection:** set `wireProtection: true` to additionally validate/remask the final HTTP request body or supported WS outbound frame content; unknown routes and unknown/mixed body shapes refuse before dispatch. Tool safety and reply-side recovery are identical in both levels. For compatibility, **omitting `wireProtection` retains this stronger legacy behavior**. The general plugin default remains `mode: "block"`; only the transparent-install example chooses false explicitly. The option is valid only in transparent mode.
+**Final wire protection:** set `wireProtection: true` to additionally validate/remask the final HTTP request body or supported WS outbound frame content; unknown routes and unknown/mixed body shapes refuse before dispatch. Tool safety and reply-side recovery are identical in both levels. For compatibility, **omitting `wireProtection` retains this stronger legacy behavior**. With the v2 default (`mode: "transparent"`, `wireProtection` omitted) this stronger level is on; only the hook-first example chooses false explicitly. The option is valid only in transparent mode.
 
 **AI SDK providers:** with `wireProtection: true`, providers must honor OpenCode's injected `options.fetch`; request-scoped HTTP hooks provide attribution and wire enforcement without a provider-brand allowlist. The wrapper checks HTTP/HTTPS and supported paths; missing/accessor/nonwritable fetch options refuse. With false, SG installs no SDK wrapper and imposes none of those transport requirements; only content/tool hooks and optional ingress restoration apply. Bypass transports are **outside final-wire coverage**, not guaranteed blocked. Commandcode `/alpha/generate`, including Go/403 fallback, is untouched in false and refused in true; there is no legacy response adapter. Arguments, abort signals and real provider failures remain host-owned.
 
@@ -357,7 +358,7 @@ In wire mode, the wrapper represents its route/content refusals as a **local HTT
 { "package": "/absolute/path/to/leakshield/dist", "options": { "mode": "redact", "deidentify": true } }
 ```
 
-**Opt-in readonly env queries (both versions):** the `envQueries` option (default `false`) exposes three read-only tools over the files listed in `settings.env_files`, so an agent can answer configuration questions without ever seeing values:
+**Opt-in readonly env queries (both versions):** the `envQueries` option (default `false`) exposes three read-only tools over the files listed in `settings.env_files`, so an agent can answer configuration questions without ever seeing values. It does not work with transparent mode, so on v2 set `mode` to `block` or `redact` explicitly:
 
 | Tool | Contract |
 |---|---|

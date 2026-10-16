@@ -324,7 +324,7 @@ describe("OpenCode plugin entry", () => {
   it("fails closed when deidentify has the wrong type (v2 setup)", async () => {
     const registered: Array<{ name: string; callback: unknown }> = [];
     const ctx = {
-      options: { deidentify: "yes" },
+      options: { mode: "block", deidentify: "yes" },
       location: { directory: process.cwd() },
       session: {
         hook: async (name: string, callback: unknown) => {
@@ -352,7 +352,7 @@ describe("OpenCode plugin entry", () => {
   it("fails closed when envQueries has the wrong type (v2 setup)", async () => {
     const registered: Array<{ name: string; callback: unknown }> = [];
     const ctx = {
-      options: { envQueries: 1 },
+      options: { mode: "block", envQueries: 1 },
       location: { directory: process.cwd() },
       session: {
         hook: async (name: string, callback: unknown) => {
@@ -380,7 +380,7 @@ describe("OpenCode plugin entry", () => {
   it("registers no env query tools by default (v2 setup)", async () => {
     const transforms: Array<(editor: unknown) => void> = [];
     const ctx = {
-      options: {},
+      options: { mode: "block" },
       location: { directory: process.cwd() },
       session: {
         hook: async () => ({ dispose: async () => {} }),
@@ -408,7 +408,7 @@ describe("OpenCode plugin entry", () => {
 
     const addedTools: Array<{ name: string; tool: Record<string, unknown> }> = [];
     const ctx = {
-      options: { configPath, envQueries: true },
+      options: { mode: "block", configPath, envQueries: true },
       location: { directory },
       session: {
         hook: async () => ({ dispose: async () => {} }),
@@ -752,6 +752,64 @@ describe("OpenCode plugin entry", () => {
     }
     await (cleanup as () => Promise<void>)();
     expect(disposed).toBe(24);
+  });
+
+  it("defaults to the transparent hook set when options omit mode (v2 setup)", async () => {
+    const hookNames = async (options: unknown) => {
+      const registered: string[] = [];
+      const hookFor = (domain: string) => async (name: string) => {
+        registered.push(`${domain}:${name}`);
+        return { dispose: async () => {} };
+      };
+      await leakshieldPlugin.setup({
+        options,
+        location: { directory: process.cwd() },
+        session: { hook: hookFor("session") },
+        tool: { hook: hookFor("tool") },
+        aisdk: { hook: hookFor("aisdk") },
+        provider: { transform: async () => ({ dispose: async () => {} }) },
+      } as never);
+      return registered;
+    };
+
+    const explicit = await hookNames({ mode: "transparent" });
+    expect(explicit).toContain("session:http.request");
+    expect(await hookNames({})).toEqual(explicit);
+    expect(await hookNames(undefined)).toEqual(explicit);
+  });
+
+  it("fails closed across all routes when options omit mode and are invalid (v2 setup)", async () => {
+    const registered: Array<{ name: string; callback: unknown }> = [];
+    const hookFor = () => async (name: string, callback: unknown) => {
+      registered.push({ name, callback });
+      return { dispose: async () => {} };
+    };
+    const ctx = {
+      // envQueries is rejected in transparent mode, the v2 default.
+      options: { envQueries: true },
+      location: { directory: process.cwd() },
+      session: { hook: hookFor() },
+      tool: { hook: hookFor() },
+      aisdk: { hook: hookFor() },
+    };
+
+    await leakshieldPlugin.setup(ctx as never);
+
+    expect(registered).toHaveLength(12);
+    const httpHook = registered.find((r) => r.name === "http.request")!.callback as (event: unknown) => Promise<void>;
+    await expect((async () => httpHook({ sessionID: "s" }))()).rejects.toThrow("LeakShield initialization failed");
+  });
+
+  it("defaults to block mode when options omit mode (v1 server)", async () => {
+    for (const options of [undefined, {}]) {
+      const hooks = await leakshieldPlugin.server({} as never, options);
+      const parts = [textPart(`token=${secret}`)];
+
+      await hooks["chat.message"]!({ sessionID: "session-1" }, { message: {} as never, parts });
+
+      expect(JSON.stringify(parts)).not.toContain(secret);
+      expect(JSON.stringify(parts)).toContain("LeakShield blocked message text");
+    }
   });
 
   it("fails closed when transparent is requested on the v1 server (v1 has no transport hooks)", async () => {

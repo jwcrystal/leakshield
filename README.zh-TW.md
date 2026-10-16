@@ -356,8 +356,9 @@ OpenCode plugin 成功載入後會成為強制性整合：它會在 OpenCode 儲
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     {
-      "package": "/絕對路徑/leakshield/dist",
-      "options": { "mode": "block" }
+      "package": "/絕對路徑/leakshield/dist"
+      // 不設定 options 時，v2 的 mode 預設為 "transparent"。
+      // 想改成直接攔截，加上 "options": { "mode": "block" }。
     }
   ]
 }
@@ -378,11 +379,11 @@ OpenCode plugin 成功載入後會成為強制性整合：它會在 OpenCode 儲
 }
 ```
 
-`block` 是預設值，會用不含機敏值的攔截訊息替換危險內容。只有在你明確希望已辨識的直接命中改為 `[REDACTED_TYPE]` 佔位符時，才設定 `mode: "redact"`。
+`mode` 的預設值依 host 版本而定：**OpenCode v2 是 `transparent`**（見下方），**v1 是 `block`**，因為 transparent 只支援 v2。`block` 會用不含機敏值的攔截訊息替換危險內容；在 v2 想沿用這個行為，請設定 `"mode": "block"`。只有在你明確希望已辨識的直接命中改為 `[REDACTED_TYPE]` 佔位符時，才設定 `mode: "redact"`。`--doctor` 會顯示實際生效的 mode，沒有設定時會標示 `(default)`。
 
-**僅限 OpenCode v2 — 透明假名化（transparent）：** 設定 `"mode": "transparent"` 後，偵測到的敏感值會在模型請求快照中替換為穩定的不透明佔位符——W1（2026-10-07）起為帶類別的 `[SGP2:<TYPE>-xxxx-xxxx-xxxx]`（仍辨識舊 `[SGP1:…]` 映射）。反查映射預設僅在行程記憶體、以 OpenCode session 為界；持久化 opt-in。已知佔位符在工具執行前及支援的助理顯示文字中還原。HTTP adapters 支援按路徑形狀判別的 Chat Completions、Anthropic Messages、Responses（含串流），另支援 native Responses-family WS；不依 provider 品牌設 allowlist。Hook-only 保護 content 快照，不設出站傳輸守門，也不為未知協定新增 adapter。失效或不安全的工具還原仍拒絕該次操作。本機歷史、日誌與檔案可能含原文——保護的是模型邊界，不是磁碟。
+**僅限 OpenCode v2 — 透明假名化（transparent，v2 預設）：** 不設定 `mode` 或設定 `"mode": "transparent"` 時，偵測到的敏感值會在模型請求快照中替換為穩定的不透明佔位符——W1（2026-10-07）起為帶類別的 `[SGP2:<TYPE>-xxxx-xxxx-xxxx]`（仍辨識舊 `[SGP1:…]` 映射）。反查映射預設僅在行程記憶體、以 OpenCode session 為界；持久化 opt-in。已知佔位符在工具執行前及支援的助理顯示文字中還原。HTTP adapters 支援按路徑形狀判別的 Chat Completions、Anthropic Messages、Responses（含串流），另支援 native Responses-family WS；不依 provider 品牌設 allowlist。Hook-only 保護 content 快照，不設出站傳輸守門，也不為未知協定新增 adapter。失效或不安全的工具還原仍拒絕該次操作。本機歷史、日誌與檔案可能含原文——保護的是模型邊界，不是磁碟。transparent 目前在 loopback provider 和一個真實 OpenAI 模型上驗證過；真實 OS keychain、真實 Anthropic provider，以及其他 provider 的長歷史重播都還沒驗證（[#26](https://github.com/jwcrystal/leakshield/issues/26)）。無法保護的路線會被拒絕，不會放行。
 
-**純 hook-only／共用 wire 開關：** 新 transparent 安裝可使用 [hook-first 範本](config/opencode.hook-first.example.json)，明確設 `wireProtection: false`。保留 system/messages/options/tools 遮罩與工具安全還原；**不註冊出站 HTTP request、WS handshake/send 或 AI SDK admission hooks**，不檢查 transport metadata、不改 provider transport 設定。未知路線與 SDK 私有傳輸不會因 SG 傳輸門檻被擋。選擇性入站 HTTP／WS hooks 依同 session/kind/model 的成功準備還原支援的顯示文字；缺 hook 或還原失敗只保留 literal，不停用輸入保護。後續新增內容／附件可能未遮罩，`doctor` 仍顯示 `PARTIAL`。**Hook 內無法遮罩的輸入仍拒絕該次請求**，並附安全的 `[stage=prepare.mask reason=…]`；不是靜默放行原文。true 增加 final-wire 與傳輸守門；省略 wire 仍為 true，plugin 預設 mode 仍為 block。[本輪驗證](docs/evidence/2026-10-11-pure-hook-only-verification.md)。
+**純 hook-only／共用 wire 開關：** 新 transparent 安裝可使用 [hook-first 範本](config/opencode.hook-first.example.json)，明確設 `wireProtection: false`。保留 system/messages/options/tools 遮罩與工具安全還原；**不註冊出站 HTTP request、WS handshake/send 或 AI SDK admission hooks**，不檢查 transport metadata、不改 provider transport 設定。未知路線與 SDK 私有傳輸不會因 SG 傳輸門檻被擋。選擇性入站 HTTP／WS hooks 依同 session/kind/model 的成功準備還原支援的顯示文字；缺 hook 或還原失敗只保留 literal，不停用輸入保護。後續新增內容／附件可能未遮罩，`doctor` 仍顯示 `PARTIAL`。**Hook 內無法遮罩的輸入仍拒絕該次請求**，並附安全的 `[stage=prepare.mask reason=…]`；不是靜默放行原文。true 增加 final-wire 與傳輸守門；省略 wire 仍為 true，所以 v2 預設（`mode: "transparent"`、不設 `wireProtection`）就是這個較強的層級。[本輪驗證](docs/evidence/2026-10-11-pure-hook-only-verification.md)。
 
 **透明模式容量與生命週期：** guard 每次遮罩／還原操作使用輸入＋輸出合計 8 Mi UTF-16 units、100,000 個 value nodes 的有限預算，不再把 standalone core 的 1 Mi-unit 小預算套在整份歷史。HTTP body／WS frame 仍限 4 MiB；scanner `max_chars`、深度 32、mapping entry 與總記憶體預算仍檢查。每個 guard 最多保留 4,096 個 session，不用 LRU 任意丟棄仍可續用的 mapping。正式 V2 `session.deleted` 事件只回收該 session 的 RAM、回覆準備證明及 WS 緩衝；idle、完成或中斷不視為刪除。缺少／失敗的事件訂閱會保留 mapping 到 unload，因此不是無限期不限容量。刪除事件不抹除加密持久化資料，仍由 TTL／明確 `forget` 管理。[本地驗證與實機限制](docs/evidence/2026-10-14-transparent-capacity-verification.md)。
 
@@ -404,7 +405,7 @@ Wire 模式的 wrapper 把自身拒絕表示為 **本地 HTTP 400 錯誤回覆**
 { "package": "/絕對路徑/leakshield/dist", "options": { "mode": "redact", "deidentify": true } }
 ```
 
-**選擇性開啟的唯讀 env 查詢（兩個版本皆支援）：** `envQueries` 選項（預設 `false`）針對 `settings.env_files` 所列檔案提供三個唯讀工具，讓 agent 能回答設定問題而不看到任何 value：
+**選擇性開啟的唯讀 env 查詢（兩個版本皆支援）：** `envQueries` 選項（預設 `false`）針對 `settings.env_files` 所列檔案提供三個唯讀工具，讓 agent 能回答設定問題而不看到任何 value。這個選項不支援 transparent 模式，所以在 v2 要明確設定 `mode` 為 `block` 或 `redact`：
 
 | 工具 | 契約 |
 |---|---|

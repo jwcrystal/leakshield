@@ -111,6 +111,24 @@ describe("runDoctor", () => {
     expect(report.checks.find((c) => c.id === "dist")?.state).toBe("skip");
   });
 
+  it("reports the generation default when options omit mode", async () => {
+    const v2 = makeFixture({ config: () => ({ plugins: ["leakshield"] }) });
+    const v2Report = await runDoctor(v2.deps);
+    expect(v2Report.checks.find((c) => c.id === "options")?.detail).toContain("mode=transparent (default) wireProtection=true");
+
+    const v1 = makeFixture({
+      version: "opencode 1.18.29",
+      distFiles: true,
+      config: (tmp) => ({ plugin: [`${distRef(tmp)}/opencode.js`] }),
+    });
+    const v1Report = await runDoctor(v1.deps);
+    expect(v1Report.checks.find((c) => c.id === "options")?.detail).toContain("mode=block (default)");
+
+    const explicit = makeFixture({ config: () => ({ plugins: [{ package: "leakshield", options: { mode: "block" } }] }) });
+    const explicitReport = await runDoctor(explicit.deps);
+    expect(explicitReport.checks.find((c) => c.id === "options")?.detail).toBe("mode=block");
+  });
+
   it("reports BROKEN for invalid mode", async () => {
     const { deps } = makeFixture({
       distFiles: true,

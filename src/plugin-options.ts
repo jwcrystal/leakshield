@@ -14,7 +14,10 @@ import { z } from "zod";
 // tools is rejected here — every entry path fails closed on the parse error.
 export const PluginOptionsSchema = z
   .object({
-    mode: z.enum(["block", "redact", "transparent"]).default("block"),
+    // No schema default: the default depends on the host generation, so
+    // callers fill it in with withDefaultMode() before parsing. A caller
+    // that forgets fails the parse, and every entry path fails closed.
+    mode: z.enum(["block", "redact", "transparent"]),
     configPath: z.string().min(1).optional(),
     deidentify: z.boolean().default(false),
     /** Opt-in readonly env query tools over `settings.env_files`. Default off. */
@@ -71,10 +74,26 @@ export const PluginOptionsSchema = z
   })
   .refine((options) => !options.persistence.enabled || options.mode === "transparent", {
     message: 'persistence requires mode "transparent"',
-  })
-  .default({});
+  });
 
 export type PluginOptions = z.infer<typeof PluginOptionsSchema>;
+
+export type HostGeneration = "v1" | "v2";
+
+/** Mode used when the options omit `mode`: transparent on v2, block on v1
+ * (transparent is v2-only). */
+export function defaultMode(generation: HostGeneration): "block" | "transparent" {
+  return generation === "v2" ? "transparent" : "block";
+}
+
+/** Fills in the generation's default mode when the options omit it. Any
+ * other non-object input is returned unchanged so the schema rejects it. */
+export function withDefaultMode(input: unknown, generation: HostGeneration): unknown {
+  if (input === undefined || input === null) return { mode: defaultMode(generation) };
+  if (typeof input !== "object" || Array.isArray(input)) return input;
+  if ((input as { mode?: unknown }).mode !== undefined) return input;
+  return { ...input, mode: defaultMode(generation) };
+}
 
 /** Validated plugin options for external consumers (doctor, tests). Never
  * throws; returns the combined zod/refine error message on failure. */
@@ -82,8 +101,8 @@ export type PluginOptionsValidation =
   | { ok: true; options: PluginOptions }
   | { ok: false; error: string };
 
-export function validatePluginOptions(input: unknown): PluginOptionsValidation {
-  const parsed = PluginOptionsSchema.safeParse(input ?? {});
+export function validatePluginOptions(input: unknown, generation: HostGeneration): PluginOptionsValidation {
+  const parsed = PluginOptionsSchema.safeParse(withDefaultMode(input, generation));
   if (parsed.success) return { ok: true, options: parsed.data };
   return {
     ok: false,

@@ -6,9 +6,9 @@
 import { types } from "node:util";
 import { classifyModelRoute } from "./opencode-transparent-http.js";
 
-const ADMISSION_ERROR = "LeakShield transparent mode blocked an unsupported model transport route. AI SDK providers must honor OpenCode's injected HTTP fetch.";
-const DISPOSED_ERROR = "LeakShield transparent mode blocked an inactive AI SDK transport.";
-const PROTECTION_ERROR = "LeakShield transparent mode blocked an AI SDK HTTP request. Check its protocol, metadata and content before retrying.";
+const ADMISSION_ERROR = "LeakShield blocked an unsupported route. The provider must use the fetch OpenCode injects.";
+const DISPOSED_ERROR = "LeakShield blocked a request on an inactive AI SDK transport.";
+const PROTECTION_ERROR = "LeakShield blocked an AI SDK request. Check its protocol, metadata and content, then try again.";
 type RecordLike = Record<string, unknown>;
 type InjectedFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 

@@ -9,7 +9,7 @@ import {
 import type { GuardConfig } from "./types.js";
 
 const INITIALIZATION_ERROR =
-  "LeakShield initialization failed. Model request blocked before content was sent.";
+  "LeakShield initialization failed, so the request was blocked before anything was sent.";
 
 function blockedAttachment(part: Part): Part {
   return {
@@ -17,7 +17,7 @@ function blockedAttachment(part: Part): Part {
     sessionID: part.sessionID,
     messageID: part.messageID,
     type: "text",
-    text: "[LeakShield blocked an attachment. Attachments are not forwarded because their content cannot be safely scanned.]",
+    text: "[LeakShield blocked an attachment: its content cannot be scanned, so it was not sent.]",
     synthetic: true,
   };
 }

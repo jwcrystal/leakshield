@@ -33,7 +33,7 @@ interface CachedDecision {
 
 export function blockedText(context: string, totalFindings: number): string {
   const count = totalFindings === 0 ? "unscanned" : `${totalFindings} sensitive item(s)`;
-  return `[LeakShield blocked ${context}: ${count}. Original content was not sent to the model.]`;
+  return `[LeakShield blocked ${context}: ${count}. The original was not sent to the model.]`;
 }
 
 /**
@@ -169,7 +169,7 @@ export function protectUnknownStrings(
   }
 
   if (!isPlainRecord(value)) {
-    return "[LeakShield blocked unsupported metadata value.]";
+    return "[LeakShield blocked an unsupported metadata value.]";
   }
 
   const copy: Record<string, unknown> = {};

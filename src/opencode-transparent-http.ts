@@ -92,19 +92,19 @@ const warnDegradation = (context: string): void => {
 };
 
 const UNSUPPORTED_REQUEST_BODY =
-  "LeakShield transparent mode blocked a model request with an unsupported or unidentifiable body.";
+  "LeakShield blocked the request because its body is unsupported or could not be identified.";
 const UNSUPPORTED_TRANSPORT =
-  "LeakShield transparent mode blocked a request on an unsupported model transport route.";
+  "LeakShield blocked a request on an unsupported route.";
 const MASK_FAILURE =
-  "LeakShield transparent mode failed to mask a model request.";
+  "LeakShield blocked the request because it could not be masked safely.";
 const UNSUPPORTED_RESPONSE =
-  "LeakShield transparent mode blocked a response it cannot restore safely.";
+  "LeakShield blocked a response it could not restore safely.";
 const RESTORE_FAILURE =
-  "LeakShield transparent mode failed to restore a model response.";
+  "LeakShield blocked the response because it could not be restored safely.";
 const MALFORMED_STREAM =
-  "LeakShield transparent mode blocked a malformed or incomplete streaming response.";
+  "LeakShield blocked a malformed or incomplete stream.";
 const STREAM_BUFFER_LIMIT =
-  "LeakShield transparent mode blocked an oversized streaming buffer.";
+  "LeakShield blocked an oversized stream buffer.";
 
 /**
  * Content-free refusal classification (2026-10-08): every request refusal

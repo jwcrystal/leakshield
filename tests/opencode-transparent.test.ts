@@ -43,11 +43,11 @@ const phoneConfig: GuardConfig = {
   settings: { ...baseConfig.settings, rule_overrides: { "phone-tw": true } },
 };
 
-const PROTECT_FAILED = "LeakShield transparent mode failed to protect a model request.";
+const PROTECT_FAILED = "LeakShield blocked a model request because it could not be masked safely.";
 const INIT_FAILED = "LeakShield initialization failed";
-const ATTRIBUTION_FAILED = "LeakShield transparent mode blocked a response without verified request attribution.";
-const UNSUPPORTED_ROUTE = "LeakShield transparent mode blocked an unsupported model transport route";
-const TOOL_REFUSED = "LeakShield transparent mode blocked this tool call";
+const ATTRIBUTION_FAILED = "LeakShield blocked a response because it could not be matched to a request.";
+const UNSUPPORTED_ROUTE = "LeakShield blocked a request on an unsupported route";
+const TOOL_REFUSED = "LeakShield blocked this tool call";
 
 interface RecordedHook {
   domain: string;
@@ -827,7 +827,7 @@ describe("transparent tool execution gate", () => {
     const input = { command: `echo ${token}` };
     await expect(
       hook("tool:execute.before")({ tool: "bash", sessionID: "session-1", input }),
-    ).rejects.toThrow("shell command does not use a supported literal-argument form");
+    ).rejects.toThrow("shell command's quoting is not supported");
     expect(input.command).toBe(`echo ${token}`);
   });
 

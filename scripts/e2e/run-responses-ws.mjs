@@ -283,13 +283,13 @@ export default { id: "sg-lost-send-test", async setup(ctx) {
     });
     const rejectionProven = !result.timedOut && (FORCE_UPGRADE ? captures.length > 0 && originalsAbsent : captures.length === 0) && unexpectedRequests.length === 0
       && !existsSync(outputFile) && !existsSync(shellFile)
-      && /LeakShield transparent mode blocked an unsupported model transport route/.test(result.stderr + result.stdout);
+      && /LeakShield blocked a request on an unsupported route/.test(result.stderr + result.stdout);
     // Hook-only ingress starts from response.created; a missing send hook is
     // normal there, not a restoration failure. Wire mode still needs it.
     const expectedDegradedReply = hookOnlyReply || (LOST_WS_SEND && transport === "websocket" && wireProtection);
     const displayOK = expectedDegradedReply ? text.includes("OK_DONE") && TOKEN.test(text) && !text.includes(EMAIL) : text.includes(`Contact ${EMAIL} OK_DONE`);
     const passed = expectRejection ? rejectionProven : result.code === 0 && !result.timedOut && displayOK && originalsAbsent && operationsOK && successfulPrimary.length === 4 && continuedWithOutput && primary.every((capture) => capture.transport === transport) && unexpectedRequests.length === 0 && (transport !== "websocket" || connections.size === 1);
-    rows.push({ name, wireProtection, providerPackage: PROVIDER_PACKAGE, model: MODEL, planPin: PLAN, expectedLegacyRejection: expectRejection, forceUpgrade: FORCE_UPGRADE, rejectionProven: expectRejection ? rejectionProven : undefined, expectedDegradedReply, reportedMissingAttribution: /blocked a WebSocket frame without matching request attribution/.test(result.stderr + result.stdout), passed, code: result.code, timedOut: result.timedOut, originalsAbsent, operationsOK, continuedWithOutput, primaryRequests: primary.length, successfulPrimaryRequests: successfulPrimary.length, routes: [...new Set(captures.map((capture) => capture.route))], primaryRoutes: [...new Set(primary.map((capture) => capture.route))], connections: connections.size, directory });
+    rows.push({ name, wireProtection, providerPackage: PROVIDER_PACKAGE, model: MODEL, planPin: PLAN, expectedLegacyRejection: expectRejection, forceUpgrade: FORCE_UPGRADE, rejectionProven: expectRejection ? rejectionProven : undefined, expectedDegradedReply, reportedMissingAttribution: /blocked a WebSocket frame that could not be matched to a request/.test(result.stderr + result.stdout), passed, code: result.code, timedOut: result.timedOut, originalsAbsent, operationsOK, continuedWithOutput, primaryRequests: primary.length, successfulPrimaryRequests: successfulPrimary.length, routes: [...new Set(captures.map((capture) => capture.route))], primaryRoutes: [...new Set(primary.map((capture) => capture.route))], connections: connections.size, directory });
     writeFileSync(path.join(ROOT, "summary.json"), JSON.stringify(rows, null, 2));
     console.log(`${name}: ${passed ? "PASS" : "FAIL"}; operations=${operationsOK}; originalsAbsent=${originalsAbsent}; requests=${primary.length}; WS connections=${connections.size}`);
   }

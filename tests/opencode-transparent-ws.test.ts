@@ -179,8 +179,8 @@ describe("Responses-family WebSocket hooks", () => {
 
   it("refuses unadmitted sends with wire protection but keeps unattributed replies literal", async () => {
     const { call, route, handshake, send, receive } = await arm(true);
-    await expect(handshake({ url: "wss://gateway.example/chat" })).rejects.toThrow("unsupported model transport");
-    await expect(send({ type: "response.create", input: EMAIL })).rejects.toThrow("attribution");
+    await expect(handshake({ url: "wss://gateway.example/chat" })).rejects.toThrow("unsupported route");
+    await expect(send({ type: "response.create", input: EMAIL })).rejects.toThrow("could not be matched to a request");
     await handshake();
     expect((await receive({ type: "response.created", response: { id: "r1" } })).response.id).toBe("r1");
     for (const body of [{ type: "unknown", input: EMAIL }, { type: "response.cancel" }, []]) {

@@ -16,10 +16,10 @@ import {
 } from "./opencode-transparent-http.js";
 
 type Event = Record<string, unknown>;
-const ROUTE_ERROR = "LeakShield transparent mode blocked an unsupported model transport route.";
-const FRAME_ERROR = "LeakShield transparent mode blocked an unsupported or malformed WebSocket frame.";
-const ATTRIBUTION_ERROR = "LeakShield transparent mode blocked a WebSocket frame without matching request attribution.";
-const LIMIT_ERROR = "LeakShield transparent mode blocked an oversized WebSocket buffer.";
+const ROUTE_ERROR = "LeakShield blocked a request on an unsupported route.";
+const FRAME_ERROR = "LeakShield blocked an unsupported or malformed WebSocket frame.";
+const ATTRIBUTION_ERROR = "LeakShield blocked a WebSocket frame that could not be matched to a request.";
+const LIMIT_ERROR = "LeakShield blocked an oversized WebSocket buffer.";
 const MAX_FRAME_BYTES = 4 * 1024 * 1024;
 const MAX_LANES = 1024;
 const MAX_CHANNELS = 256;

@@ -123,7 +123,7 @@ describe("AI SDK injected HTTP transport", () => {
     for (const input of ["wss://gateway.example/v1/responses", "not a URL"]) {
       const response = await options.fetch(input);
       expect(response.status).toBe(wireProtection ? 400 : 200);
-      if (wireProtection) expect((await response.json()).error.message).toContain("unsupported model transport");
+      if (wireProtection) expect((await response.json()).error.message).toContain("unsupported route");
     }
     expect(hostFetch).toHaveBeenCalledTimes(wireProtection ? 0 : 4);
   });

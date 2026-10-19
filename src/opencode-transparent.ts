@@ -77,25 +77,25 @@ type RecordLike = { [key: string]: unknown };
 // ─── Static failure messages (no content ever included) ─────────────────────
 
 const INITIALIZATION_ERROR =
-  "LeakShield initialization failed. Model request blocked before content was sent.";
+  "LeakShield initialization failed, so the request was blocked before anything was sent.";
 const PROTECT_FAILED_ERROR =
-  "LeakShield transparent mode failed to protect a model request.";
+  "LeakShield blocked a model request because it could not be masked safely.";
 const ATTRIBUTION_ERROR =
-  "LeakShield transparent mode blocked a response without verified request attribution.";
+  "LeakShield blocked a response because it could not be matched to a request.";
 const UNSUPPORTED_ROUTE_ERROR =
-  "LeakShield transparent mode blocked an unsupported model transport route.";
+  "LeakShield blocked a request on an unsupported route.";
 const TOOL_REFUSAL_ERROR =
-  "LeakShield transparent mode blocked this tool call because its arguments could not be safely restored. Refresh the affected arguments and retry.";
+  "LeakShield blocked this tool call because its arguments could not be restored safely. Re-read the file and try again.";
 const TOOL_UNKNOWN_MAPPING_ERROR =
-  "LeakShield transparent mode blocked this tool call because a placeholder has no mapping in this session. Re-read the source in this session, refresh the affected arguments, and retry.";
+  "LeakShield blocked this tool call because a placeholder has no mapping in this session. Re-read the file, then try again.";
 const TOOL_RESTORE_LIMIT_ERROR =
-  "LeakShield transparent mode blocked this tool call because its arguments exceed the safe restoration limit. Reduce the arguments and retry.";
+  "LeakShield blocked this tool call because its arguments are too large to restore safely. Use smaller arguments and try again.";
 const TOOL_SHELL_CONTEXT_ERROR =
-  "LeakShield transparent mode blocked this tool call because the shell command does not use a supported literal-argument form. Rewrite it as a simple command or use a non-shell tool.";
+  "LeakShield blocked this tool call because the shell command's quoting is not supported. Use a simple command with plain arguments, or a different tool.";
 const TOOL_INPUT_SHAPE_ERROR =
-  "LeakShield transparent mode blocked this tool call because its argument structure cannot be safely restored. Refresh the arguments using plain JSON values and retry.";
+  "LeakShield blocked this tool call because its argument structure cannot be safely restored. Use plain JSON values and try again.";
 const STRUCTURAL_SENSITIVE_ERROR =
-  "LeakShield transparent mode refused this model request: a structural identifier (message or tool id, name, role, or part type) scans as sensitive, and masking cannot rewrite it without breaking the protocol. Adjust the matching rule in the guard config or change the identifier, then retry.";
+  "LeakShield blocked this request because a structural identifier (message or tool id, name, role, or part type) scans as sensitive and cannot be masked. Change it or adjust the matching rule, then try again.";
 
 function toolRestoreError(reason: PseudonymFailureReason): string {
   if (reason === "unknown_token" || reason === "malformed_token") return TOOL_UNKNOWN_MAPPING_ERROR;

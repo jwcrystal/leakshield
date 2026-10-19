@@ -15,10 +15,10 @@ type V2Plugin = PluginNamespace.Plugin;
 type PluginContext = PluginNamespace.Context;
 
 const INITIALIZATION_ERROR =
-  "LeakShield initialization failed. Model request blocked before content was sent.";
+  "LeakShield initialization failed, so the request was blocked before anything was sent.";
 
 const BLOCKED_ATTACHMENT_NOTICE =
-  "[LeakShield blocked an attachment. Attachments are not forwarded because their content cannot be safely scanned.]";
+  "[LeakShield blocked an attachment: its content cannot be scanned, so it was not sent.]";
 
 /**
  * Structural views of the OpenCode v2 message schema. The scanner intentionally

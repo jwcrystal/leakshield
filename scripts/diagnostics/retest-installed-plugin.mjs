@@ -48,7 +48,7 @@ if (!guardEntry || JSON.stringify(guardEntry.options) !== JSON.stringify(options
 const password = randomBytes(24).toString("hex");
 const env = { ...process.env, OPENCODE_CONFIG: resolve(pluginConfig),
   OPENCODE_SERVER_PASSWORD: password, OPENCODE_PASSWORD: password };
-const refusal = "LeakShield transparent mode failed to protect a model request.";
+const refusal = "LeakShield blocked a model request because it could not be masked safely.";
 const marker = "SG_LIVE_RETEST_OK";
 const prompt = `This is a bounded availability test, not a development task. Do not use tools, execute commands, change files, or continue earlier tasks. Reply with exactly ${marker} and nothing else.`;
 const result = {

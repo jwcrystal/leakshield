@@ -37,7 +37,7 @@ npm test                       # 單元測試
 npx tsc --noEmit               # 型別檢查
 ```
 
-> 還沒發佈到 npm，所以不要直接 `npx leakshield`；在 repo 內用 `npm run scan -- ...`，或全域安裝 / `npm link` 後使用 `leakshield`。
+> 想測本機改動時，用 repo 內的 `npm run scan -- ...`（或全域安裝 / `npm link` 這份 build）；直接用 `npx leakshield` 會抓到 npm 上的已發佈版本，不是你正在改的程式碼。
 
 ---
 

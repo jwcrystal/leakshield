@@ -24,7 +24,7 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 
 ## 目前狀態
 
-**實驗性，尚未正式發佈。** 還沒發佈到 npm：請在本機建置（`npm ci && npm run build`），再讓 OpenCode 指向 `dist` 目錄。
+**實驗性，尚未正式發佈。** 已發佈到 npm（`leakshield`，`0.1.x`）：可直接用 `npx leakshield`，或在本機建置（`npm ci && npm run build`）再讓 OpenCode 指向 `dist` 目錄。
 
 - Transparent 模式已在 OpenCode v2.0.28 搭配本機替身 provider 驗證，並用真實 OpenAI 模型驗證過一次。它**不保證**敏感內容絕不會送到模型：建議的 hook-first 設定在 `--doctor` 顯示為 `PARTIAL`，hook 之後才加入的內容，以及被允許的工具外送（curl、遠端 MCP），都不在保護範圍內。
 - 尚未驗證：OS keychain 持久化、真實 Anthropic provider、其他 provider 的長對話、長時間使用（[#26](https://github.com/jwcrystal/leakshield/issues/26)）。
@@ -104,7 +104,7 @@ npm install
 npm run build
 ```
 
-尚未發佈到 npm，所以 `npx leakshield` 要等你全域安裝或 `npm link` 這份 build 後才能用，之後可直接使用
+`npx leakshield …` 會執行已發佈的套件。本機開發時，全域安裝或 `npm link` 這份 build 後即可直接使用
 `leakshield`；在此 repository 內不用安裝，直接用 `npm run scan -- ...` 即可。
 
 ### npm scripts 速查

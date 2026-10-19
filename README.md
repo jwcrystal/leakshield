@@ -24,7 +24,7 @@ MCP server mode has been removed. It depended on the model voluntarily calling a
 
 ## Project status
 
-**Experimental, pre-release.** Nothing is published to npm yet: build locally (`npm ci && npm run build`) and point OpenCode at the `dist` directory.
+**Experimental, pre-release.** Published to npm as `leakshield` (`0.1.x`): run `npx leakshield`, or build locally (`npm ci && npm run build`) and point OpenCode at the `dist` directory.
 
 - Transparent mode has been verified on OpenCode v2.0.28 with local loopback providers, and once against a real OpenAI model. It is **not** a guarantee that nothing sensitive reaches a model: the recommended hook-first setup is reported as `PARTIAL` by `--doctor`, and content added after the plugin's hooks or sent by permitted tools (curl, remote MCP) is outside its coverage.
 - Not yet verified: OS-keychain persistence, a real Anthropic provider, long histories on other providers, long-running use ([#26](https://github.com/jwcrystal/leakshield/issues/26)).
@@ -99,9 +99,9 @@ npm install
 npm run build
 ```
 
-Nothing is published to npm yet, so `npx leakshield` only works after you
-install the build globally or `npm link` it; then use `leakshield`
-directly. `npm run scan -- ...` works from this repository without installing.
+`npx leakshield …` runs the published package. For local development, install
+the build globally or `npm link` it, then use `leakshield` directly.
+`npm run scan -- ...` works from this repository without installing.
 
 ### npm Scripts
 

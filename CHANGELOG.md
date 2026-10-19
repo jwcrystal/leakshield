@@ -2,17 +2,16 @@
 
 All notable changes are listed here.
 
-## Unreleased
+## 0.1.1 — 2026-10-19
 
 ### Changed
 
+- Refusal and block messages now follow one plain style, `LeakShield blocked <thing> because <reason>.` The `transparent mode` prefix and the misleading `failed to protect a model request` wording are gone (masking failures always failed closed; the old text read like a leak and was the only refusal that did not say `blocked`), and jargon such as `verified request attribution`, `model transport route` and `literal-argument form` is replaced with simpler language. Only the operator-facing text changed; every message still starts with `LeakShield `.
 - Releases ship the npm package only (the OpenCode plugin and the `leakshield` CLI). Standalone binaries are no longer attached; run the `Build binaries` workflow manually and download one from its artifacts when needed.
-- Transparent-mode masking refusals now read `LeakShield blocked a model request because it could not be masked safely.` instead of `LeakShield transparent mode failed to protect a model request.` The blocking behaviour is unchanged (it was always fail-closed); the old wording read as a leak and was the only refusal message not to say `blocked`.
-- All refusal and block messages now follow one plain style, `LeakShield blocked <thing> because <reason>.` The `transparent mode` prefix is dropped, `failed to protect` wording is gone, and jargon such as `verified request attribution`, `model transport route` and `literal-argument form` is replaced with simpler language. Only the operator-facing text changed.
 
 ### Fixed
 
-- `npm publish` no longer warns that the `bin` entry is invalid. The path is now `dist/cli.js` instead of `./dist/cli.js`; npm 11 rewrote the old form at publish time, and 0.1.0 still installs the `leakshield` command.
+- `npm publish` no longer warns that the `bin` entry is invalid. The path is now `dist/cli.js` instead of `./dist/cli.js`; npm 11 rewrote the old form at publish time, and 0.1.1 still installs the `leakshield` command.
 
 ## 0.1.0 — 2026-10-16
 

@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # Fail fast when the tag and package.json disagree: the tarball name and
+      # the release title are derived from the version, and a mismatch would
+      # publish a package file under the wrong tag.
+      - name: Check tag matches package.json
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "tag v$TAG_VERSION does not match package.json $PKG_VERSION" >&2
+            exit 1
+          fi
+
+      # `prepack` runs the TypeScript build, so the tarball contains dist/.
+      # `files: ["dist"]` in package.json keeps source out of it.
+      - name: Build the npm tarball (plugin + CLI)
+        run: npm pack
+
+      # Release notes come from the matching CHANGELOG section (single source
+      # of truth); fall back to a pointer if the section is missing.
+      - name: Build release notes from CHANGELOG
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v v="$VERSION" '
+            $0 ~ "^## " v " " { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "See CHANGELOG.md for the full list of changes." > "$RUNNER_TEMP/notes.md"
+          fi
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" leakshield-*.tgz --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "LeakShield ${GITHUB_REF_NAME#v}" \
+              --notes-file "$RUNNER_TEMP/notes.md" \
+              leakshield-*.tgz
+          fi

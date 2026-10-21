@@ -11,9 +11,7 @@ the last reviewed commit.
 - Any commit added after the review (docs, tests, comments included) either gets a
   fresh review or carries `no-review: <reason>` in its message, where the reason is
   `docs-only`, `comments-only`, or `formatting-only`.
-- The PR body records the reviewer and outcome: `Reviewed with
-  openai/gpt-6.1-sol#high (blocking-only): no blocking findings`, or the findings and
-  what fixed them.
+- Review stays in the session; do not add a review section to the PR body.
 - Review does not replace CI: `npx vitest run` and `npx tsc --noEmit` still decide
   whether the push is green.
 

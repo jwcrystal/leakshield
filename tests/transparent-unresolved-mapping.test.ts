@@ -18,9 +18,11 @@
  * refused) by the very guard the test author runs under, so the authoring
  * workflow and the behaviour under test would contaminate each other.
  *
- * What is asserted is the observable contract: the hook rejects before the
- * tool runs, the tool input is left untouched, the refusal text stays
- * content-free, and the same guard still restores a mapped value afterwards.
+ * What is asserted is the observable contract at the hook boundary: the hook
+ * rejects instead of returning, the tool input it was given is unchanged, the
+ * refusal text stays content-free, and the same guard still restores a mapped
+ * value afterwards. The host owns the actual tool execution, so host ordering
+ * is covered by the E2E runners under `scripts/e2e/`, not here.
  */
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -98,7 +100,10 @@ function tokenOf(event: Record<string, unknown>): string {
 
 /** Same shape as a real marker, different payload, never registered. */
 function unmintedFrom(token: string): string {
-  const derived = token.replace(/[a-z]{4}\]$/, "zzzz]");
+  const derived = token.replace(
+    /[a-z]{4}\]$/,
+    (segment) => `${segment[0] === "a" ? "b" : "a"}${segment.slice(1)}`,
+  );
   expect(derived).not.toBe(token);
   return derived;
 }
@@ -154,27 +159,47 @@ describe("unresolved placeholder diagnostics", () => {
     // Rereading the source cannot validate the old token, so the text must not
     // promise that a retry will succeed.
     expect(error.message).not.toMatch(/try again/i);
+    expect(input).toEqual({ filePath: `src/${token}.ts`, oldString: "before", newString: "after" });
   });
 
-  it("refuses a marker minted in another session but restores it in its own", async () => {
+  it("keeps markers scoped to the session that minted them", async () => {
     const { call } = await arm();
-    const event = contextEvent("ses_owner");
-    await call("session:context", event);
-    const token = tokenOf(event);
+    const ownerEvent = contextEvent("ses_owner");
+    await call("session:context", ownerEvent);
+    const ownerToken = tokenOf(ownerEvent);
 
-    const foreign = { path: "notes.txt", content: `value ${token}` };
+    // Both sessions hold a mapping for the same configured value, so each one
+    // has a usable marker of its own; this is not a "no mappings at all" case.
+    const otherEvent = contextEvent("ses_other");
+    await call("session:context", otherEvent);
+    const otherToken = tokenOf(otherEvent);
+    expect(otherToken).not.toBe(ownerToken);
+
+    const ownerOwned = { path: "notes.txt", content: `value ${ownerToken}` };
+    await expect(
+      call("tool:execute.before", { sessionID: "ses_owner", tool: "write", input: ownerOwned }),
+    ).resolves.toBeUndefined();
+    expect(ownerOwned.content).toBe(`value ${MARKER}`);
+
+    const otherOwned = { path: "notes.txt", content: `value ${otherToken}` };
+    await expect(
+      call("tool:execute.before", { sessionID: "ses_other", tool: "write", input: otherOwned }),
+    ).resolves.toBeUndefined();
+    expect(otherOwned.content).toBe(`value ${MARKER}`);
+
+    // A marker is never guessed from the other session's mapping for the same
+    // value, in either direction.
+    const ownerInOther = { path: "notes.txt", content: `value ${ownerToken}` };
     const error = await refusal(
-      call("tool:execute.before", { sessionID: "ses_other", tool: "write", input: foreign }),
+      call("tool:execute.before", { sessionID: "ses_other", tool: "write", input: ownerInOther }),
     );
     expect(error.message).toContain("no mapping in this session");
-    expect(foreign.content).toBe(`value ${token}`);
+    expect(ownerInOther.content).toBe(`value ${ownerToken}`);
 
-    // The same guard still restores the marker in the session that owns it,
-    // so the refusal is about scope, not about the marker shape.
-    const owned = { path: "notes.txt", content: `value ${token}` };
+    const otherInOwner = { path: "notes.txt", content: `value ${otherToken}` };
     await expect(
-      call("tool:execute.before", { sessionID: "ses_owner", tool: "write", input: owned }),
-    ).resolves.toBeUndefined();
-    expect(owned.content).toBe(`value ${MARKER}`);
+      call("tool:execute.before", { sessionID: "ses_owner", tool: "write", input: otherInOwner }),
+    ).rejects.toThrow("no mapping");
+    expect(otherInOwner.content).toBe(`value ${otherToken}`);
   });
 });

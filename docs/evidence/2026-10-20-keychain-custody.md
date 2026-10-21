@@ -42,14 +42,21 @@ Issue #26 的第一個勾：「Real OS keychain key custody for persistence」�
 | 跨程序重新解析金鑰 | PASS（來源同為 `os-keychain`） |
 | key id 一致 | PASS |
 | 解密後 token 與原文一致 | PASS |
-| 項目是否由本次驗證建立 | **是**（cdat `2026-10-20T02:58:02Z`，即 10:58:02 +0800） |
+| 項目是否由本次驗證建立 | **未證實**（`cdat` 2026-10-20T02:58:02Z 只證明建立時間，建立者無法判定） |
 | keychain 項目被刪除 | 否（腳本不刪除） |
 
-> 原稿此處寫「測試前該項目已存在：是（未建立、未覆寫）」，是錯的。舊版腳本
-> 先讓 key ladder 解析（缺少時會建立），之後才讀存在性，所以該欄位必然為
-> `true`。keychain 中繼資料顯示 `cdat`/`mdat` 都是 2026-10-20 02:58:02Z，
-> 與這次驗證的執行時間一致：項目是**這次建立的**。腳本已改為記錄 ladder
-> 的第一次讀取，且預設拒絕建立（`--allow-create` 才建立）。
+> 這段紀錄被更正過兩次，兩次都是把「推論」寫成了「事實」：
+>
+> 1. 原稿寫「測試前該項目已存在：是（未建立、未覆寫）」是錯的。舊版腳本先讓
+>    key ladder 解析（缺少時會建立），之後才讀存在性，所以該欄位必然是 `true`。
+> 2. 改成「項目是**這次建立的**」同樣過頭。`cdat`/`mdat` 為 2026-10-20
+>    02:58:02Z，只能證明建立時間落在這次執行的時間窗內，**無法證明是哪個程序
+>    建立的**；當時的讀取順序也讓「執行前是否存在」這個問題無法回答。
+>
+> 因此這一格現在的答案是「未證實」，不是「是」也不是「否」。現在的腳本改用
+> recording probe：只有它自己的 `write()` 真的成功才記 `createdProductionKey:
+> true`；項目在讀取與寫入之間被別的程式建好、或寫入失敗時記 `null`，不再用
+> 「原本不存在所以是我們建的」這種推論。跨程序解密 PASS 不受此影響。
 >
 > 同一個問題當時也存在於 restart 子程序：它走的是會建立的 production
 > resolver，父程序到子程序之間項目若消失，子程序會自己補一把。現在子程序
@@ -83,6 +90,7 @@ node scripts/diagnostics/verify-keychain-persistence.mjs --real-keychain
 `--allow-create`。
 
 通過條件：`source=os-keychain`、`restartFound`、`restartEntriesMatch`、
-`restartKeyIdMatch` 皆為 true，且 `childReadOnly` 為 true（real 模式）。重跑後
-把新的 `summary.json` 數字補進上表，並移除「待重跑」標記。完整清單見
-`docs/plans/2026-10-20-issue-26-verification-runbook.md`。
+`restartKeyIdMatch`、`keyReadBackMatches` 皆為 true，且 `childReadOnly` 為 true
+（real 模式）。重跑後把新的 `summary.json` 數字補進上表，並移除「待重跑」標記；
+`createdProductionKey` 可能是 `null`（無法判定），照實記錄，不要改成 `false`。
+完整清單見 `docs/plans/2026-10-20-issue-26-verification-runbook.md`。

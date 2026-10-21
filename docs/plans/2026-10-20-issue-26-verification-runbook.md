@@ -85,16 +85,24 @@ node scripts/diagnostics/verify-keychain-persistence.mjs --real-keychain --allow
 - 會讀正式 keychain 項目（service `leakshield`、account `sgp-mapping-key`）。
 - **預設不建立**：項目不存在時以 exit 2 結束，提示先啟用 persistence 或加 `--allow-create`。
   重啟子程序也走唯讀 probe，項目在父子之間消失時會判失敗，不會自己補一把。
-- `--allow-create` 才會建立（等同第一次啟用持久化）；此時 `createdProductionKey: true`。
+- `--allow-create` 才會建立（等同第一次啟用持久化）。建立前會印出警告（項目刪掉就
+  解不開既有 mapping）；`keyWriteAttempted` / `keyWriteSucceeded` 記錄實際發生什麼。
+- `createdProductionKey` 是**三態**：只有本次的 `write()` 成功才是 `true`，項目原本就
+  存在且沒寫入才是 `false`，其餘（別的程序在讀寫之間補上、寫入失敗）是 `null`。
+  **`null` 照實記錄，不要改寫成 `false`。**
+- 金鑰會在**同一個程序內讀回**並比對 key id（`keyReadBackMatches`）：寫得進去但讀不
+  回來，不算保管成功。
 - `keychainItemExistedBefore` 取自 key ladder 的**第一次讀取**；本次執行前不存在時為 `false`。
   （舊版腳本在 ladder 可能已建立之後才讀，所以該欄位恆為 `true`；已修正。）
+  這一欄只回答「執行前在不在」，不回答「是誰建立的」。
 - **不會刪除**任何 keychain 項目。DB 寫在暫存目錄，跑完刪除。
 - 若 `keychainAvailable: false`，先看 `summary.error`：`keychain_item_absent` 表示
   這台主機還沒有項目（見上）；其他情況才檢查 `security` 與登入 keychain 是否解鎖。
 - 若日後要移除這個項目（會讓既有持久化 mapping 無法解密，通常**不要**做）：
   `security delete-generic-password -s leakshield -a sgp-mapping-key`
 
-通過條件：`source=os-keychain`、`restartFound=true`、`restartEntriesMatch=true`、`restartKeyIdMatch=true`。
+通過條件：`source=os-keychain`、`restartFound=true`、`restartEntriesMatch=true`、
+`restartKeyIdMatch=true`、`keyReadBackMatches=true`。
 
 ### 2. Anthropic（勾 2 與 4）
 
@@ -160,7 +168,7 @@ E2E_SOAK=1 E2E_REAL=1 E2E_PROVIDER=anthropic E2E_SOAK_MS=3600000 \
 
 | 項目 | 結果 | 證據 |
 |---|---|---|
-| OS keychain 保管 | PASS / FAIL | source=…, restartFound=…, keyIdMatch=…, childReadOnly=… |
+| OS keychain 保管 | PASS / FAIL | source=…, restartFound=…, keyIdMatch=…, keyReadBackMatches=…, createdProductionKey=…/null, childReadOnly=… |
 | Anthropic Messages | PASS / FAIL | requests=…, originals=…, placeholders=… |
 | 長歷史 replay（20 輪） | PASS / FAIL | covered 全 true, missing=…, bytes 首/末=…, originals=… |
 | wireProtection: true | PASS / FAIL | case real-basic-wire |
@@ -169,6 +177,18 @@ E2E_SOAK=1 E2E_REAL=1 E2E_PROVIDER=anthropic E2E_SOAK_MS=3600000 \
 
 備註（限制、異常、未覆蓋項目，例如 `leakshieldMappingRelease: not-verified`）：
 ```
+
+## 證據保存
+
+`summary.json` 預設寫在 `$TMPDIR/opencode/sg-*/`，重開機或清理就會消失，先前有些
+數字因此只剩口頭回報、無法重現。跑完後請：
+
+1. 把 `summary.json` 複製到 `docs/evidence/<YYYY-MM-DD>-<項目>-summary.json`。
+   內容只有布林、計數、位元組數、RSS 與短 hash，可以公開；**不要**自行加入
+   prompt、金鑰或 request body。
+2. 在 issue 記錄裡引用那個檔案路徑，而不是只貼數字。
+3. 若該次結果要修正，依 `CONTRIBUTING.md`：已合併的 dated evidence 不要改寫結論，
+   另開新檔並加一行指標。
 
 ## 安全邊界
 

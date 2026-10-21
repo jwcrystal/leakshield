@@ -14,10 +14,18 @@
  *    deletes it. By default it also refuses to CREATE it: an absent item is a
  *    precondition failure (exit 2), because a diagnostic must not mint a
  *    production secret behind the operator's back. `--allow-create` opts in
- *    (equivalent to a real first run) and sets `createdProductionKey`.
+ *    (equivalent to a real first run), prints a warning, and records what
+ *    happened in `keyWriteAttempted` / `keyWriteSucceeded`.
+ *  - `createdProductionKey` is tri-state: true only when this run's write
+ *    succeeded, false only when the item already existed and nothing was
+ *    written, null when it cannot be told (an item that appeared without our
+ *    write, or a failed write). "It was absent, so we made it" is not sound —
+ *    another process can fill that gap.
  *  - "Did it exist before?" is answered by the key ladder's OWN first read
  *    (a recording probe), not by a second read after the ladder may have
  *    already created the item.
+ *  - The key is read back in the same process, and the read-back key id must
+ *    match before the real-keychain run can pass.
  *  - The restart child resolves the key through a read-only probe, so a child
  *    that finds the item missing fails the check instead of creating one.
  *  - No key material is printed: only source names, key ids and booleans.
@@ -41,6 +49,7 @@ import {
   resolveMappingKeyWithProbe,
 } from "../../dist/decision/mapping-key.js";
 import { deriveKeyId, openMappingStore } from "../../dist/decision/mapping-store.js";
+import { keyCreationAttribution, makeReadOnlyProbe, makeRecordingProbe } from "./lib/keychain-probes.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SELF = fileURLToPath(import.meta.url);
@@ -67,72 +76,7 @@ if (!REAL && !process.argv.includes("--simulated")) {
 const warn = (message) => console.error(`warn: ${message}`);
 const seed = { sessionId: SESSION_ID, epoch: "verify-epoch", entries: [{ token: TOKEN, original: ORIGINAL }] };
 
-/**
- * Wraps the real probe so the key ladder's own first read is the evidence for
- * "did the item exist before?". Reading after the ladder ran would always say
- * yes, because the ladder creates the item when it is absent. When the item is
- * absent and creation was not opted into, this read refuses instead of letting
- * the ladder write a production key.
- */
-function makeRecordingProbe(probe) {
-  let existedBefore = null;
-  let readFailed = false;
-  let refusedAbsence = false;
-  const recording = {
-    read() {
-      let value;
-      try {
-        value = probe.read();
-      } catch (error) {
-        readFailed = true;
-        throw error;
-      }
-      if (existedBefore === null) existedBefore = value !== null;
-      if (existedBefore === false && !ALLOW_CREATE) {
-        refusedAbsence = true;
-        const refusal = new Error("keychain item absent");
-        refusal.code = "sg_key_absent";
-        throw refusal;
-      }
-      return value;
-    },
-    write(hexKey) {
-      probe.write(hexKey);
-    },
-  };
-  return {
-    probe: recording,
-    state: {
-      get existedBefore() {
-        return existedBefore;
-      },
-      get readFailed() {
-        return readFailed;
-      },
-      get refusedAbsence() {
-        return refusedAbsence;
-      },
-    },
-  };
-}
-
-/**
- * Read-only wrapper for the restart child. The child must never mint a key: if
- * the item is gone by the time it starts, that is a failed restart check, not
- * permission to write a new production secret.
- */
-function makeReadOnlyProbe(probe) {
-  return {
-    read() {
-      return probe.read();
-    },
-    write() {
-      const refusal = new Error("read-only restart check: refusing to create a keychain item");
-      refusal.code = "sg_read_only_probe";
-      throw refusal;
-    },
-  };
-}
+/** The probe wrappers live in `lib/keychain-probes.mjs` so the boundary is testable. */
 
 function resolveForMode() {
   if (!REAL) {
@@ -141,7 +85,7 @@ function resolveForMode() {
   }
   const probe = createPlatformKeychainProbe();
   if (probe === null) return { provider: null, probe: null, state: null };
-  const recording = makeRecordingProbe(probe);
+  const recording = makeRecordingProbe(probe, { allowCreate: ALLOW_CREATE });
   const provider = resolveMappingKeyWithProbe(recording.probe, {
     keyFile: false,
     warn: (message) => {
@@ -212,7 +156,10 @@ const summary = {
   platform: process.platform,
   keychainItemExistedBefore: null,
   keychainAvailable: null,
-  createdProductionKey: false,
+  createdProductionKey: null,
+  keyWriteAttempted: null,
+  keyWriteSucceeded: null,
+  keyReadBackMatches: null,
   source: null,
   keyId: null,
   written: false,
@@ -259,9 +206,39 @@ try {
     throw new Error("key_unavailable");
   }
   summary.source = provider.source ?? "keyfile";
+  if (REAL && resolved.state.existedBefore === false) {
+    console.error(
+      "WARNING: no keychain item exists; creating the production mapping key now.\n" +
+        "         Do not delete it afterwards — existing persisted mappings cannot be decrypted without it.",
+    );
+  }
   const key = provider.getOrCreateKey();
   summary.keyId = deriveKeyId(key);
-  summary.createdProductionKey = REAL && summary.keychainItemExistedBefore === false;
+  if (REAL) {
+    summary.keyWriteAttempted = resolved.state.writeAttempted;
+    summary.keyWriteSucceeded = resolved.state.writeSucceeded;
+    if (resolved.state.writeError !== null) summary.keyWriteError = resolved.state.writeError;
+    // Tri-state: an item that appeared without our write is not ours to claim.
+    summary.createdProductionKey = keyCreationAttribution({
+      existedBefore: resolved.state.existedBefore,
+      writeAttempted: resolved.state.writeAttempted,
+      writeSucceeded: resolved.state.writeSucceeded,
+    });
+    // Read the item back in this same process: a write we cannot read back is
+    // not custody evidence.
+    let readBack = null;
+    try {
+      readBack = resolved.probe.read();
+    } catch (error) {
+      summary.keyReadBackError = error instanceof Error ? error.message : "read_back_failed";
+    }
+    summary.keyReadBackMatches =
+      typeof readBack === "string" && /^[0-9a-f]{64}$/i.test(readBack)
+        ? deriveKeyId(Buffer.from(readBack, "hex")) === summary.keyId
+        : false;
+  } else {
+    summary.createdProductionKey = false;
+  }
 
   const store = openMappingStore({ path: dbPath, keyProvider: provider, ttlDays: 0 });
   try {
@@ -292,7 +269,7 @@ try {
     summary.restartFound &&
     summary.restartEntriesMatch &&
     summary.restartKeyIdMatch &&
-    (REAL ? summary.source === "os-keychain" : summary.source === "keyfile");
+    (REAL ? summary.source === "os-keychain" && summary.keyReadBackMatches === true : summary.source === "keyfile");
 } catch (error) {
   summary.error = summary.error ?? (error instanceof Error ? error.message : "harness_error");
 } finally {

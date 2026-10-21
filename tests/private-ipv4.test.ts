@@ -48,9 +48,11 @@ describe("private-ipv4 rule", () => {
     ["RFC 1918 /8", "10.1.2.3"],
     ["RFC 1918 /8 upper edge", "10.255.255.255"],
     ["RFC 1918 /12 lower edge", "172.16.0.0"],
+    ["RFC 1918 /12", "172.20.0.9"],
     ["RFC 1918 /12 upper edge", "172.31.255.255"],
     ["RFC 1918 /16", "192.168.1.10"],
     ["CGNAT /10 lower edge", "100.64.0.0"],
+    ["CGNAT /10", "100.100.1.1"],
     ["CGNAT /10 upper edge", "100.127.255.255"],
     ["link-local", "169.254.1.1"],
   ])("reports %s", (_label, address) => {
@@ -74,6 +76,15 @@ describe("private-ipv4 rule", () => {
   it("leaves the public-ipv4 rule as the only finding for a public address", () => {
     expect(ipFindings("host 93.184.216.34", withRule())).toHaveLength(1);
     expect(ipFindings("host 93.184.216.34", base)).toHaveLength(1);
+  });
+
+  it("never reports 8.8.8.8 as private as well as public", () => {
+    const on = scanText("resolver 8.8.8.8", withRule()).findings;
+    const off = scanText("resolver 8.8.8.8", base).findings;
+    expect(on).toHaveLength(1);
+    expect(on[0].match_text).toBe("8.8.8.8");
+    // Same detector produced it with the opt-in rule on and off.
+    expect(on[0].description).toBe(off[0].description);
   });
 
   it("narrows to the configured networks", () => {

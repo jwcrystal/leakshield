@@ -54,9 +54,11 @@ Issue #26 的第一個勾：「Real OS keychain key custody for persistence」�
 >    建立的**；當時的讀取順序也讓「執行前是否存在」這個問題無法回答。
 >
 > 因此這一格現在的答案是「未證實」，不是「是」也不是「否」。現在的腳本改用
-> recording probe：只有它自己的 `write()` 真的成功才記 `createdProductionKey:
-> true`；項目在讀取與寫入之間被別的程式建好、或寫入失敗時記 `null`，不再用
-> 「原本不存在所以是我們建的」這種推論。跨程序解密 PASS 不受此影響。
+> recording probe：只有它自己的 `write()` 成功**而且**存回去的就是它寫的那把金鑰
+> （比對兩邊的 key id）才記 `createdProductionKey: true`；項目在讀取與寫入之間被
+> 別的程式建好、寫入失敗、或我們寫了但 read-back 採用別人贏得的金鑰，都記 `null`。
+> 不再用「原本不存在所以是我們建的」或「寫成功所以是我們的」這種推論。跨程序
+> 解密 PASS 不受此影響。
 >
 > 同一個問題當時也存在於 restart 子程序：它走的是會建立的 production
 > resolver，父程序到子程序之間項目若消失，子程序會自己補一把。現在子程序

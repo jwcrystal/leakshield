@@ -551,7 +551,11 @@ fi
 | `nda_keywords` 每個項目 | 200 字元 |
 | `private_domains` 每個項目 | 255 字元 |
 
+| `custom_rules` 的 `description` / `pattern` | 200 字元 |
+
 超過長度限制的值會導致 `loadConfig()` 拋出 Zod 驗證錯誤，避免過長的 pattern 進入掃描器。
+
+`custom_rules` 的 pattern 若無法編譯成正規表示式，`loadConfig()` 也會拋錯，並指出規則的索引和 `description`（不會印出 pattern）：無法執行的規則不能載入。可以編譯、但在固定測試輸入上跑得太慢的 pattern 會被當成疑似 ReDoS 而略過，stderr 會印警告，`leakshield --doctor` 也會出現 `custom-rules` 警告。這個檢查只是計時啟發式，不是保證：它只執行 pattern 一次，而且無法中斷執行，所以不能證明 pattern 安全。
 
 ## 敏感資訊預覽行為
 

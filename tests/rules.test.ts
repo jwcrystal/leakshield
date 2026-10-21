@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { BUILTIN_RULES } from "../src/rules/builtin.js";
-import { buildDynamicRules } from "../src/rules/dynamic.js";
+import { buildDynamicRules, checkCustomPattern, skippedCustomRules } from "../src/rules/dynamic.js";
 import type { GuardConfig } from "../src/types.js";
 
 // 輔助：測試某條規則是否命中
@@ -566,5 +566,43 @@ describe("PEM Private Key", () => {
       const hit = re.exec(block);
       expect(hit?.[0]).toBe(block);
     }
+  });
+});
+
+// ─── custom_rules 略過判定（#33）─────────────────────────────────────────────
+
+describe("checkCustomPattern() / skippedCustomRules()", () => {
+  const config = (patterns: string[]): GuardConfig => ({
+    nda_keywords: [],
+    private_domains: [],
+    custom_rules: patterns.map((pattern, i) => ({ description: `rule ${i}`, pattern, severity: "HIGH" as const })),
+    settings: { max_chars: 200000, show_line_numbers: true, preview_length: 60 },
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("正常 pattern 判為 ok，且不會被略過", () => {
+    expect(checkCustomPattern("\\bEMP-\\d{6}\\b")).toBe("ok");
+    expect(skippedCustomRules(config(["\\bEMP-\\d{6}\\b"]))).toEqual([]);
+    expect(buildDynamicRules(config(["\\bEMP-\\d{6}\\b"]))).toHaveLength(1);
+  });
+
+  it("無法編譯的 pattern 判為 invalid", () => {
+    expect(checkCustomPattern("[")).toBe("invalid");
+  });
+
+  it("超過計時門檻的 pattern 判為 redos-suspect，被略過並回報", () => {
+    // exec() cannot be interrupted, so a real catastrophic pattern would hang
+    // the test; simulate a slow exec by advancing the clock instead.
+    let now = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => (now += 250));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const cfg = config(["slow"]);
+    expect(checkCustomPattern("slow")).toBe("redos-suspect");
+    expect(skippedCustomRules(cfg)).toEqual([{ description: "rule 0", reason: "redos-suspect" }]);
+    expect(buildDynamicRules(cfg)).toHaveLength(0);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("ReDoS"));
   });
 });

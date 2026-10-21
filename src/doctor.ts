@@ -26,6 +26,7 @@ import { loadConfig } from "./config/loader.js";
 import { defaultKeyfilePath, defaultStorePath } from "./decision/mapping-key.js";
 import { InMemoryMappingKeyProvider, openMappingStore } from "./decision/mapping-store.js";
 import { validatePluginOptions, type PluginOptions } from "./plugin-options.js";
+import { skippedCustomRules } from "./rules/dynamic.js";
 import { scanText } from "./scanner/engine.js";
 import type { GuardConfig } from "./types.js";
 
@@ -422,6 +423,18 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       fix: "Fix the config file, or remove configPath to use defaults.",
     });
     return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
+  }
+
+  // Custom rules the scanner skips (the ReDoS timing heuristic; uncompileable
+  // patterns already failed the load above). Descriptions only, never patterns.
+  const skipped = skippedCustomRules(guardConfig);
+  if (skipped.length > 0) {
+    checks.push({
+      id: "custom-rules",
+      state: "warn",
+      detail: `${skipped.length} custom rule(s) disabled and not enforced: ${skipped.map((rule) => `"${rule.description}" (${rule.reason === "invalid" ? "pattern does not compile" : "disabled by ReDoS check"})`).join(", ")}. The ReDoS check is a timing heuristic, not a guarantee.`,
+      fix: "Rewrite the pattern without nested or overlapping quantifiers, such as (a+)+ or (a|a)*.",
+    });
   }
 
   // Smoke: the local scanner must flag a synthetic credential

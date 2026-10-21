@@ -1,8 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { runDoctor, parseJsonc, formatDoctorReport, type DoctorDeps } from "../src/doctor.js";
+import { buildDynamicRules } from "../src/rules/dynamic.js";
 import type { GuardConfig } from "../src/types.js";
 
 function makeFixture(overrides: {
@@ -170,6 +171,66 @@ describe("runDoctor", () => {
     const report = await runDoctor(deps);
     expect(report.status).toBe("BROKEN");
     expect(report.checks.find((c) => c.id === "guard-config")?.state).toBe("fail");
+  });
+
+  it("warns about custom rules the scanner skips without failing the install (#33)", async () => {
+    const guardConfig = {
+      nda_keywords: [],
+      private_domains: [],
+      custom_rules: [{ description: "employee id", pattern: "[", severity: "HIGH" }],
+      settings: { max_chars: 200000, show_line_numbers: true, preview_length: 60, encoding_detection: false },
+    } as GuardConfig;
+    const { deps } = makeFixture({
+      distFiles: true,
+      config: (tmp) => ({ plugins: [{ package: distRef(tmp), options: {} }] }),
+      options: { loadGuardConfig: () => guardConfig },
+    });
+    const report = await runDoctor(deps);
+    const check = report.checks.find((c) => c.id === "custom-rules");
+    expect(check?.state).toBe("warn");
+    expect(check?.detail).toContain('"employee id"');
+    expect(check?.detail).not.toContain("[");
+    expect(report.status).toBe("PROTECTED");
+  });
+
+  it("reports a ReDoS-skipped rule exactly when the scanner drops it, even if later probes are fast (#33)", async () => {
+    // First probe slow, every later one fast: doctor and the scanner must
+    // still agree, because the first verdict is the one enforced.
+    const pattern = "doctor-timing-marker-\\d+";
+    const guardConfig = {
+      nda_keywords: [],
+      private_domains: [],
+      custom_rules: [{ description: "timing rule", pattern, severity: "HIGH" }],
+      settings: { max_chars: 200000, show_line_numbers: true, preview_length: 60, encoding_detection: false },
+    } as GuardConfig;
+    let calls = 0;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => (++calls === 2 ? 250 : 0));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { deps } = makeFixture({
+        distFiles: true,
+        config: (tmp) => ({ plugins: [{ package: distRef(tmp), options: {} }] }),
+        options: { loadGuardConfig: () => guardConfig },
+      });
+      const report = await runDoctor(deps);
+      const check = report.checks.find((c) => c.id === "custom-rules");
+      expect(check?.state).toBe("warn");
+      expect(check?.detail).toContain('"timing rule" (disabled by ReDoS check)');
+      expect(check?.detail).not.toContain("doctor-timing-marker");
+      expect(buildDynamicRules(guardConfig).some((r) => r.description === "timing rule")).toBe(false);
+    } finally {
+      nowSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("omits the custom-rules check when every custom rule is enforced", async () => {
+    const { deps } = makeFixture({
+      distFiles: true,
+      config: (tmp) => ({ plugins: [{ package: distRef(tmp), options: {} }] }),
+    });
+    const report = await runDoctor(deps);
+    expect(report.checks.find((c) => c.id === "custom-rules")).toBeUndefined();
   });
 
   it("reports BROKEN when smoke finds nothing", async () => {

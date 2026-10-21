@@ -2,6 +2,13 @@
 
 All notable changes are listed here.
 
+## Unreleased
+
+### Changed
+
+- A `custom_rules` pattern that does not compile now fails the config load, naming the rule's index and `description`. Before, the rule was skipped with one stderr line and the scan still reported `safe: true`. ([#33](https://github.com/jwcrystal/leakshield/issues/33))
+- `leakshield --doctor` lists custom rules skipped by the ReDoS timing check as a `custom-rules` warning. The check is a heuristic, not a guarantee; the README now says so. (#33)
+
 ## 0.1.1 — 2026-10-19
 
 ### Changed

@@ -52,12 +52,14 @@ export OPENAI_API_KEY=...        # 只有要跑 OpenAI 時
 
 時間與費用粗估（依模型而異，僅供安排）：
 
-| 步驟 | 時間 | 呼叫數 |
+| 步驟 | 時間 | 使用者回合數 |
 |---|---|---|
 | 離線自檢 | < 2 分鐘 | 0（本機 stand-in） |
-| Anthropic 三個 case | 3–5 分鐘 | 8 次（1 + 1 + 6 輪） |
-| 長歷史 20 輪 | 5–10 分鐘 | 20 次 |
+| Anthropic 三個 case | 3–5 分鐘 | 2 + `E2E_TURNS`（預設 6 → 共 8 回合） |
+| 長歷史 20 輪（`E2E_TURNS=20`） | 5–10 分鐘 | 2 + 20 = 22 回合 |
 | soak 1 小時 | 60 分鐘 | 每輪 1 次，間隔可調 |
+
+上表不含 auxiliary request（標題、摘要）與重試，實際 API 呼叫數會略高。
 
 ## 執行順序
 
@@ -174,7 +176,8 @@ E2E_SOAK=1 E2E_REAL=1 E2E_PROVIDER=anthropic E2E_SOAK_MS=3600000 \
   回覆、金鑰或 request body。stand-in provider 以 `CAPTURE_RECORD=0` 啟動：
   body 仍會解析以產生回覆，但不會落盤。
 - 每個案例使用隔離的 HOME / XDG，不讀寫你的 OpenCode 設定。
-- 暫時 session 在正常路徑跑完即刪除；刪除失敗不會讓已完成的判定翻盤，所以
+- `run-real-provider.mjs` 的暫時 session 在正常路徑跑完即刪除，刪除失敗不會讓已完成
+  的判定翻盤；`run-soak.mjs` 則相反，刪除失敗會讓該輪判 FAIL（回收是它的驗證目標）。
   異常中斷時 workdir 與 session 可能殘留，落在 `$TMPDIR/opencode/sg-*`。
 - 沒有實際跑過的勾**不要**標成 verified；capture / simulated 模式的 PASS 只是
   harness 自檢，不能當 #26 證據。

@@ -37,9 +37,7 @@ import {
   PROVIDERS,
   freePort,
   isolatedEnv,
-  missingPlaceholders,
   modelFor,
-  newPlaceholders,
   providerEntry,
   readTrace,
   requireGate,
@@ -48,6 +46,7 @@ import {
   startCaptureServer,
   startPrivateServer,
   stopChild,
+  turnCoverage,
   waitForHealth,
   waitForPluginActive,
   writeObservedProject,
@@ -199,32 +198,23 @@ async function runCase({ id, wireProtection, turns, canaries }) {
             });
       lastReply = turns > 1 ? generated.stdout ?? "" : responseText(generated);
       const turnRows = traceRows(tracePath, sessionID).slice(seenBefore);
-      // The main model request is the largest body in the turn (title helpers
-      // are tiny); retries cannot hide it because coverage is asserted per turn.
-      const main = turnRows.reduce(
-        (best, row) => ((row.bytes ?? 0) > ((best?.bytes ?? -1)) ? row : best),
-        undefined,
-      );
-      const hashes = Array.isArray(main?.placeholderHashes) ? main.placeholderHashes : [];
-      const missing = missingPlaceholders(knownPlaceholders, hashes);
-      const introduced = newPlaceholders(knownPlaceholders, hashes);
       const finalTurn = turns > 1 && turn === turns - 1;
-      // The final turn only asks for a replay, so it introduces nothing new.
-      const covered = missing.length === 0 && (finalTurn ? introduced.length === 0 : introduced.length >= 1);
+      const coverage = turnCoverage({ known: knownPlaceholders, rows: turnRows, finalTurn });
       turnsRun.push({
         turn,
         status: generated.status,
         timedOut: generated.timedOut ?? false,
         durationMs: generated.durationMs,
         requests: turnRows.length,
-        mainBytes: main?.bytes ?? 0,
-        placeholders: hashes.length,
+        turnRequests: coverage.requests,
+        mainBytes: coverage.maxBytes,
+        placeholders: coverage.present.length,
         expectedPlaceholders: knownPlaceholders.length,
-        missingPlaceholders: missing.length,
-        introducedPlaceholders: introduced.length,
-        covered,
+        missingPlaceholders: coverage.missing,
+        introducedPlaceholders: coverage.introduced,
+        covered: coverage.covered,
       });
-      knownPlaceholders = [...new Set([...knownPlaceholders, ...hashes])];
+      knownPlaceholders = [...new Set([...knownPlaceholders, ...coverage.present])];
       if (generated.status !== 0) break;
     }
     const observed = traceRows(tracePath, sessionID);

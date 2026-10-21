@@ -221,9 +221,10 @@ export async function waitForHealth(port, pathname = "/health", timeoutMs = 2000
 }
 
 /**
- * Starts the stand-in provider. `record: false` runs it content-free: no request
- * body is parsed or written, because the issue-#26 evidence comes from the
- * in-process egress observer (flags and counts) instead of captured bodies.
+ * Starts the stand-in provider. `record: false` runs it content-free: the body
+ * is parsed in memory to build a reply but never written, because the issue-#26
+ * evidence comes from the in-process egress observer (flags and counts) instead
+ * of captured bodies.
  */
 export function startCaptureServer({ repo, env, port, captureDir, record = true }) {
   const childEnv = record ? { ...env, CAPTURE_DIR: captureDir } : { ...env, CAPTURE_RECORD: "0" };
@@ -352,15 +353,22 @@ export function sessionNotFound(result, sessionID) {
   if (body === null || typeof body !== "object") return false;
   const error = body.error !== null && typeof body.error === "object" ? body.error : body;
   if (error._tag !== "SessionNotFoundError") return false;
-  const named = error.sessionID ?? error.sessionId;
-  if (typeof named === "string") return named === sessionID;
-  return String(error.message ?? "").includes(`Session not found: ${sessionID}`);
+  // Exact identity, no message fallback: a prefix or a differently-named
+  // session in the message must not stand in for this one being gone.
+  return typeof error.sessionID === "string" && error.sessionID === sessionID;
 }
 
 /**
- * Placeholders a turn's main request no longer carries, given the ones earlier
- * turns introduced. Distinct hashes, not occurrences: an assistant echo repeats
- * an existing placeholder and must not stand in for a lost one.
+ * Request kinds that carry a user turn. `primary` is a CLI turn that replays
+ * the session; `generate` is the one-shot API endpoint. Auxiliary requests
+ * (titles, summaries) are excluded so they can neither prove nor hide replay.
+ */
+export const TURN_REQUEST_KINDS = ["primary", "generate"];
+
+/**
+ * Placeholders a turn's requests no longer carry, given the ones earlier turns
+ * introduced. Distinct hashes, not occurrences: an assistant echo repeats an
+ * existing placeholder and must not stand in for a lost one.
  */
 export function missingPlaceholders(expected, actual) {
   const have = new Set(actual);
@@ -371,6 +379,30 @@ export function missingPlaceholders(expected, actual) {
 export function newPlaceholders(known, actual) {
   const seen = new Set(known);
   return actual.filter((hash) => !seen.has(hash));
+}
+
+/**
+ * Replay verdict for one turn, over its trace rows. Every request that carries
+ * a user turn must still hold every placeholder earlier turns introduced; a
+ * complete attempt cannot vouch for a deficient retry in the same turn. The
+ * final turn asks only for a replay, so it must introduce nothing new.
+ */
+export function turnCoverage({ known = [], rows = [], finalTurn = false }) {
+  const turnRows = rows.filter((row) => TURN_REQUEST_KINDS.includes(row.kind));
+  const missing = turnRows.reduce(
+    (max, row) => Math.max(max, missingPlaceholders(known, row.placeholderHashes ?? []).length),
+    0,
+  );
+  const present = [...new Set(turnRows.flatMap((row) => row.placeholderHashes ?? []))];
+  const introduced = newPlaceholders(known, present);
+  return {
+    covered: turnRows.length > 0 && missing === 0 && (finalTurn ? introduced.length === 0 : introduced.length >= 1),
+    requests: turnRows.length,
+    missing,
+    introduced: introduced.length,
+    present,
+    maxBytes: turnRows.reduce((max, row) => Math.max(max, row.bytes ?? 0), 0),
+  };
 }
 
 /** Resident set size of a process in KiB, or null when unavailable. */

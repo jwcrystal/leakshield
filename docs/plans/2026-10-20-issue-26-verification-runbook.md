@@ -113,13 +113,14 @@ E2E_REAL=1 E2E_PROVIDER=openai E2E_OPENAI_MODEL=<你的模型> E2E_TURNS=20 \
 
 `E2E_OPENAI_MODEL` 沒有預設值：模型名稱變動快，故意要求明填。
 判斷「長歷史」是否真的成立，看 `summary.json` 裡 `turnsDetail[]` 的 `covered`。
-observer 會為每個出現過的 placeholder 記一個短 hash（不存 token 本身），每一輪的
-**主要 request**（該輪 bytes 最大的那一個）必須仍帶著前面所有輪引入的 placeholder：
-`missingPlaceholders` 必須為 0。最後一輪只要求重述、不再引入新值，所以
-`introducedPlaceholders` 應為 0；其他輪則應 ≥ 1。用「不同 hash」而不是出現次數，
-是因為 assistant 回覆會重複既有 placeholder，用次數會被重複的舊值冒充成沒丟。
-未達標直接以 `history_not_replayed` FAIL；`mainBytes` 與 `trace.bytesPerRequest`
-提供成長趨勢。
+observer 會為每個出現過的 placeholder 記一個短 hash（不存 token 本身）。
+**每一輪中所有帶使用者回合的 request**（`kind` 為 `primary` 或 `generate`，包含
+重試）都必須仍帶著前面所有輪引入的 placeholder：`missingPlaceholders` 必須為 0。
+挑「最大的那一個」不算，因為一個完整的大 request 會替同輪另一個缺漏的 request 遮掩。
+最後一輪只要求重述、不再引入新值，所以 `introducedPlaceholders` 應為 0；其他輪則
+應 ≥ 1。用「不同 hash」而不是出現次數，是因為 assistant 回覆會重複既有 placeholder，
+用次數會被重複的舊值冒充成沒丟。未達標直接以 `history_not_replayed` FAIL；
+`mainBytes` 與 `trace.bytesPerRequest` 提供成長趨勢。
 
 ### 4. Soak（勾 5）
 
@@ -129,10 +130,10 @@ E2E_SOAK=1 E2E_REAL=1 E2E_PROVIDER=anthropic E2E_SOAK_MS=3600000 \
 ```
 
 - 每輪：建立 session → 一次極短對話 → 刪除 → GET 確認**明確回報不存在** → 取 server RSS。
-  host 對已刪除的 session 回 `_tag: "SessionNotFoundError"` 且 `sessionID` 就是該
-  session；只有這個結構化回應才算「已回收」。timeout、解析失敗、其他型別的
-  NotFound 或錯誤訊息裡剛好有「not found」都記成 `deleted_session_state_unknown`
-  並判該輪失敗，不會因為「讀不到」就當成已回收。
+  host 對已刪除的 session 回 `_tag: "SessionNotFoundError"`，且 `sessionID` **必須完全
+  等於**剛刪掉的那個 id；只有這個結構化回應才算「已回收」，訊息文字不參與判定。
+  timeout、解析失敗、其他型別的 NotFound、id 只有前綴相同、或錯誤訊息裡剛好有
+  「not found」都記成 `deleted_session_state_unknown` 並判該輪失敗。
 - 費用與時長成正比；先用 `E2E_SOAK_MS=60000` 試一次再放大。
 - 通過條件（腳本會自動判定）：`passes == iterations`、`deletedSessionsGone ==
   deletedSessionsChecked`、`memory.measured == true`（至少兩個 RSS 樣本）。
@@ -169,9 +170,11 @@ E2E_SOAK=1 E2E_REAL=1 E2E_PROVIDER=anthropic E2E_SOAK_MS=3600000 \
 
 ## 安全邊界
 
-- 腳本只輸出布林、計數、位元組數、RSS；不寫 prompt、回覆、金鑰或 request body。
-  stand-in provider 以 `CAPTURE_RECORD=0` 啟動：body 仍會解析以產生回覆，但不會落盤。
+- 腳本只輸出布林、計數、位元組數、RSS 與 placeholder 的短 hash；不寫 prompt、
+  回覆、金鑰或 request body。stand-in provider 以 `CAPTURE_RECORD=0` 啟動：
+  body 仍會解析以產生回覆，但不會落盤。
 - 每個案例使用隔離的 HOME / XDG，不讀寫你的 OpenCode 設定。
-- 所有暫時 session 跑完即刪除；每個 workdir 在 `$TMPDIR/opencode/sg-*`。
+- 暫時 session 在正常路徑跑完即刪除；刪除失敗不會讓已完成的判定翻盤，所以
+  異常中斷時 workdir 與 session 可能殘留，落在 `$TMPDIR/opencode/sg-*`。
 - 沒有實際跑過的勾**不要**標成 verified；capture / simulated 模式的 PASS 只是
   harness 自檢，不能當 #26 證據。

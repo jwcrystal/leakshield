@@ -159,9 +159,9 @@ E2E_SOAK=1 E2E_REAL=1 E2E_PROVIDER=anthropic E2E_SOAK_MS=3600000 node scripts/e2
 node scripts/diagnostics/verify-keychain-persistence.mjs --real-keychain
 ```
 
-Only booleans, counts, bytes and RSS are recorded. The stand-in provider runs
-with `CAPTURE_RECORD=0`, so no request body is written to disk even in
-self-test mode (it is still parsed in memory to build a reply). Full checklist, cost/time
+Only booleans, counts, bytes, RSS and short placeholder hashes are recorded. The
+stand-in provider runs with `CAPTURE_RECORD=0`, so no request body is written to
+disk even in self-test mode (it is still parsed in memory to build a reply). Full checklist, cost/time
 estimates, per-check pass conditions and the record template live in
 `docs/plans/2026-10-20-issue-26-verification-runbook.md`. A capture-mode PASS
 proves the harness works, not that #26 is verified.

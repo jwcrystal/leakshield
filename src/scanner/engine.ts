@@ -126,13 +126,15 @@ function collectRuleFindings(
     let match: RegExpExecArray | null;
 
     while ((match = rule.pattern.exec(text)) !== null) {
-      const matchedText = match[0];
-      if (rule.validate !== undefined && !rule.validate(matchedText)) continue;
-      const key = `${rule.type}:${match.index}`;
+      const offset = rule.skipPrefix ?? 0;
+      const matchedText = match[0].slice(offset);
+      const start = match.index + offset;
+      if (rule.validate !== undefined && !rule.validate(matchedText, { text, index: start })) continue;
+      const key = `${rule.type}:${start}`;
       if (seen.has(key)) continue;
       seen.add(key);
 
-      const { line, col } = getLineCol(text, match.index);
+      const { line, col } = getLineCol(text, start);
       if (ignoredLines.has(line)) continue;
 
       const preview = redact(matchedText, config.settings.preview_length);
@@ -144,8 +146,8 @@ function collectRuleFindings(
         column: config.settings.show_line_numbers ? col : undefined,
         preview,
         description: rule.description,
-        match_start: match.index,
-        match_end: match.index + matchedText.length,
+        match_start: start,
+        match_end: match.index + match[0].length,
         match_text: matchedText,
       });
     }
@@ -357,14 +359,17 @@ export function redactText(
     rule.pattern.lastIndex = 0;
     let match: RegExpExecArray | null;
     while ((match = rule.pattern.exec(truncated)) !== null) {
-      if (rule.validate !== undefined && !rule.validate(match[0])) continue;
-      if (overlapsSpan(match.index, match.index + match[0].length, protectedSpans)) continue;
-      const key = `${match.index}:${match[0].length}`;
+      const offset = rule.skipPrefix ?? 0;
+      const start = match.index + offset;
+      const end = match.index + match[0].length;
+      if (rule.validate !== undefined && !rule.validate(match[0].slice(offset), { text: truncated, index: start })) continue;
+      if (overlapsSpan(start, end, protectedSpans)) continue;
+      const key = `${start}:${end - start}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      const { line } = getLineCol(truncated, match.index);
+      const { line } = getLineCol(truncated, start);
       if (ignoredLines.has(line)) continue;
-      matches.push({ index: match.index, length: match[0].length, type: rule.type });
+      matches.push({ index: start, length: end - start, type: rule.type });
     }
   }
 

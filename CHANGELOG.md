@@ -4,6 +4,14 @@ All notable changes are listed here.
 
 ## Unreleased
 
+### Added
+
+- `url-userinfo` reports the `user:password@` span of an authenticated `scheme://` URL as a HIGH SECRET finding. Only the userinfo is masked; the scheme and host stay readable, and the span is no longer mislabelled as an email address. ([#34](https://github.com/jwcrystal/leakshield/issues/34))
+
+### Fixed
+
+- An SSH Git remote (`user@host:path`, `ssh://user@host/…`, `git+ssh://…`) is no longer reported as `PII_EMAIL`. A public repository host is no longer pseudonymized for no privacy gain, and the password half of a remote URL is no longer classified as personal data. Configured private domains and path keywords still apply inside remote URLs. (#34)
+
 ### Changed
 
 - A `custom_rules` pattern that does not compile now fails the config load, naming the rule's index and `description`. Before, the rule was skipped with one stderr line and the scan still reported `safe: true`. ([#33](https://github.com/jwcrystal/leakshield/issues/33))

@@ -162,8 +162,12 @@ export function writeObservedProject({ dir, repo, pluginOptions, providers }) {
 export function egressObserverSource(tracePath) {
   return `
 import { appendFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 const PLACEHOLDER = ${JSON.stringify(PLACEHOLDER_PREFIX)};
 const PLACEHOLDER_RE = new RegExp(${JSON.stringify(PLACEHOLDER_PATTERN)}, "g");
+// Distinct placeholders, as short hashes: enough to answer "does this request
+// still carry turn 0's value?" without keeping the token or the content.
+const hashOf = (token) => createHash("sha256").update(token).digest("hex").slice(0, 12);
 export default { id: "leakshield-egress-observer", async setup(ctx) {
   const registered = await ctx.session.hook("http.request", async (event) => {
     const body = await event.request.clone().text();
@@ -171,11 +175,13 @@ export default { id: "leakshield-egress-observer", async setup(ctx) {
     const route = pathname.endsWith("/chat/completions") ? "chat"
       : pathname.endsWith("/messages") ? "messages"
       : pathname.endsWith("/responses") ? "responses" : "unknown";
+    const tokens = [...new Set(body.match(PLACEHOLDER_RE) || [])];
     appendFileSync(${JSON.stringify(tracePath)}, JSON.stringify({
       sessionID: event.sessionID, kind: event.kind, route,
       syntheticOriginalPresent: /(verify-[a-z0-9]+@example\\.test|AKIAIOSFODNN7EXAMPLE)/.test(body),
       placeholderPresent: body.includes(PLACEHOLDER),
       canaryCount: (body.match(PLACEHOLDER_RE) || []).length,
+      placeholderHashes: tokens.map(hashOf),
       bytes: Buffer.byteLength(body),
     }) + "\\n", { mode: 0o600 });
   });
@@ -334,35 +340,37 @@ export function runCliTurn({ bin, serverURL, cwd, env, sessionID, modelRef, prom
 }
 
 /**
- * True only when the host says the session does not exist. A timeout, an
- * unparseable reply or an unexpected status means "unknown" — counting those as
- * reclamation is how a soak reports PASS while proving nothing.
+ * True only when the host reports THIS session as absent. OpenCode answers
+ * `GET /api/session/<id>` with `{ _tag: "SessionNotFoundError", sessionID }`; a
+ * 404 from a wrong route, a proxy error page or "configuration file not found"
+ * must never read as reclamation.
  */
-export function sessionNotFound(result) {
+export function sessionNotFound(result, sessionID) {
+  if (typeof sessionID !== "string" || sessionID.length === 0) return false;
   if (result == null || result.timedOut === true || result.parseFailed === true) return false;
   const body = result.value?.data ?? result.value;
-  const statuses = [
-    result.status,
-    result.value?.statusCode,
-    body?.status,
-    body?.statusCode,
-    body?.error?.status,
-    body?.error?.statusCode,
-  ].filter((value) => typeof value === "number");
-  if (statuses.includes(404)) return true;
-  const message =
-    typeof body?.error === "string" ? body.error : (body?.error?.message ?? body?.message ?? body?.error) || "";
-  return /not\s*found|no such session|unknown session|session (does not exist|not exist)/i.test(String(message));
+  if (body === null || typeof body !== "object") return false;
+  const error = body.error !== null && typeof body.error === "object" ? body.error : body;
+  if (error._tag !== "SessionNotFoundError") return false;
+  const named = error.sessionID ?? error.sessionId;
+  if (typeof named === "string") return named === sessionID;
+  return String(error.message ?? "").includes(`Session not found: ${sessionID}`);
 }
 
 /**
- * How many placeholders a request on this turn must still carry. The final turn
- * asks for a replay of earlier lines and adds no canary of its own, so its
- * expectation stays at `turns - 1` rather than `turns`.
+ * Placeholders a turn's main request no longer carries, given the ones earlier
+ * turns introduced. Distinct hashes, not occurrences: an assistant echo repeats
+ * an existing placeholder and must not stand in for a lost one.
  */
-export function expectedCanariesFor(turn, turns) {
-  if (turns <= 1) return 1;
-  return turn === turns - 1 ? turns - 1 : turn + 1;
+export function missingPlaceholders(expected, actual) {
+  const have = new Set(actual);
+  return expected.filter((hash) => !have.has(hash));
+}
+
+/** Placeholders this request carries that no earlier turn introduced. */
+export function newPlaceholders(known, actual) {
+  const seen = new Set(known);
+  return actual.filter((hash) => !seen.has(hash));
 }
 
 /** Resident set size of a process in KiB, or null when unavailable. */

@@ -35,10 +35,11 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   PROVIDERS,
-  expectedCanariesFor,
   freePort,
   isolatedEnv,
+  missingPlaceholders,
   modelFor,
+  newPlaceholders,
   providerEntry,
   readTrace,
   requireGate,
@@ -157,6 +158,9 @@ async function runCase({ id, wireProtection, turns, canaries }) {
       return state;
     }
     const turnsRun = [];
+    // Placeholder hashes introduced by earlier turns; each turn must still
+    // carry every one of them in its main request.
+    let knownPlaceholders = [];
     let lastReply = "";
     for (let turn = 0; turn < turns; turn++) {
       const canary = canaries[turn % canaries.length];
@@ -195,19 +199,32 @@ async function runCase({ id, wireProtection, turns, canaries }) {
             });
       lastReply = turns > 1 ? generated.stdout ?? "" : responseText(generated);
       const turnRows = traceRows(tracePath, sessionID).slice(seenBefore);
-      const expectedCanaries = expectedCanariesFor(turn, turns);
+      // The main model request is the largest body in the turn (title helpers
+      // are tiny); retries cannot hide it because coverage is asserted per turn.
+      const main = turnRows.reduce(
+        (best, row) => ((row.bytes ?? 0) > ((best?.bytes ?? -1)) ? row : best),
+        undefined,
+      );
+      const hashes = Array.isArray(main?.placeholderHashes) ? main.placeholderHashes : [];
+      const missing = missingPlaceholders(knownPlaceholders, hashes);
+      const introduced = newPlaceholders(knownPlaceholders, hashes);
+      const finalTurn = turns > 1 && turn === turns - 1;
+      // The final turn only asks for a replay, so it introduces nothing new.
+      const covered = missing.length === 0 && (finalTurn ? introduced.length === 0 : introduced.length >= 1);
       turnsRun.push({
         turn,
         status: generated.status,
         timedOut: generated.timedOut ?? false,
         durationMs: generated.durationMs,
         requests: turnRows.length,
-        // Replay evidence: a request that carries history carries the earlier
-        // turns' placeholders too. Counts only — no content is kept.
-        maxCanaries: turnRows.reduce((max, row) => Math.max(max, row.canaryCount || 0), 0),
-        expectedCanaries,
-        maxBytes: turnRows.reduce((max, row) => Math.max(max, row.bytes || 0), 0),
+        mainBytes: main?.bytes ?? 0,
+        placeholders: hashes.length,
+        expectedPlaceholders: knownPlaceholders.length,
+        missingPlaceholders: missing.length,
+        introducedPlaceholders: introduced.length,
+        covered,
       });
+      knownPlaceholders = [...new Set([...knownPlaceholders, ...hashes])];
       if (generated.status !== 0) break;
     }
     const observed = traceRows(tracePath, sessionID);
@@ -215,10 +232,9 @@ async function runCase({ id, wireProtection, turns, canaries }) {
     state.turnsCompleted = turnsRun.filter((row) => row.status === 0).length;
     state.turnsDetail = turnsRun;
     state.trace = traces;
-    // Turn 0 must carry one placeholder, turn 1 two, and so on: anything less
-    // means the host did not replay the earlier history.
-    state.replayOk =
-      turnsRun.length === turns && turnsRun.every((row) => row.maxCanaries >= row.expectedCanaries);
+    // Every turn's main request must still carry the placeholders earlier turns
+    // introduced: anything less means the host did not replay the history.
+    state.replayOk = turnsRun.length === turns && turnsRun.every((row) => row.covered === true);
     // The first canary is the one every later request should still carry, so it
     // is the one worth looking for in the final reply. Recorded, not gated: a
     // model is free to paraphrase, and the stand-in never echoes by design.

@@ -35,7 +35,7 @@
 
 | 日期 | 檔案 | 狀態 |
 |---|---|---|
-| 10-20 | [OS keychain 金鑰保管（macOS）](2026-10-20-keychain-custody.md) | 現行（僅 macOS） |
+| 10-20 | [OS keychain 金鑰保管（macOS）](2026-10-20-keychain-custody.md) | 待重跑（restart 子程序改為唯讀後；僅 macOS） |
 | 10-14 | [容量修正驗證](2026-10-14-transparent-capacity-verification.md) | 現行 |
 | 10-14 | [容量與刪除回收重測](2026-10-14-live-capacity-and-lifecycle-retest.md) | 現行 |
 | 10-11 | [純 hook-only 驗證](2026-10-11-pure-hook-only-verification.md) | 現行 |

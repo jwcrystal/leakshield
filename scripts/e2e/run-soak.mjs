@@ -208,7 +208,7 @@ try {
           timeoutMs: 15000,
         });
         summary.deletedSessionsChecked = (summary.deletedSessionsChecked ?? 0) + 1;
-        if (sessionNotFound(after)) {
+        if (sessionNotFound(after, sessionID)) {
           summary.deletedSessionsGone = (summary.deletedSessionsGone ?? 0) + 1;
         } else {
           // No positive proof of deletion: never count it as reclaimed.
@@ -254,14 +254,21 @@ try {
     hostSessionCycle: "checked",
     leakshieldMappingRelease: "not-verified",
     memoryTrend: summary.memory.measured ? "sampled" : "unmeasured",
+    memoryTrendAssessment: "manual",
   };
   summary.passed =
     summary.iterations > 0 &&
     summary.passes === summary.iterations &&
     summary.failures.length === 0 &&
     summary.memory.measured === true;
+  summary.failureReasons = [
+    ...(summary.iterations > 0 && summary.failures.length === 0 && summary.passes === summary.iterations
+      ? []
+      : ["iterations_failed"]),
+    ...(summary.memory.measured === true ? [] : ["memory_unmeasured"]),
+  ];
   if (!summary.passed && summary.failure === undefined) {
-    summary.failure = summary.memory.measured === false ? "memory_unmeasured" : "iteration_failed";
+    summary.failure = summary.failureReasons[0] ?? "not_passed";
   }
 } catch (error) {
   summary.failure = summary.failure ?? fatal("harness_error");

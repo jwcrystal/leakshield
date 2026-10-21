@@ -7,7 +7,8 @@
  * `@ai-sdk/openai-compatible`:
  *
  *   GET  /v1/models            -> { data: [{ id: "capture-1" }] }
- *   POST /v1/chat/completions  -> records full request body, replies
+ *   POST /v1/chat/completions  -> parses the body to build a reply, and
+ *                                  records it unless CAPTURE_RECORD=0
  *                                  (streaming SSE or plain JSON)
  *   GET  /health               -> readiness probe used by the orchestrator
  *   POST /control              -> orchestrator-only: set response label and
@@ -22,10 +23,11 @@
  *
  * Usage: node capture-server.mjs [port]     (port 0 = ephemeral)
  * Env:   CAPTURE_DIR    output directory (default ./out/captured)
- *        CAPTURE_RECORD when "0", record nothing: the body is never parsed or
- *                      written, so prompts and tool context stay off disk.
- *                      Used by the issue-#26 runners, which take their evidence
- *                      from the in-process egress observer instead.
+ *        CAPTURE_RECORD when "0", record nothing: the body is still parsed to
+ *                      build a reply but is never written, so prompts and tool
+ *                      context stay off disk. Used by the issue-#26 runners,
+ *                      which take their evidence from the in-process egress
+ *                      observer instead.
  *
  * Canary values never appear in this server; it only echoes what the host
  * under test sends.

@@ -1,5 +1,22 @@
 
 
+# Review before push
+
+Every push to a branch with an open PR gets a blocking-only review of the diff since
+the last reviewed commit.
+
+- Reviewer: `openai/gpt-6.1-sol#high`. Fixed, not chosen per conversation.
+- Scope: blocking only — wrong behaviour, unsafe masking, regressions, unmet issue
+  acceptance criteria. Nits are listed separately and never block.
+- Any commit added after the review (docs, tests, comments included) either gets a
+  fresh review or carries `no-review: <reason>` in its message, where the reason is
+  `docs-only`, `comments-only`, or `formatting-only`.
+- The PR body records the reviewer and outcome: `Reviewed with
+  openai/gpt-6.1-sol#high (blocking-only): no blocking findings`, or the findings and
+  what fixed them.
+- Review does not replace CI: `npx vitest run` and `npx tsc --noEmit` still decide
+  whether the push is green.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 

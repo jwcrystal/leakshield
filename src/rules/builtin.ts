@@ -1,4 +1,8 @@
 import type { Rule } from "../types.js";
+import { containsAddress, parseCidrList } from "../scanner/cidr.js";
+
+/** Networks used when a rule is evaluated without a loaded config. */
+const DEFAULT_PRIVATE_NETWORKS = parseCidrList(undefined);
 import { classifyTransportSpan } from "../scanner/remotes.js";
 
 /** Luhn checksum（ISO/IEC 7812-1）；信用卡號形狀相符後必須通過才命中。 */
@@ -290,6 +294,19 @@ export const BUILTIN_RULES: Rule[] = [
     // 私有／回環／CGNAT／保留段由 validate 排除，避免 config 常數誤報
     pattern: /\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b/g,
     validate: publicIPv4,
+  },
+  {
+    id: "private-ipv4",
+    type: "PII_IP",
+    severity: "MEDIUM",
+    description: "私有 IPv4 位址",
+    // Opt-in：內網拓撲通常敏感，但位址字面值對版本號、時間戳的誤報也高。
+    // 要開啟：settings.rule_overrides["private-ipv4"]: true。預設涵蓋
+    // RFC 1918、CGNAT 與 link-local；settings.private_cidrs 可縮小範圍。
+    optIn: true,
+    pattern: /\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b/g,
+    // getRules 會以 settings.private_cidrs 換掉這個 validator。
+    validate: (match) => containsAddress(DEFAULT_PRIVATE_NETWORKS, match),
   },
   {
     id: "url",

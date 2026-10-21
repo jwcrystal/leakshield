@@ -49,3 +49,10 @@ settings:
   # env_files:
   #   - .env
   #   - .env.local
+  # 選用：私有網段，只在 rule_overrides["private-ipv4"]: true 時生效。
+  # 留空則使用 RFC 1918（10/8、172.16/12、192.168/16）、CGNAT（100.64/10）
+  # 與 link-local（169.254/16）。格式錯誤會讓設定載入失敗。
+  # private_cidrs:
+  #   - 10.0.0.0/8
+  #   - 172.16.0.0/12
+  #   - 192.168.0.0/16

@@ -5,6 +5,7 @@ import * as yaml from "js-yaml";
 import { fileURLToPath } from "url";
 import { z } from "zod";
 import { loadExactValueDetector } from "../scanner/exact-values.js";
+import { parseCidr } from "../scanner/cidr.js";
 import { BUILTIN_RULE_IDS } from "../rules/builtin.js";
 import type { GuardConfig } from "../types.js";
 
@@ -31,6 +32,7 @@ export const GuardConfigSchema = z.object({
     encoding_detection: z.boolean().default(false),
     env_files: z.array(z.string().min(1).max(MAX_ENV_FILE_PATH_LENGTH)).max(16).default([]),
     rule_overrides: z.record(z.string().min(1), z.boolean()).default({}),
+    private_cidrs: z.array(z.string().min(1).max(64)).max(64).default([]),
   }).default({}),
 }).superRefine((config, ctx) => {
   // Unknown rule ids in `rule_overrides` fail the parse (fail-closed): a typo
@@ -45,6 +47,17 @@ export const GuardConfigSchema = z.object({
       });
     }
   }
+  // A private network list that does not parse fails the load: a typo would
+  // otherwise narrow the rule to nothing while it still reported "enabled".
+  (config.settings.private_cidrs ?? []).forEach((entry, index) => {
+    if (parseCidr(entry) === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["settings", "private_cidrs", index],
+        message: `private_cidrs[${index}] is not a valid IPv4 CIDR (expected a.b.c.d/prefix)`,
+      });
+    }
+  });
   // A custom rule whose pattern does not compile fails the parse too: the
   // scanner would otherwise drop it and report clean text as safe.
   config.custom_rules.forEach((rule, index) => {

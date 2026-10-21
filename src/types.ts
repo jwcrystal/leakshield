@@ -20,6 +20,11 @@ export interface GuardConfig {
     env_files?: string[];
     /** Built-in rule id → enabled. Absent id = the rule's own default (opt-in rules stay off). */
     rule_overrides?: Record<string, boolean>;
+    /**
+     * Networks the opt-in `private-ipv4` rule reports. Empty or absent uses
+     * RFC 1918, CGNAT and link-local. Entries are validated at config load.
+     */
+    private_cidrs?: string[];
   };
   /** In-memory only; serializes to a fingerprint without retaining raw values. */
   exact_value_detector?: ExactValueDetector;

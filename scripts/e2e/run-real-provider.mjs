@@ -5,7 +5,9 @@
  * Runs the built plugin against a REAL model provider in a private server with
  * an isolated HOME, and proves from the host's own outgoing request that the
  * synthetic originals never leave the machine while placeholders do. Records
- * only booleans/counts — never prompts, replies, keys or request bodies.
+ * only booleans/counts — never prompts, replies, keys or request bodies. The
+ * stand-in provider runs with recording off, so multi-turn replay is asserted
+ * from each turn's placeholder count rather than from captured text.
  *
  * Gate: E2E_REAL=1 (spends real credits). Stand-in mode (`E2E_PROVIDER=capture`)
  * needs no credentials and validates the harness itself.
@@ -33,6 +35,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   PROVIDERS,
+  expectedCanariesFor,
   freePort,
   isolatedEnv,
   modelFor,
@@ -95,19 +98,23 @@ function responseText(result) {
   return typeof data === "string" ? data : typeof data?.text === "string" ? data.text : "";
 }
 
-function traceSummary(tracePath, sessionID) {
-  const traces = readTrace(tracePath).filter((row) => row.sessionID === sessionID);
+function traceSummary(rows) {
   return {
-    count: traces.length,
-    routes: [...new Set(traces.map((row) => row.route))],
-    originals: traces.filter((row) => row.syntheticOriginalPresent).length,
-    placeholderRows: traces.filter((row) => row.placeholderPresent).length,
-    canaryTotal: traces.reduce((sum, row) => sum + (row.canaryCount || 0), 0),
-    bytes: traces.reduce((sum, row) => sum + (row.bytes || 0), 0),
+    count: rows.length,
+    routes: [...new Set(rows.map((row) => row.route))],
+    originals: rows.filter((row) => row.syntheticOriginalPresent).length,
+    placeholderRows: rows.filter((row) => row.placeholderPresent).length,
+    canaryTotal: rows.reduce((sum, row) => sum + (row.canaryCount || 0), 0),
+    bytesPerRequest: rows.map((row) => row.bytes || 0),
   };
 }
 
-async function runCase({ id, wireProtection, turns, canaries, restoreStrict }) {
+/** Per-request observations for one session, in arrival order. */
+function traceRows(tracePath, sessionID) {
+  return readTrace(tracePath).filter((row) => row.sessionID === sessionID);
+}
+
+async function runCase({ id, wireProtection, turns, canaries }) {
   const dir = path.join(ROOT, id);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const env = isolatedEnv(dir);
@@ -159,6 +166,9 @@ async function runCase({ id, wireProtection, turns, canaries, restoreStrict }) {
           : turn === turns - 1
             ? "Without using tools, repeat verbatim every line I asked you to repeat, one per line, and nothing else."
             : `Without using tools, repeat verbatim only this line: Contact ${canary} TURN_${turn + 1}.`;
+      // Requests that arrive during this turn; history replay is asserted from
+      // their placeholder counts below (turn N carries N earlier canaries).
+      const seenBefore = traceRows(tracePath, sessionID).length;
       // The generate endpoint starts a fresh turn without replaying history,
       // so multi-turn cases must go through the CLI, which loads the session.
       const generated =
@@ -184,25 +194,47 @@ async function runCase({ id, wireProtection, turns, canaries, restoreStrict }) {
               timeoutMs: TIMEOUT_MS,
             });
       lastReply = turns > 1 ? generated.stdout ?? "" : responseText(generated);
-      turnsRun.push({ turn, status: generated.status, timedOut: generated.timedOut ?? false, durationMs: generated.durationMs });
+      const turnRows = traceRows(tracePath, sessionID).slice(seenBefore);
+      const expectedCanaries = expectedCanariesFor(turn, turns);
+      turnsRun.push({
+        turn,
+        status: generated.status,
+        timedOut: generated.timedOut ?? false,
+        durationMs: generated.durationMs,
+        requests: turnRows.length,
+        // Replay evidence: a request that carries history carries the earlier
+        // turns' placeholders too. Counts only — no content is kept.
+        maxCanaries: turnRows.reduce((max, row) => Math.max(max, row.canaryCount || 0), 0),
+        expectedCanaries,
+        maxBytes: turnRows.reduce((max, row) => Math.max(max, row.bytes || 0), 0),
+      });
       if (generated.status !== 0) break;
     }
-    const traces = traceSummary(tracePath, sessionID);
+    const observed = traceRows(tracePath, sessionID);
+    const traces = traceSummary(observed);
     state.turnsCompleted = turnsRun.filter((row) => row.status === 0).length;
-    state.turnDurationsMs = turnsRun.map((row) => row.durationMs);
+    state.turnsDetail = turnsRun;
     state.trace = traces;
-    state.restoredLastCanary = lastReply.includes(canaries[(turns - 1) % canaries.length]);
+    // Turn 0 must carry one placeholder, turn 1 two, and so on: anything less
+    // means the host did not replay the earlier history.
+    state.replayOk =
+      turnsRun.length === turns && turnsRun.every((row) => row.maxCanaries >= row.expectedCanaries);
+    // The first canary is the one every later request should still carry, so it
+    // is the one worth looking for in the final reply. Recorded, not gated: a
+    // model is free to paraphrase, and the stand-in never echoes by design.
+    state.echoedFirstCanary = lastReply.includes(canaries[0]);
     state.placeholderInDisplay = lastReply.includes(PLACEHOLDER_PREFIX);
     state.replyLength = lastReply.length;
     const routeOk = traces.count > 0 && traces.routes.every((route) => EXPECTED_ROUTES.includes(route));
-    state.passed =
-      state.turnsCompleted === turns &&
-      traces.count > 0 &&
-      traces.originals === 0 &&
-      traces.placeholderRows === traces.count &&
-      routeOk &&
-      state.plugin.active === true &&
-      (restoreStrict ? state.restoredLastCanary && !state.placeholderInDisplay : true);
+    state.failedChecks = [];
+    if (state.turnsCompleted !== turns) state.failedChecks.push("turns_incomplete");
+    if (traces.count === 0) state.failedChecks.push("no_requests");
+    if (traces.originals !== 0) state.failedChecks.push("originals_on_wire");
+    if (traces.placeholderRows !== traces.count) state.failedChecks.push("request_without_placeholder");
+    if (!routeOk) state.failedChecks.push("unexpected_route");
+    if (state.plugin.active !== true) state.failedChecks.push("plugin_inactive");
+    if (!state.replayOk) state.failedChecks.push("history_not_replayed");
+    state.passed = state.failedChecks.length === 0;
     if (!state.passed) state.failure = "assertion_failed";
     runApi({
       bin: BIN,
@@ -227,8 +259,10 @@ function record(state, label = state.id) {
   console.log(
     `${label}: ${state.passed ? "PASS" : "FAIL"} wire=${state.wireProtection} turns=${state.turnsCompleted ?? 0}/${state.turns}` +
       (state.trace
-        ? ` requests=${state.trace.count} originals=${state.trace.originals} placeholders=${state.trace.placeholderRows}`
+        ? ` requests=${state.trace.count} originals=${state.trace.originals} placeholders=${state.trace.placeholderRows}` +
+          ` replay=${state.replayOk === true ? "yes" : "no"}`
         : "") +
+      (state.failedChecks?.length ? ` failed=[${state.failedChecks.join(",")}]` : "") +
       (state.failure ? ` (${state.failure})` : ""),
   );
 }
@@ -241,16 +275,14 @@ try {
       repo: REPO,
       env: captureEnv,
       port: capturePort,
-      captureDir: path.join(ROOT, "captured"),
+      record: false,
     });
     if (!(await waitForHealth(capturePort))) throw new Error("capture server did not become healthy");
   }
 
-  record(await runCase({ id: "real-basic-hook", wireProtection: false, turns: 1, canaries: [EMAILS[0]], restoreStrict: false }));
-  record(await runCase({ id: "real-basic-wire", wireProtection: true, turns: 1, canaries: [EMAILS[0]], restoreStrict: false }));
-  record(
-    await runCase({ id: "real-long-history", wireProtection: true, turns: TURNS, canaries: EMAILS, restoreStrict: false }),
-  );
+  record(await runCase({ id: "real-basic-hook", wireProtection: false, turns: 1, canaries: [EMAILS[0]] }));
+  record(await runCase({ id: "real-basic-wire", wireProtection: true, turns: 1, canaries: [EMAILS[0]] }));
+  record(await runCase({ id: "real-long-history", wireProtection: true, turns: TURNS, canaries: EMAILS }));
 } catch (error) {
   record(
     { id: "harness", passed: false, failure: error instanceof Error ? error.message : "harness_error" },

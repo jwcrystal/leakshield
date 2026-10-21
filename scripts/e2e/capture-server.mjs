@@ -21,7 +21,11 @@
  * happens out-of-band.)
  *
  * Usage: node capture-server.mjs [port]     (port 0 = ephemeral)
- * Env:   CAPTURE_DIR  output directory (default ./out/captured)
+ * Env:   CAPTURE_DIR    output directory (default ./out/captured)
+ *        CAPTURE_RECORD when "0", record nothing: the body is never parsed or
+ *                      written, so prompts and tool context stay off disk.
+ *                      Used by the issue-#26 runners, which take their evidence
+ *                      from the in-process egress observer instead.
  *
  * Canary values never appear in this server; it only echoes what the host
  * under test sends.
@@ -35,8 +39,9 @@ if (!Number.isFinite(portArg) || portArg < 0 || portArg > 65535) {
   console.error(`capture-server: invalid port ${process.argv[2] ?? process.env.PORT}`);
   process.exit(2);
 }
-const captureDir = process.env.CAPTURE_DIR || path.join(process.cwd(), "out", "captured");
-mkdirSync(captureDir, { recursive: true });
+const RECORD = process.env.CAPTURE_RECORD !== "0";
+const captureDir = RECORD ? process.env.CAPTURE_DIR || path.join(process.cwd(), "out", "captured") : null;
+if (RECORD) mkdirSync(captureDir, { recursive: true });
 
 let seq = 0;
 const state = {
@@ -61,6 +66,8 @@ const state = {
 function record(req, bodyRaw) {
   const receivedAt = Date.now();
   seq += 1;
+  // Content-free mode: never parse the body, never keep a reference to it.
+  if (!RECORD) return { receivedAt, seq, file: null };
   let body = null;
   const raw = bodyRaw == null ? "" : String(bodyRaw);
   try {
@@ -507,7 +514,7 @@ server.on("error", (err) => {
 
 server.listen(portArg, "127.0.0.1", () => {
   const addr = server.address();
-  console.log(`CAPTURE_SERVER_READY port=${addr.port} dir=${captureDir}`);
+  console.log(`CAPTURE_SERVER_READY port=${addr.port} dir=${RECORD ? captureDir : "none"}`);
 });
 
 for (const sig of ["SIGTERM", "SIGINT"]) {

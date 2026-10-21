@@ -18,6 +18,8 @@
  *  - "Did it exist before?" is answered by the key ladder's OWN first read
  *    (a recording probe), not by a second read after the ladder may have
  *    already created the item.
+ *  - The restart child resolves the key through a read-only probe, so a child
+ *    that finds the item missing fails the check instead of creating one.
  *  - No key material is printed: only source names, key ids and booleans.
  *
  * Usage:
@@ -36,7 +38,6 @@ import { fileURLToPath } from "node:url";
 import {
   KeyfileMappingKeyProvider,
   createPlatformKeychainProbe,
-  resolveMappingKey,
   resolveMappingKeyWithProbe,
 } from "../../dist/decision/mapping-key.js";
 import { deriveKeyId, openMappingStore } from "../../dist/decision/mapping-store.js";
@@ -115,6 +116,24 @@ function makeRecordingProbe(probe) {
   };
 }
 
+/**
+ * Read-only wrapper for the restart child. The child must never mint a key: if
+ * the item is gone by the time it starts, that is a failed restart check, not
+ * permission to write a new production secret.
+ */
+function makeReadOnlyProbe(probe) {
+  return {
+    read() {
+      return probe.read();
+    },
+    write() {
+      const refusal = new Error("read-only restart check: refusing to create a keychain item");
+      refusal.code = "sg_read_only_probe";
+      throw refusal;
+    },
+  };
+}
+
 function resolveForMode() {
   if (!REAL) {
     const keyfile = arg("--keyfile") ?? keyfilePath;
@@ -140,9 +159,21 @@ if (CHILD) {
   const keyfilePath = arg("--keyfile");
   const expectedKeyId = arg("--key-id");
   const resolved = REAL
-    ? resolveMappingKey({ keyFile: false, warn })
+    ? (() => {
+        const probe = createPlatformKeychainProbe();
+        return probe === null
+          ? null
+          : resolveMappingKeyWithProbe(makeReadOnlyProbe(probe), { keyFile: false, warn });
+      })()
     : new KeyfileMappingKeyProvider(keyfilePath);
-  const result = { source: resolved?.source ?? null, keyIdMatch: false, found: false, entriesMatch: false, version: 0 };
+  const result = {
+    source: resolved?.source ?? null,
+    keyIdMatch: false,
+    found: false,
+    entriesMatch: false,
+    version: 0,
+    readOnly: REAL,
+  };
   try {
     if (resolved === null) throw new Error("key_unavailable");
     const key = resolved.getOrCreateKey();
@@ -189,6 +220,7 @@ const summary = {
   restartEntriesMatch: false,
   restartKeyIdMatch: false,
   childSource: null,
+  childReadOnly: REAL,
   passed: false,
 };
 

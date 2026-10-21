@@ -214,9 +214,15 @@ export async function waitForHealth(port, pathname = "/health", timeoutMs = 2000
   return false;
 }
 
-export function startCaptureServer({ repo, env, port, captureDir }) {
+/**
+ * Starts the stand-in provider. `record: false` runs it content-free: no request
+ * body is parsed or written, because the issue-#26 evidence comes from the
+ * in-process egress observer (flags and counts) instead of captured bodies.
+ */
+export function startCaptureServer({ repo, env, port, captureDir, record = true }) {
+  const childEnv = record ? { ...env, CAPTURE_DIR: captureDir } : { ...env, CAPTURE_RECORD: "0" };
   const child = spawn(process.execPath, [path.join(repo, "scripts/e2e/capture-server.mjs"), String(port)], {
-    env: captureDir === undefined ? env : { ...env, CAPTURE_DIR: captureDir },
+    env: childEnv,
     stdio: ["ignore", "ignore", "pipe"],
   });
   child.stderr.resume();
@@ -325,6 +331,38 @@ export function runCliTurn({ bin, serverURL, cwd, env, sessionID, modelRef, prom
     timedOut: result.error?.code === "ETIMEDOUT",
     durationMs: Date.now() - started,
   };
+}
+
+/**
+ * True only when the host says the session does not exist. A timeout, an
+ * unparseable reply or an unexpected status means "unknown" — counting those as
+ * reclamation is how a soak reports PASS while proving nothing.
+ */
+export function sessionNotFound(result) {
+  if (result == null || result.timedOut === true || result.parseFailed === true) return false;
+  const body = result.value?.data ?? result.value;
+  const statuses = [
+    result.status,
+    result.value?.statusCode,
+    body?.status,
+    body?.statusCode,
+    body?.error?.status,
+    body?.error?.statusCode,
+  ].filter((value) => typeof value === "number");
+  if (statuses.includes(404)) return true;
+  const message =
+    typeof body?.error === "string" ? body.error : (body?.error?.message ?? body?.message ?? body?.error) || "";
+  return /not\s*found|no such session|unknown session|session (does not exist|not exist)/i.test(String(message));
+}
+
+/**
+ * How many placeholders a request on this turn must still carry. The final turn
+ * asks for a replay of earlier lines and adds no canary of its own, so its
+ * expectation stays at `turns - 1` rather than `turns`.
+ */
+export function expectedCanariesFor(turn, turns) {
+  if (turns <= 1) return 1;
+  return turn === turns - 1 ? turns - 1 : turn + 1;
 }
 
 /** Resident set size of a process in KiB, or null when unavailable. */

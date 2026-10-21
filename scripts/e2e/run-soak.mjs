@@ -3,8 +3,20 @@
  * Soak / lifecycle run for transparent mode (issue #26).
  *
  * One private server, many short sessions: create → one tiny model turn →
- * delete, sampling the server's RSS throughout. Proves reclamation and gives
- * a memory-growth series. Content-free: only counts, durations and KiB.
+ * delete → confirm the host reports it gone, sampling the server's RSS
+ * throughout. Content-free: only counts, durations and KiB.
+ *
+ * What this proves, and what it does not:
+ *  - host session lifecycle: create, generate, delete, and a GET after the
+ *    delete that must return an explicit not-found. A timeout, a failed parse
+ *    or an unexpected response is recorded as unknown, never as "gone".
+ *  - memory: a timestamped RSS series. If at least two samples cannot be taken,
+ *    the run FAILS as `memory_unmeasured` instead of passing with no data.
+ *  - LeakShield mapping reclamation is NOT covered here: the run never observes
+ *    the plugin's own mapping count, so a broken `session.deleted` subscriber
+ *    would still pass. The mapping-release contract is covered by
+ *    `tests/opencode-transparent-capacity.test.ts`; a long-running soak of it
+ *    needs content-free instrumentation and is tracked in the runbook.
  *
  * This is NOT a WebSocket-reuse proof: the stand-in provider is HTTP, and the
  * real-provider path follows whatever transport that provider's package uses
@@ -35,6 +47,7 @@ import {
   requireGate,
   runApi,
   sampleRssKb,
+  sessionNotFound,
   startCaptureServer,
   startPrivateServer,
   stopChild,
@@ -96,8 +109,12 @@ const summary = {
   passes: 0,
   failures: [],
   rssKb: {},
-  sessionsAfterDelete: null,  passed: false,
+  sessionsAfterDelete: null,
+  memory: { measured: false, samples: 0 },
+  passed: false,
 };
+
+/** The pass/fail predicates live in the shared lib so the test suite can pin them. */
 
 function fatal(code) {
   summary.failure = code;
@@ -113,7 +130,7 @@ try {
       repo: REPO,
       env: isolatedEnv(path.join(ROOT, "capture")),
       port: capturePort,
-      captureDir: path.join(ROOT, "captured"),
+      record: false,
     });
     if (!(await waitForHealth(capturePort))) throw new Error(fatal("capture_unhealthy"));
   }
@@ -190,12 +207,20 @@ try {
           env,
           timeoutMs: 15000,
         });
-        const body = after.value?.data ?? after.value;
-        const stillThere = typeof body === "object" && body !== null && body.id === sessionID;
         summary.deletedSessionsChecked = (summary.deletedSessionsChecked ?? 0) + 1;
-        if (!stillThere) summary.deletedSessionsGone = (summary.deletedSessionsGone ?? 0) + 1;
-        else failures.push({ iteration, code: "deleted_session_still_listed" });
-        ok = ok && !stillThere;
+        if (sessionNotFound(after)) {
+          summary.deletedSessionsGone = (summary.deletedSessionsGone ?? 0) + 1;
+        } else {
+          // No positive proof of deletion: never count it as reclaimed.
+          failures.push({
+            iteration,
+            code: "deleted_session_state_unknown",
+            sawStatus: typeof after.status === "number" ? after.status : null,
+            timedOut: after.timedOut === true,
+            parseFailed: after.parseFailed === true,
+          });
+          ok = false;
+        }
       }
       if (!ok) failures.push({ iteration, code: "session_cycle_failed" });
     } else {
@@ -219,11 +244,25 @@ try {
       peak: Math.max(...values),
       min: Math.min(...values),
       delta: values[values.length - 1] - values[0],
+      // Kept in full: the trend, not just the endpoints, is the evidence.
+      series: rss,
     };
   }
+  summary.memory = { measured: rss.length >= 2, samples: rss.length };
   summary.elapsedMs = Date.now() - startedAt;
+  summary.reclamation = {
+    hostSessionCycle: "checked",
+    leakshieldMappingRelease: "not-verified",
+    memoryTrend: summary.memory.measured ? "sampled" : "unmeasured",
+  };
   summary.passed =
-    summary.iterations > 0 && summary.passes === summary.iterations && summary.failures.length === 0;
+    summary.iterations > 0 &&
+    summary.passes === summary.iterations &&
+    summary.failures.length === 0 &&
+    summary.memory.measured === true;
+  if (!summary.passed && summary.failure === undefined) {
+    summary.failure = summary.memory.measured === false ? "memory_unmeasured" : "iteration_failed";
+  }
 } catch (error) {
   summary.failure = summary.failure ?? fatal("harness_error");
   summary.error = error instanceof Error ? error.message : String(error);

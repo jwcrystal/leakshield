@@ -12,7 +12,23 @@ const REDOS_TEST_INPUT = "a".repeat(50) + "!";
 
 export type CustomPatternVerdict = "ok" | "invalid" | "redos-suspect";
 
+// The timing check can land on either side of the limit from one run to the
+// next, so the first verdict for a pattern is kept for the life of the
+// process: `--doctor` and the scanner it smoke-tests then agree on which
+// rules are enforced. Bounded so a long-lived process cannot grow it forever.
+const MAX_REMEMBERED_VERDICTS = 1024;
+const verdicts = new Map<string, CustomPatternVerdict>();
+
 export function checkCustomPattern(pattern: string): CustomPatternVerdict {
+  const remembered = verdicts.get(pattern);
+  if (remembered !== undefined) return remembered;
+  const verdict = probeCustomPattern(pattern);
+  if (verdicts.size >= MAX_REMEMBERED_VERDICTS) verdicts.clear();
+  verdicts.set(pattern, verdict);
+  return verdict;
+}
+
+function probeCustomPattern(pattern: string): CustomPatternVerdict {
   let compiled: RegExp;
   try {
     compiled = new RegExp(pattern, "gi");

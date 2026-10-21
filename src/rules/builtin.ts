@@ -1,4 +1,5 @@
 import type { Rule } from "../types.js";
+import { classifyTransportSpan } from "../scanner/remotes.js";
 
 /** Luhn checksum（ISO/IEC 7812-1）；信用卡號形狀相符後必須通過才命中。 */
 function luhnValid(raw: string): boolean {
@@ -130,6 +131,18 @@ export const BUILTIN_RULES: Rule[] = [
       /(?:password|passwd|secret|private_key|client_secret)\s*[:=]\s*(?:['"](?!\$\{)[^'"]{8,}['"]|(?!['"\$\*])\S{8,})/gi,
   },
   {
+    id: "url-userinfo",
+    type: "SECRET",
+    severity: "HIGH",
+    description: "URL 內嵌憑證（user:password@）",
+    // 取到 authority 內最後一個 `@` 為止的完整 userinfo：`https://u:pa@ss@host`
+    // 若停在第一個 `@`，`ss` 會留在遮罩之外。前置 group 不吃 `:`，且以 `://`
+    // 起頭（skipPrefix 只回報 userinfo），避免可變長度 lookbehind 在每個位置
+    // 重掃造成二次方成長。
+    pattern: /:\/\/[^\s/?#:]*:[^\s/?#]*@/gi,
+    skipPrefix: 3,
+  },
+  {
     id: "jwt",
     type: "TOKEN",
     severity: "HIGH",
@@ -190,7 +203,17 @@ export const BUILTIN_RULES: Rule[] = [
     type: "PII_EMAIL",
     severity: "MEDIUM",
     description: "Email 地址",
-    pattern: /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g,
+    // The local part is capped at 64 octets, the RFC 5321 limit. Unbounded
+    // `+` made the rule quadratic on a long token with no `@`: every start
+    // position consumed the rest of the run before failing.
+    pattern: /[a-zA-Z0-9._%+\-]{1,64}@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g,
+    // `user@host:path` and `ssh://user@host/…` are Git transports, not
+    // mailboxes (#34). The password half of `scheme://user:password@host` is
+    // a credential, reported by `url-userinfo` instead. Only this rule skips
+    // those spans; private domains, path keywords and URL credentials keep
+    // their own findings.
+    validate: (match, context) =>
+      classifyTransportSpan(context.text, context.index, match.length) === null,
   },
   {
     id: "phone-tw",

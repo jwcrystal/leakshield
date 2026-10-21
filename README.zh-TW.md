@@ -53,6 +53,7 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 | IBAN | 緊湊或四字一組格式，需通過 mod-97 檢查碼 | 🔴 HIGH |
 | 公共 IPv4 位址 | 排除私有／回環／CGNAT／保留段 | 🟡 MEDIUM |
 | Email 地址 | 所有 email 格式 | 🟡 MEDIUM |
+| URL 內嵌憑證 | `scheme://user:password@host` —— 只遮罩 userinfo 這一段 | 🔴 HIGH |
 | 台灣手機號碼 | **Opt-in** —— 預設關閉（`rule_overrides: { "phone-tw": true }` 開啟）；數字段是實測的誤報來源，關閉的代價是漏偵真電話 | 🟡 MEDIUM |
 | 國際電話 | **Opt-in** —— 預設關閉（`rule_overrides: { "phone-intl": true }` 開啟）；取捨同上 | 🟢 LOW |
 | HTTP(S) URL | **Opt-in** —— 預設關閉（`rule_overrides: { "url": true }` 開啟） | 🟢 LOW |

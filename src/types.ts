@@ -119,6 +119,19 @@ export interface Rule {
    * mod-97 for IBAN, routability for IPv4). Returning false skips the match
    * entirely — used to keep checksum-capable formats at near-zero false
    * positives without weakening the pattern shape.
+   *
+   * `context` carries the scanned text and the match offset for rules whose
+   * meaning depends on surrounding syntax (an email-shaped span that is really
+   * an SSH remote authority). It is supplied by the engine, never by callers
+   * that only know the matched string.
    */
-  validate?: (match: string) => boolean;
+  validate?: (match: string, context: { text: string; index: number }) => boolean;
+  /**
+   * Characters at the start of `pattern`'s match that are syntax, not the
+   * finding. The engine reports and redacts from `match.index + skipPrefix`.
+   * Used by url-userinfo, which must anchor on `://` without a variable-length
+   * lookbehind (V8 retries that lookbehind at every position, which is
+   * quadratic on a long token).
+   */
+  skipPrefix?: number;
 }

@@ -46,13 +46,14 @@ MCP server mode has been removed. It depended on the model voluntarily calling a
 | IBAN | Compact or 4-char groups, mod-97 checksum required | 🔴 HIGH |
 | Public IPv4 Address | Private/loopback/CGNAT/reserved ranges excluded | 🟡 MEDIUM |
 | Email Address | All email formats | 🟡 MEDIUM |
+| URL Embedded Credential | `scheme://user:password@host` — only the userinfo span is masked | 🔴 HIGH |
 | Taiwan Mobile Number | **Opt-in** — disabled by default (`rule_overrides["phone-tw"]: true`); digit runs are a measured false-positive source | 🟡 MEDIUM |
 | International Phone | **Opt-in** — disabled by default (`rule_overrides["phone-intl"]: true`); same trade-off as above | 🟢 LOW |
 | HTTP(S) URL | **Opt-in** — disabled by default (`rule_overrides.url: true`) | 🟢 LOW |
 | NDA Keywords | Custom (see `config/guard.config.yaml`) | 🔴 HIGH |
 | Private Domains | Custom (see `config/guard.config.yaml`) | 🟡 MEDIUM |
 
-> **Detection boundaries** (per `src/rules/builtin.ts`): the generic secret rule matches only the keywords `password`, `passwd`, `secret`, `private_key`, `client_secret` with a value of **8+ characters** — generic `api_key=`/`token=` assignments are not matched unless the value itself matches a vendor pattern. Credit card and IBAN matches require a valid checksum; IP matches cover only public/routable IPv4. Not covered by any rule: street/postal addresses, dates, IPv6, and values below the 8-character minimum. Every built-in rule has a stable id and can be toggled via `settings.rule_overrides` in `config/guard.config.yaml` (unknown ids fail config load); the URL rule ships disabled because always-on URL masking would flag provider endpoints. The same rule set (built-in + `config/guard.config.yaml`) applies to every mode — `block`, `redact`, and `transparent`.
+> **Detection boundaries** (per `src/rules/builtin.ts`): the generic secret rule matches only the keywords `password`, `passwd`, `secret`, `private_key`, `client_secret` with a value of **8+ characters** — generic `api_key=`/`token=` assignments are not matched unless the value itself matches a vendor pattern. Credit card and IBAN matches require a valid checksum; IP matches cover only public/routable IPv4. Not covered by any rule: street/postal addresses, dates, IPv6, and values below the 8-character minimum for generic secret assignments. SSH remote authorities (`user@host:path`, `ssh://user@host/…`) are not reported as email; private domains and path keywords still apply inside them, and the password half of `scheme://user:password@host` is reported as a URL credential instead. Every built-in rule has a stable id and can be toggled via `settings.rule_overrides` in `config/guard.config.yaml` (unknown ids fail config load); the URL rule ships disabled because always-on URL masking would flag provider endpoints. The same rule set (built-in + `config/guard.config.yaml`) applies to every mode — `block`, `redact`, and `transparent`.
 
 ---
 

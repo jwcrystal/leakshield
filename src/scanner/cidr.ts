@@ -69,3 +69,31 @@ export function containsAddress(cidrs: readonly Cidr[], raw: string): boolean {
   if (value === null) return false;
   return cidrs.some((cidr) => ((value & cidr.mask) >>> 0) === cidr.base);
 }
+
+/**
+ * Every four-octet window in a dotted run, in order.
+ *
+ * `10.1.2.3.4` is not an address, but it contains `1.2.3.4`. A regex finds
+ * only the first four groups, so the runner is what keeps detection
+ * consistent for the addresses hiding behind that prefix.
+ */
+export function ipv4Windows(raw: string): string[] {
+  const parts = raw.split(".");
+  const windows: string[] = [];
+  for (let start = 0; start + 4 <= parts.length; start += 1) {
+    windows.push(parts.slice(start, start + 4).join("."));
+  }
+  return windows;
+}
+
+/**
+ * True when `raw` is inside one of the networks, including when it is a
+ * dotted run longer than four octets: the run is reported whole if any of
+ * its four-octet windows matches.
+ */
+export function containsAddressInRun(cidrs: readonly Cidr[], raw: string): boolean {
+  const groups = raw.split(".").length;
+  if (groups === 4) return containsAddress(cidrs, raw);
+  if (groups > 4) return ipv4Windows(raw).some((window) => containsAddress(cidrs, window));
+  return false;
+}

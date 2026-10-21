@@ -1,27 +1,41 @@
 import type { GuardConfig, Rule } from "../types.js";
 
-// ReDoS protection: test the compiled regex against a fixed input with a
-// synchronous timeout. Node.js is single-threaded so we approximate a timeout
-// by measuring wall-clock time after exec() returns. Patterns that complete
-// under REDOS_TIMEOUT_MS are accepted; those that hang are caught by the
-// outer try/catch if they throw, or rejected if they exceed the limit.
+// ReDoS heuristic: run the compiled regex once against a fixed input and
+// measure wall-clock time after exec() returns. This is a heuristic, not a
+// guarantee: Node.js is single-threaded, so exec() cannot be interrupted, and
+// a pattern that backtracks catastrophically on this input blocks until it
+// finishes. Patterns that return under REDOS_TIMEOUT_MS are accepted; slower
+// ones are skipped and reported by `--doctor`. Patterns that do not compile
+// never get here: `loadConfig()` rejects them (fail-closed).
 const REDOS_TIMEOUT_MS = 200;
 const REDOS_TEST_INPUT = "a".repeat(50) + "!";
 
-function isSafePattern(pattern: string): boolean {
+export type CustomPatternVerdict = "ok" | "invalid" | "redos-suspect";
+
+export function checkCustomPattern(pattern: string): CustomPatternVerdict {
   let compiled: RegExp;
   try {
     compiled = new RegExp(pattern, "gi");
   } catch {
-    return false; // invalid regex syntax
+    return "invalid";
   }
   const start = Date.now();
   try {
     compiled.exec(REDOS_TEST_INPUT);
   } catch {
-    return false;
+    return "redos-suspect";
   }
-  return Date.now() - start < REDOS_TIMEOUT_MS;
+  return Date.now() - start < REDOS_TIMEOUT_MS ? "ok" : "redos-suspect";
+}
+
+/** Descriptions of the custom rules `buildDynamicRules` skips, in config order. */
+export function skippedCustomRules(config: GuardConfig): { description: string; reason: Exclude<CustomPatternVerdict, "ok"> }[] {
+  const skipped: { description: string; reason: Exclude<CustomPatternVerdict, "ok"> }[] = [];
+  for (const rule of config.custom_rules ?? []) {
+    const verdict = checkCustomPattern(rule.pattern);
+    if (verdict !== "ok") skipped.push({ description: rule.description, reason: verdict });
+  }
+  return skipped;
 }
 
 export function buildDynamicRules(config: GuardConfig): Rule[] {
@@ -59,8 +73,13 @@ export function buildDynamicRules(config: GuardConfig): Rule[] {
   }
 
   for (const rule of config.custom_rules) {
-    if (!isSafePattern(rule.pattern)) {
-      console.warn(`[leakshield] custom_rules: 略過不安全或無效的 pattern —「${rule.description}」`);
+    const verdict = checkCustomPattern(rule.pattern);
+    if (verdict !== "ok") {
+      console.warn(
+        verdict === "invalid"
+          ? `[leakshield] custom_rules: 略過無法編譯的 pattern —「${rule.description}」`
+          : `[leakshield] custom_rules: 略過疑似 ReDoS 的 pattern（計時啟發式檢查，非保證）—「${rule.description}」`,
+      );
       continue;
     }
     rules.push({

@@ -155,6 +155,34 @@ settings:
     expect(config.settings.show_line_numbers).toBe(false);
     expect(config.settings.preview_length).toBe(30);
   });
+
+  it("custom_rules 的 pattern 無法編譯時應拋出錯誤並指出規則（#33）", () => {
+    const p = writeTmp(`
+custom_rules:
+  - description: "ok rule"
+    pattern: "EMP-\\\\d{6}"
+  - description: "typo rule"
+    pattern: "SECRETVALUE["
+`);
+    expect(() => loadConfig(p)).toThrow(/custom_rules\[1\] \\?"typo rule\\?": pattern does not compile/);
+    try {
+      loadConfig(p);
+    } catch (error) {
+      // The pattern may itself be a protected literal; the error must not echo it.
+      expect((error as Error).message).not.toContain("SECRETVALUE");
+    }
+  });
+
+  it("可編譯的 custom_rules pattern 照常載入", () => {
+    const p = writeTmp(`
+custom_rules:
+  - description: "employee id"
+    pattern: "\\\\bEMP-\\\\d{6}\\\\b"
+    severity: MEDIUM
+`);
+    const config = loadConfig(p);
+    expect(config.custom_rules).toEqual([{ description: "employee id", pattern: "\\bEMP-\\d{6}\\b", severity: "MEDIUM" }]);
+  });
 });
 
 // ─── 單次讀取：config 與指紋來自同一次檔案讀取 ──────────────────────────────────

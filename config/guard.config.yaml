@@ -19,7 +19,7 @@ private_domains: []
 
 # 自訂規則（使用正則表達式，大小寫不敏感）
 # severity 可填 HIGH / MEDIUM / LOW，不填預設 HIGH
-# pattern 長度上限 200 字元；危險的 ReDoS pattern 會被自動略過並顯示警告
+# pattern 長度上限 200 字元；無法編譯的 pattern 會讓設定載入失敗；疑似 ReDoS 的 pattern 會被略過並顯示警告（計時啟發式，非保證），--doctor 會列出
 custom_rules: []
 # 自訂 regex 命中都會形成 finding；LOW 也不代表忽略或不攔截。
 # 通用數字 pattern 容易誤報，請先依實際資料格式驗證，再取消註解。

@@ -172,6 +172,35 @@ describe("runDoctor", () => {
     expect(report.checks.find((c) => c.id === "guard-config")?.state).toBe("fail");
   });
 
+  it("warns about custom rules the scanner skips without failing the install (#33)", async () => {
+    const guardConfig = {
+      nda_keywords: [],
+      private_domains: [],
+      custom_rules: [{ description: "employee id", pattern: "[", severity: "HIGH" }],
+      settings: { max_chars: 200000, show_line_numbers: true, preview_length: 60, encoding_detection: false },
+    } as GuardConfig;
+    const { deps } = makeFixture({
+      distFiles: true,
+      config: (tmp) => ({ plugins: [{ package: distRef(tmp), options: {} }] }),
+      options: { loadGuardConfig: () => guardConfig },
+    });
+    const report = await runDoctor(deps);
+    const check = report.checks.find((c) => c.id === "custom-rules");
+    expect(check?.state).toBe("warn");
+    expect(check?.detail).toContain('"employee id"');
+    expect(check?.detail).not.toContain("[");
+    expect(report.status).toBe("PROTECTED");
+  });
+
+  it("omits the custom-rules check when every custom rule is enforced", async () => {
+    const { deps } = makeFixture({
+      distFiles: true,
+      config: (tmp) => ({ plugins: [{ package: distRef(tmp), options: {} }] }),
+    });
+    const report = await runDoctor(deps);
+    expect(report.checks.find((c) => c.id === "custom-rules")).toBeUndefined();
+  });
+
   it("reports BROKEN when smoke finds nothing", async () => {
     const { deps } = makeFixture({
       distFiles: true,

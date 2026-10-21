@@ -45,6 +45,23 @@ export const GuardConfigSchema = z.object({
       });
     }
   }
+  // A custom rule whose pattern does not compile fails the parse too: the
+  // scanner would otherwise drop it and report clean text as safe.
+  config.custom_rules.forEach((rule, index) => {
+    try {
+      new RegExp(rule.pattern, "gi");
+    } catch (error) {
+      // V8 messages embed the pattern ("Invalid regular expression: /…/gi:
+      // reason"); keep only the reason, since a pattern may itself be a
+      // literal the rule exists to protect.
+      const reason = (error as Error).message.split(": ").pop();
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["custom_rules", index, "pattern"],
+        message: `custom_rules[${index}] "${rule.description}": pattern does not compile (${reason})`,
+      });
+    }
+  });
 });
 
 function finalizeConfig(config: GuardConfig, workspaceRoot: string): GuardConfig {

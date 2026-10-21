@@ -510,7 +510,11 @@ Input lengths for dynamic rules are validated when the config is loaded:
 | `nda_keywords` entries | 200 characters |
 | `private_domains` entries | 255 characters |
 
+| `custom_rules` `description` / `pattern` | 200 characters |
+
 Values exceeding these limits will cause `loadConfig()` to throw a Zod validation error, preventing oversized patterns from entering the scanner.
+
+A `custom_rules` pattern that does not compile as a regular expression also makes `loadConfig()` throw, naming the rule's index and `description` (not the pattern): a rule that cannot be enforced must not load. A pattern that compiles but runs slowly on a fixed probe input is skipped as a ReDoS suspect, with a warning on stderr and a `custom-rules` warning in `leakshield --doctor`. That check is a timing heuristic, not a guarantee: it runs the pattern once and cannot interrupt it, so it cannot prove a pattern safe.
 
 ## Secret Preview Behavior
 

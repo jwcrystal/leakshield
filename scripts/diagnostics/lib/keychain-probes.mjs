@@ -8,16 +8,19 @@
  */
 
 /**
- * Records the ladder's FIRST read as `existedBefore`, and refuses to let the
- * ladder create anything unless creation was explicitly allowed.
+ * Records the ladder's FIRST read as `existedBefore`, refuses to let the ladder
+ * create anything unless creation was explicitly allowed, and calls `beforeWrite`
+ * immediately before the underlying write so a warning lands before the secret
+ * exists, not after.
  */
-export function makeRecordingProbe(probe, { allowCreate = false } = {}) {
+export function makeRecordingProbe(probe, { allowCreate = false, beforeWrite = null } = {}) {
   let existedBefore = null;
   let readFailed = false;
   let refusedAbsence = false;
   let writeAttempted = false;
   let writeSucceeded = false;
   let writeError = null;
+  let writtenHex = null;
 
   const recording = {
     read() {
@@ -39,6 +42,8 @@ export function makeRecordingProbe(probe, { allowCreate = false } = {}) {
     },
     write(hexKey) {
       writeAttempted = true;
+      writtenHex = hexKey;
+      if (typeof beforeWrite === "function") beforeWrite();
       try {
         probe.write(hexKey);
         writeSucceeded = true;
@@ -70,6 +75,10 @@ export function makeRecordingProbe(probe, { allowCreate = false } = {}) {
       get writeError() {
         return writeError;
       },
+      /** The hex this run wrote, or null. Kept in memory; never printed. */
+      get writtenHex() {
+        return writtenHex;
+      },
     },
   };
 }
@@ -93,20 +102,30 @@ export function makeReadOnlyProbe(probe) {
 }
 
 /**
- * Tri-state answer to "did this run create the key?".
+ * Tri-state answer to "does the key in the keychain come from this run?".
  *
- * - `true`  — our write was attempted and succeeded.
+ * - `true`  — our write succeeded AND the key that is now in the keychain is the
+ *             one we wrote (same derived id).
  * - `false` — the item already existed and we never wrote.
- * - `null`  — indeterminate: the item appeared without a write of ours (another
- *             process created it between the first read and the ladder's write),
- *             or a write was attempted and failed.
+ * - `null`  — indeterminate: no write of ours and the item appeared anyway, a
+ *             write failed, or we wrote but the ladder adopted a different key
+ *             (a concurrent creator won between our write and the read-back).
  *
- * Inferring this from "it was absent, therefore we made it" is not sound: the
- * gap between the first read and the write is a race.
+ * Neither "it was absent, so we made it" nor "our write succeeded, so it is
+ * ours" is sound on its own: both leave the race unaccounted for.
  */
-export function keyCreationAttribution({ existedBefore, writeAttempted, writeSucceeded }) {
-  if (writeAttempted === true) return writeSucceeded === true ? true : null;
+export function keyCreationAttribution({
+  existedBefore,
+  writeAttempted,
+  writeSucceeded,
+  writtenKeyId = null,
+  currentKeyId = null,
+}) {
+  if (writeAttempted === true) {
+    if (writeSucceeded !== true) return null;
+    if (writtenKeyId === null || currentKeyId === null) return null;
+    return writtenKeyId === currentKeyId ? true : null;
+  }
   if (existedBefore === true) return false;
-  if (existedBefore === false) return null;
   return null;
 }

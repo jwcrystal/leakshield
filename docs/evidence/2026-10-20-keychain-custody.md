@@ -68,9 +68,10 @@ Issue #26 的第一個勾：「Real OS keychain key custody for persistence」�
 - **只測 macOS**。Windows（DPAPI/ProtectedData）與 Linux（libsecret）
   尚未執行；`createWindowsDpapiProbe` 與 `createLinuxSecretProbe` 仍只有
   單元測試覆蓋。
-- 這個 keychain 項目由本次驗證在 2026-10-20 10:58（+0800）建立，現在存在於
-  登入 keychain。**不要刪除**：既有持久化 mapping 會無法解密。runbook 裡的
-  `security delete-generic-password` 只供理解，不建議執行。
+- 這個 keychain 項目在 2026-10-20 10:58（+0800）**之前就已存在或於當時建立，建立者
+  未證實**（`cdat` 只給時間）。它現在存在於登入 keychain，**不要刪除**：既有持久化
+  mapping 會無法解密。runbook 裡的 `security delete-generic-password` 只供理解，
+  不建議執行。
 - 沒有人在場情況下，腳本無法驗證「keychain 授權彈窗」的實際 UX；本次
   讀取沒有跳窗（項目 ACL 已允許）。
 - 證明了「重啟後金鑰可重讀、mapping 可解密」，**沒有**證明 plugin 端到端

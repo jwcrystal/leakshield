@@ -87,11 +87,13 @@ node scripts/diagnostics/verify-keychain-persistence.mjs --real-keychain --allow
   重啟子程序也走唯讀 probe，項目在父子之間消失時會判失敗，不會自己補一把。
 - `--allow-create` 才會建立（等同第一次啟用持久化）。建立前會印出警告（項目刪掉就
   解不開既有 mapping）；`keyWriteAttempted` / `keyWriteSucceeded` 記錄實際發生什麼。
-- `createdProductionKey` 是**三態**：只有本次的 `write()` 成功才是 `true`，項目原本就
-  存在且沒寫入才是 `false`，其餘（別的程序在讀寫之間補上、寫入失敗）是 `null`。
-  **`null` 照實記錄，不要改寫成 `false`。**
+- `createdProductionKey` 是**三態**：只有本次的 `write()` 成功**而且**存回去的金鑰就是
+  我們寫的那一把（比對 `writtenKeyId` 與 `currentKeyId`）才是 `true`，項目原本就存在且
+  沒寫入才是 `false`，其餘（別的程序在讀寫之間補上、寫入失敗、或我們寫了但 read-back
+  採用的是別人贏得的金鑰）是 `null`。**`null` 照實記錄，不要改寫成 `false`。**
 - 金鑰會在**同一個程序內讀回**並比對 key id（`keyReadBackMatches`）：寫得進去但讀不
-  回來，不算保管成功。
+  回來，不算保管成功。這一項只證明「讀得回來」，不證明那把金鑰是本次寫的；後者由
+  `createdProductionKey` 另外比對 `writtenKeyId` 與 `currentKeyId`。
 - `keychainItemExistedBefore` 取自 key ladder 的**第一次讀取**；本次執行前不存在時為 `false`。
   （舊版腳本在 ladder 可能已建立之後才讀，所以該欄位恆為 `true`；已修正。）
   這一欄只回答「執行前在不在」，不回答「是誰建立的」。

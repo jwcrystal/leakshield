@@ -17,10 +17,11 @@
  *    (equivalent to a real first run), prints a warning, and records what
  *    happened in `keyWriteAttempted` / `keyWriteSucceeded`.
  *  - `createdProductionKey` is tri-state: true only when this run's write
- *    succeeded, false only when the item already existed and nothing was
- *    written, null when it cannot be told (an item that appeared without our
- *    write, or a failed write). "It was absent, so we made it" is not sound —
- *    another process can fill that gap.
+ *    succeeded AND the stored key is the one it wrote, false only when the item
+ *    already existed and nothing was written, null when it cannot be told (an
+ *    item that appeared without our write, a failed write, or a concurrent
+ *    creator whose key won the read-back). "It was absent, so we made it" is not
+ *    sound — another process can fill that gap.
  *  - "Did it exist before?" is answered by the key ladder's OWN first read
  *    (a recording probe), not by a second read after the ladder may have
  *    already created the item.
@@ -85,7 +86,16 @@ function resolveForMode() {
   }
   const probe = createPlatformKeychainProbe();
   if (probe === null) return { provider: null, probe: null, state: null };
-  const recording = makeRecordingProbe(probe, { allowCreate: ALLOW_CREATE });
+  const recording = makeRecordingProbe(probe, {
+    allowCreate: ALLOW_CREATE,
+    // The warning has to land before the write: the resolver writes during
+    // resolution, so warning afterwards can be skipped entirely.
+    beforeWrite: () =>
+      console.error(
+        "WARNING: no keychain item exists; creating the production mapping key now.\n" +
+          "         Do not delete it afterwards — existing persisted mappings cannot be decrypted without it.",
+      ),
+  });
   const provider = resolveMappingKeyWithProbe(recording.probe, {
     keyFile: false,
     warn: (message) => {
@@ -206,23 +216,25 @@ try {
     throw new Error("key_unavailable");
   }
   summary.source = provider.source ?? "keyfile";
-  if (REAL && resolved.state.existedBefore === false) {
-    console.error(
-      "WARNING: no keychain item exists; creating the production mapping key now.\n" +
-        "         Do not delete it afterwards — existing persisted mappings cannot be decrypted without it.",
-    );
-  }
   const key = provider.getOrCreateKey();
   summary.keyId = deriveKeyId(key);
   if (REAL) {
     summary.keyWriteAttempted = resolved.state.writeAttempted;
     summary.keyWriteSucceeded = resolved.state.writeSucceeded;
     if (resolved.state.writeError !== null) summary.keyWriteError = resolved.state.writeError;
-    // Tri-state: an item that appeared without our write is not ours to claim.
+    const writtenHex = resolved.state.writtenHex;
+    const writtenKeyId =
+      typeof writtenHex === "string" && /^[0-9a-f]{64}$/i.test(writtenHex)
+        ? deriveKeyId(Buffer.from(writtenHex, "hex"))
+        : null;
+    // Tri-state: a write of ours only counts if the stored key is the one we
+    // wrote; a concurrent creator that won the read-back is not ours to claim.
     summary.createdProductionKey = keyCreationAttribution({
       existedBefore: resolved.state.existedBefore,
       writeAttempted: resolved.state.writeAttempted,
       writeSucceeded: resolved.state.writeSucceeded,
+      writtenKeyId,
+      currentKeyId: summary.keyId,
     });
     // Read the item back in this same process: a write we cannot read back is
     // not custody evidence.

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 const probes = (await import("../scripts/diagnostics/lib/keychain-probes.mjs")) as unknown as {
   makeRecordingProbe: (
     probe: { read: () => string | null; write: (hexKey: string) => void },
-    options?: { allowCreate?: boolean },
+    options?: { allowCreate?: boolean; beforeWrite?: (() => void) | null },
   ) => {
     probe: { read: () => string | null; write: (hexKey: string) => void };
     state: {
@@ -13,6 +13,7 @@ const probes = (await import("../scripts/diagnostics/lib/keychain-probes.mjs")) 
       writeAttempted: boolean;
       writeSucceeded: boolean;
       writeError: string | null;
+      writtenHex: string | null;
     };
   };
   makeReadOnlyProbe: (probe: { read: () => string | null; write: (hexKey: string) => void }) => {
@@ -23,6 +24,8 @@ const probes = (await import("../scripts/diagnostics/lib/keychain-probes.mjs")) 
     existedBefore: boolean | null;
     writeAttempted: boolean;
     writeSucceeded: boolean;
+    writtenKeyId?: string | null;
+    currentKeyId?: string | null;
   }) => boolean | null;
 };
 
@@ -108,6 +111,44 @@ describe("makeRecordingProbe", () => {
     expect(() => probe.read()).toThrow(/locked/);
     expect(state.readFailed).toBe(true);
   });
+
+  it("runs beforeWrite before the item actually exists", () => {
+    const order: string[] = [];
+    const fake = {
+      read: () => null,
+      write: () => {
+        order.push("write");
+      },
+    };
+    const { probe } = probes.makeRecordingProbe(fake, {
+      allowCreate: true,
+      beforeWrite: () => order.push("warn"),
+    });
+    probe.read();
+    probe.write("aa");
+    expect(order).toEqual(["warn", "write"]);
+  });
+
+  it("does not call beforeWrite when nothing is written", () => {
+    let warned = 0;
+    const fake = fakeProbe("aa");
+    const { probe } = probes.makeRecordingProbe(fake.probe, {
+      allowCreate: true,
+      beforeWrite: () => {
+        warned += 1;
+      },
+    });
+    probe.read();
+    expect(warned).toBe(0);
+  });
+
+  it("keeps the written hex in memory for later comparison", () => {
+    const fake = fakeProbe(null);
+    const { probe, state } = probes.makeRecordingProbe(fake.probe, { allowCreate: true });
+    probe.read();
+    probe.write("aa");
+    expect(state.writtenHex).toBe("aa");
+  });
 });
 
 describe("makeReadOnlyProbe", () => {
@@ -126,33 +167,75 @@ describe("makeReadOnlyProbe", () => {
 });
 
 describe("keyCreationAttribution", () => {
-  it("is true only when our write succeeded", () => {
+  it("is true when our write succeeded and the stored key is ours", () => {
+    expect(
+      probes.keyCreationAttribution({
+        existedBefore: false,
+        writeAttempted: true,
+        writeSucceeded: true,
+        writtenKeyId: "aaaa",
+        currentKeyId: "aaaa",
+      }),
+    ).toBe(true);
+  });
+
+  it("is null when we wrote but a concurrent creator won the read-back", () => {
+    expect(
+      probes.keyCreationAttribution({
+        existedBefore: false,
+        writeAttempted: true,
+        writeSucceeded: true,
+        writtenKeyId: "aaaa",
+        currentKeyId: "bbbb",
+      }),
+    ).toBe(null);
+  });
+
+  it("is null when the written and current key ids are unknown", () => {
     expect(probes.keyCreationAttribution({ existedBefore: false, writeAttempted: true, writeSucceeded: true })).toBe(
-      true,
+      null,
     );
   });
 
   it("is false when the item existed and nothing was written", () => {
-    expect(probes.keyCreationAttribution({ existedBefore: true, writeAttempted: false, writeSucceeded: false })).toBe(
-      false,
-    );
+    expect(
+      probes.keyCreationAttribution({
+        existedBefore: true,
+        writeAttempted: false,
+        writeSucceeded: false,
+      }),
+    ).toBe(false);
   });
 
   it("is null when the item appeared without our write", () => {
-    expect(probes.keyCreationAttribution({ existedBefore: false, writeAttempted: false, writeSucceeded: false })).toBe(
-      null,
-    );
+    expect(
+      probes.keyCreationAttribution({
+        existedBefore: false,
+        writeAttempted: false,
+        writeSucceeded: false,
+      }),
+    ).toBe(null);
   });
 
   it("is null when a write was attempted and failed", () => {
-    expect(probes.keyCreationAttribution({ existedBefore: false, writeAttempted: true, writeSucceeded: false })).toBe(
-      null,
-    );
+    expect(
+      probes.keyCreationAttribution({
+        existedBefore: false,
+        writeAttempted: true,
+        writeSucceeded: false,
+        writtenKeyId: "aaaa",
+        currentKeyId: "aaaa",
+      }),
+    ).toBe(null);
   });
 
   it("is null when the first read failed", () => {
-    expect(probes.keyCreationAttribution({ existedBefore: null, writeAttempted: false, writeSucceeded: false })).toBe(
-      null,
-    );
+    expect(
+      probes.keyCreationAttribution({
+        existedBefore: null,
+        writeAttempted: false,
+        writeSucceeded: false,
+      }),
+    ).toBe(null);
   });
 });

@@ -8,6 +8,7 @@ All notable changes are listed here.
 
 - A `custom_rules` pattern that does not compile now fails the config load, naming the rule's index and `description`. Before, the rule was skipped with one stderr line and the scan still reported `safe: true`. ([#33](https://github.com/jwcrystal/leakshield/issues/33))
 - `leakshield --doctor` lists custom rules skipped by the ReDoS timing check as a `custom-rules` warning. The check is a heuristic, not a guarantee; the README now says so. (#33)
+- The unresolved-placeholder refusal now states that the tool did not run, asks for the arguments to be rebuilt from current references, and says plainly that rereading does not validate an old placeholder. If the same call is refused again, the agent is told to stop retrying and ask the user. The message stays content-free. ([#35](https://github.com/jwcrystal/leakshield/issues/35))
 
 ## 0.1.1 — 2026-10-19
 

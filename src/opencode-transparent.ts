@@ -87,7 +87,7 @@ const UNSUPPORTED_ROUTE_ERROR =
 const TOOL_REFUSAL_ERROR =
   "LeakShield blocked this tool call because its arguments could not be restored safely. Re-read the file and try again.";
 const TOOL_UNKNOWN_MAPPING_ERROR =
-  "LeakShield blocked this tool call because a placeholder has no mapping in this session. Re-read the file, then try again.";
+  "LeakShield blocked this tool call before execution: a placeholder has no mapping in this session. The tool did not run. Reread the source and rebuild the affected arguments from current references; rereading does not make an old placeholder valid. If it is refused again, stop retrying and ask the user.";
 const TOOL_RESTORE_LIMIT_ERROR =
   "LeakShield blocked this tool call because its arguments are too large to restore safely. Use smaller arguments and try again.";
 const TOOL_SHELL_CONTEXT_ERROR =

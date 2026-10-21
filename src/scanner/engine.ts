@@ -1,6 +1,7 @@
 import type { GuardConfig, Finding, ScanResult, RedactResult, Rule } from "../types.js";
 import { BUILTIN_RULES } from "../rules/builtin.js";
 import { buildDynamicRules } from "../rules/dynamic.js";
+import { containsAddress, parseCidrList } from "./cidr.js";
 import { redact, getLineCol, getIgnoredLines } from "./utils.js";
 import { t } from "../i18n/index.js";
 import * as encoding from "./encoding.js";
@@ -25,7 +26,16 @@ function getRules(config: GuardConfig): Rule[] {
   const activeBuiltins = BUILTIN_RULES.filter(
     (rule) => (rule.id !== undefined && rule.id in overrides ? overrides[rule.id] : !rule.optIn),
   );
-  return [...activeBuiltins, ...dynamic];
+  // The private-range rule is the only builtin whose verdict depends on
+  // configuration. Bind the configured networks here so the shared rule object
+  // stays constant and an empty list still means the documented defaults.
+  const privateNetworks = parseCidrList(config.settings.private_cidrs);
+  const configuredBuiltins = activeBuiltins.map((rule) =>
+    rule.id === "private-ipv4"
+      ? { ...rule, validate: (match: string) => containsAddress(privateNetworks, match) }
+      : rule,
+  );
+  return [...configuredBuiltins, ...dynamic];
 }
 
 function hasMatchingRange(findings: readonly Finding[], index: number, length: number): boolean {

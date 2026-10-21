@@ -7,6 +7,7 @@ All notable changes are listed here.
 ### Added
 
 - `url-userinfo` reports the `user:password@` span of an authenticated `scheme://` URL as a HIGH SECRET finding. Only the userinfo is masked; the scheme and host stay readable, and the span is no longer mislabelled as an email address. ([#34](https://github.com/jwcrystal/leakshield/issues/34))
+- `private-ipv4` reports RFC 1918, CGNAT and link-local addresses as `PII_IP`. It is opt-in (`rule_overrides["private-ipv4"]: true`) because address literals also match version numbers and timestamps. `settings.private_cidrs` narrows the rule to an organisation's own networks; an entry that does not parse fails the config load. ([#31](https://github.com/jwcrystal/leakshield/issues/31))
 
 ### Fixed
 

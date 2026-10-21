@@ -11,6 +11,7 @@ All notable changes are listed here.
 
 ### Fixed
 
+- A dotted run longer than four octets is now reported whole (`10.1.2.3.4` masks the whole run), so an address embedded in it is no longer left unmasked. Before, the pattern consumed the first four groups, the public `1.2.3.4` suffix escaped detection, and transparent mode refused the whole request with `residual_sensitive_content` once the same address appeared elsewhere. ([#40](https://github.com/jwcrystal/leakshield/issues/40))
 - An SSH Git remote (`user@host:path`, `ssh://user@host/…`, `git+ssh://…`) is no longer reported as `PII_EMAIL`. A public repository host is no longer pseudonymized for no privacy gain, and the password half of a remote URL is no longer classified as personal data. Configured private domains and path keywords still apply inside remote URLs. (#34)
 
 ### Changed

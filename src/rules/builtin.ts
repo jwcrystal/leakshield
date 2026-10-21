@@ -1,8 +1,18 @@
 import type { Rule } from "../types.js";
-import { containsAddress, parseCidrList } from "../scanner/cidr.js";
+import { containsAddressInRun, ipv4Windows, parseCidrList } from "../scanner/cidr.js";
 
 /** Networks used when a rule is evaluated without a loaded config. */
 const DEFAULT_PRIVATE_NETWORKS = parseCidrList(undefined);
+
+/**
+ * A dotted run of four or more octets.
+ *
+ * Four groups is an address. A longer run is matched whole on purpose: with
+ * the old four-group pattern, `10.1.2.3.4` yielded `10.1.2.3` and the public
+ * `1.2.3.4` inside it was never reported — which the masker then caught as
+ * residual plaintext and turned into a refusal for the whole request.
+ */
+const IPV4_DOTTED_RUN = /\b[0-9]{1,3}(?:\.[0-9]{1,3}){3,}\b/g;
 import { classifyTransportSpan } from "../scanner/remotes.js";
 
 /** Luhn checksum（ISO/IEC 7812-1）；信用卡號形狀相符後必須通過才命中。 */
@@ -41,6 +51,10 @@ function ibanValid(raw: string): boolean {
 /** 僅公共可路由 IPv4 視為敏感；私有／回環／鏈路本地／CGNAT／保留段不命中（config 常見值）。 */
 function publicIPv4(raw: string): boolean {
   const octets = raw.split(".").map(Number);
+  // A run longer than four octets is reported whole when any window is a
+  // public address, so a suffix like the 1.2.3.4 in 10.1.2.3.4 is never left
+  // unmasked.
+  if (octets.length > 4) return ipv4Windows(raw).some((window) => publicIPv4(window));
   if (octets.length !== 4 || octets.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
   const [a, b] = octets;
   if (a === 0 || a === 10 || a === 127) return false;
@@ -292,7 +306,7 @@ export const BUILTIN_RULES: Rule[] = [
     severity: "MEDIUM",
     description: "公共 IPv4 位址",
     // 私有／回環／CGNAT／保留段由 validate 排除，避免 config 常數誤報
-    pattern: /\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b/g,
+    pattern: IPV4_DOTTED_RUN,
     validate: publicIPv4,
   },
   {
@@ -304,9 +318,9 @@ export const BUILTIN_RULES: Rule[] = [
     // 要開啟：settings.rule_overrides["private-ipv4"]: true。預設涵蓋
     // RFC 1918、CGNAT 與 link-local；settings.private_cidrs 可縮小範圍。
     optIn: true,
-    pattern: /\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b/g,
+    pattern: IPV4_DOTTED_RUN,
     // getRules 會以 settings.private_cidrs 換掉這個 validator。
-    validate: (match) => containsAddress(DEFAULT_PRIVATE_NETWORKS, match),
+    validate: (match) => containsAddressInRun(DEFAULT_PRIVATE_NETWORKS, match),
   },
   {
     id: "url",

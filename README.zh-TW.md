@@ -51,7 +51,7 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 | 台灣身份證字號 | 格式驗證 | 🔴 HIGH |
 | 信用卡號 | 13–19 位數字，需通過 Luhn 檢查碼 | 🔴 HIGH |
 | IBAN | 緊湊或四字一組格式，需通過 mod-97 檢查碼 | 🔴 HIGH |
-| 公共 IPv4 位址 | 排除私有／回環／CGNAT／保留段 | 🟡 MEDIUM |
+| 公共 IPv4 位址 | 排除私有／回環／CGNAT／保留段；超過四段的點分數字整段回報 | 🟡 MEDIUM |
 | 私有 IPv4／VPN 網段 | **Opt-in** —— 預設關閉（`rule_overrides: { "private-ipv4": true }` 開啟）；網段由 `settings.private_cidrs` 指定，預設 RFC 1918 + CGNAT + link-local | 🟡 MEDIUM |
 | Email 地址 | 所有 email 格式 | 🟡 MEDIUM |
 | URL 內嵌憑證 | `scheme://user:password@host` —— 只遮罩 userinfo 這一段 | 🔴 HIGH |
@@ -468,7 +468,7 @@ Doctor 是在 host 之外執行的安裝層檢查，看不到執行中的 sessio
 
 LeakShield 保護送往模型的對話內容：prompt、重播的歷史、工具輸出，以及（transparent 模式下）可解析其結構的 provider 請求 body。它**不是**工具對外連線的防火牆：被允許的本機工具仍可透過 `curl`、遠端 MCP server 或任何其他管道把原文傳出去。要管控工具的目的地，需要此 plugin 之外的權限層。
 
-偵測也有已知缺口：街道／郵遞地址、日期、IPv6，以及關鍵字清單之外或短於 8 字元的一般賦值都不會被偵測。信用卡與 IBAN 只有在檢查碼驗證通過時才會命中；IP 偵測只涵蓋公開 IPv4；URL 偵測存在但需手動開啟，見[偵測範圍](#偵測範圍)。
+偵測也有已知缺口：街道／郵遞地址、日期、IPv6，以及關鍵字清單之外或短於 8 字元的一般賦值都不會被偵測。信用卡與 IBAN 只有在檢查碼驗證通過時才會命中；IP 偵測只涵蓋公開 IPv4（超過四段的點分數字會整段回報，避免內嵌位址漏遮；`2026.10.21.14.32.59` 這類點分日期也會回報）；URL 偵測存在但需手動開啟，見[偵測範圍](#偵測範圍)。
 
 ## 設定檔
 

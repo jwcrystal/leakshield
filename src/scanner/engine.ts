@@ -1,7 +1,7 @@
 import type { GuardConfig, Finding, ScanResult, RedactResult, Rule } from "../types.js";
 import { BUILTIN_RULES } from "../rules/builtin.js";
 import { buildDynamicRules } from "../rules/dynamic.js";
-import { containsAddress, parseCidrList } from "./cidr.js";
+import { containsAddressInRun, parseCidrList } from "./cidr.js";
 import { redact, getLineCol, getIgnoredLines } from "./utils.js";
 import { t } from "../i18n/index.js";
 import * as encoding from "./encoding.js";
@@ -32,7 +32,7 @@ function getRules(config: GuardConfig): Rule[] {
   const privateNetworks = parseCidrList(config.settings.private_cidrs);
   const configuredBuiltins = activeBuiltins.map((rule) =>
     rule.id === "private-ipv4"
-      ? { ...rule, validate: (match: string) => containsAddress(privateNetworks, match) }
+      ? { ...rule, validate: (match: string) => containsAddressInRun(privateNetworks, match) }
       : rule,
   );
   return [...configuredBuiltins, ...dynamic];

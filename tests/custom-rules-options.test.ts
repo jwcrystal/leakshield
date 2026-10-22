@@ -5,7 +5,7 @@ import path from "node:path";
 import { GuardConfigSchema, loadConfigWithFingerprint } from "../src/config/loader.js";
 import { runDoctor, type DoctorDeps } from "../src/doctor.js";
 import { allowlistSuppressions, resetAllowlistSuppressionsForTests } from "../src/scanner/allowlist.js";
-import { scanText } from "../src/scanner/engine.js";
+import { scanText, redactText } from "../src/scanner/engine.js";
 import { customRuleBoundaries, customRuleFlags, customRulePattern, customRuleSource } from "../src/rules/dynamic.js";
 import type { GuardConfig } from "../src/types.js";
 
@@ -94,6 +94,26 @@ describe("custom rule word boundaries", () => {
     });
   });
 
+  it("treats an escaped edge as hidden, so a non-word ending still matches", () => {
+    // `\D` is not a literal "D": appending \b would require a word character
+    // after it and drop `KEY!`.
+    expect(customRuleSource({ description: "x", pattern: "KEY\\D", word_boundary: true })).toBe("\\bKEY\\D");
+    expect(customRuleBoundaries({ pattern: "KEY\\D", word_boundary: true })).toEqual({ lead: "added", trail: "hidden" });
+    const config = parse({
+      nda_keywords: [],
+      custom_rules: [{ description: "x", pattern: "KEY\\D", word_boundary: true }],
+    });
+    expect(scan("KEY!", config)).toHaveLength(1);
+  });
+
+  it("does not wrap an escaped CJK ending", () => {
+    const pattern = "\\u6a5f\\u5bc6";
+    expect(customRuleSource({ description: "x", pattern, word_boundary: true })).toBe(pattern);
+    expect(customRuleBoundaries({ pattern, word_boundary: true })).toEqual({ lead: "hidden", trail: "hidden" });
+    const config = parse({ nda_keywords: [], custom_rules: [{ description: "x", pattern, word_boundary: true }] });
+    expect(scan("這是機密文件", config)).toHaveLength(1);
+  });
+
   it("respects a boundary the pattern already writes", () => {
     expect(customRuleSource({ description: "x", pattern: "\\bEMP-\\d{6}\\b", word_boundary: true })).toBe(
       "\\bEMP-\\d{6}\\b",
@@ -145,6 +165,19 @@ describe("allowlists", () => {
     expect(findings).toHaveLength(1);
   });
 
+  it("does not let a suppressed short match hide another rule's longer match", () => {
+    resetAllowlistSuppressionsForTests();
+    const config = parse({
+      nda_keywords: [],
+      custom_rules: [
+        { description: "prefix", pattern: "PUBLIC", allow: ["PUBLIC"] },
+        { description: "real", pattern: "PUBLIC-[A-Z]{4}" },
+      ],
+    });
+    const findings = scan("PUBLIC-REAL", config);
+    expect(findings.map((finding) => finding.match_text)).toEqual(["PUBLIC-REAL"]);
+  });
+
   it("caps the number of entries", () => {
     const many = Array.from({ length: 33 }, (_, index) => `value-${index}`);
     expect(() => parse({ custom_rules: [{ description: "x", pattern: "a", allow: many }] })).toThrow(/allow/);
@@ -155,6 +188,21 @@ describe("allowlists", () => {
   it("caps the length of an entry", () => {
     const long = "x".repeat(201);
     expect(() => parse({ settings: { allowlist: [long] } })).toThrow(/allowlist/);
+  });
+
+  it("leaves an allowlisted value intact when redacting", () => {
+    resetAllowlistSuppressionsForTests();
+    const config = parse({ settings: { allowlist: ["user@example.com"] } });
+    const result = redactText("contact user@example.com", config);
+    expect(result.redacted).toBe("contact user@example.com");
+    expect(result.total_findings).toBe(0);
+  });
+
+  it("still redacts a different value", () => {
+    const config = parse({ settings: { allowlist: ["user@example.com"] } });
+    const result = redactText("contact other@example.com", config);
+    expect(result.redacted).toContain("[REDACTED_");
+    expect(result.redacted).not.toContain("other@example.com");
   });
 });
 
@@ -173,7 +221,10 @@ describe("allowlist fingerprint", () => {
   });
 });
 
-function makeDoctorFixture(guardConfig: GuardConfig, smokeScan: DoctorDeps["smokeScan"]) {
+function makeDoctorFixture(
+  guardConfig: GuardConfig,
+  options: { smokeScan?: DoctorDeps["smokeScan"]; probeScan?: DoctorDeps["probeScan"] } = {},
+) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sg-doctor-allow-"));
   const dist = path.join(tmp, "leakshield", "dist");
   fs.mkdirSync(dist, { recursive: true });
@@ -206,48 +257,61 @@ function makeDoctorFixture(guardConfig: GuardConfig, smokeScan: DoctorDeps["smok
       }
     },
     loadGuardConfig: () => guardConfig,
-    smokeScan,
+    smokeScan: options.smokeScan ?? (() => ({ findings: 1 })),
+    ...(options.probeScan ? { probeScan: options.probeScan } : {}),
     cwd: tmp,
     home: tmp,
   };
   return deps;
 }
 
-const everythingFinds = (): { findings: number } => ({ findings: 1 });
 
 describe("doctor allowlist reporting", () => {
-  it("exercises every entry and reports the count", async () => {
+  it("uses the severity-agnostic probe, so a working MEDIUM entry is not called dead", async () => {
+    // The email finding is MEDIUM; smokeScan counts HIGH only.
     const config = parse({ settings: { allowlist: ["user@example.com"] } });
-    const deps = makeDoctorFixture(config, (text, active) => ({
-      findings: text.startsWith("Smoke test only") ? 1 : active.settings.allowlist?.includes(text) ? 0 : 1,
-    }));
-    const report = await runDoctor(deps);
-    const check = report.checks.find((entry) => entry.id === "allowlist");
+    const check = (await runDoctor(makeDoctorFixture(config))).checks.find((entry) => entry.id === "allowlist");
     expect(check?.state).toBe("ok");
     expect(check?.detail).toContain("1 allowlist entry");
     expect(check?.detail).toContain("exact match only");
   });
 
-  it("warns about an entry that suppresses nothing", async () => {
-    const config = parse({ settings: { allowlist: ["nobody-matches-me"] } });
-    const deps = makeDoctorFixture(config, (text) => ({ findings: text.startsWith("Smoke test only") ? 1 : 0 }));
-    const check = (await runDoctor(deps)).checks.find((entry) => entry.id === "allowlist");
-    expect(check?.state).toBe("warn");
-    expect(check?.detail).toContain("match nothing");
+  it("judges a per-rule entry against its own rule, not against a longer match elsewhere", async () => {
+    resetAllowlistSuppressionsForTests();
+    const config = parse({
+      nda_keywords: [],
+      custom_rules: [
+        { description: "prefix", pattern: "PUBLIC", allow: ["PUBLIC"] },
+        { description: "real", pattern: "PUBLIC-[A-Z]{4}" },
+      ],
+    });
+    const check = (await runDoctor(makeDoctorFixture(config))).checks.find((entry) => entry.id === "allowlist");
+    expect(check?.state).toBe("ok");
   });
 
-  it("fails when an allowlisted value still produces a finding", async () => {
+  it("does not call a context-dependent entry dead", async () => {
+    const config = parse({ settings: { allowlist: ["nobody-matches-me"] } });
+    const check = (await runDoctor(makeDoctorFixture(config))).checks.find((entry) => entry.id === "allowlist");
+    expect(check?.state).toBe("warn");
+    expect(check?.detail).toContain("could not be exercised");
+  });
+
+  it("fails, and reports BROKEN, when an allowlisted literal still produces a finding", async () => {
     const config = parse({ settings: { allowlist: ["user@example.com"] } });
-    const deps = makeDoctorFixture(config, everythingFinds);
-    const check = (await runDoctor(deps)).checks.find((entry) => entry.id === "allowlist");
+    const deps = makeDoctorFixture(config, {
+      probeScan: () => ({ findings: 1, exactMatches: 1 }),
+    });
+    const report = await runDoctor(deps);
+    const check = report.checks.find((entry) => entry.id === "allowlist");
     expect(check?.state).toBe("fail");
+    expect(report.status).toBe("BROKEN");
   });
 
   it("warns that path scoping is accepted but not implemented", async () => {
     const config = parse({
       custom_rules: [{ description: "x", pattern: "MYCO", path: ["src/**"] }],
     });
-    const check = (await runDoctor(makeDoctorFixture(config, everythingFinds))).checks.find(
+    const check = (await runDoctor(makeDoctorFixture(config))).checks.find(
       (entry) => entry.id === "custom-rule-paths",
     );
     expect(check?.state).toBe("warn");
@@ -258,7 +322,7 @@ describe("doctor allowlist reporting", () => {
     const config = parse({
       custom_rules: [{ description: "employee id", pattern: "EMP-\\d{6}", word_boundary: true }],
     });
-    const check = (await runDoctor(makeDoctorFixture(config, everythingFinds))).checks.find(
+    const check = (await runDoctor(makeDoctorFixture(config))).checks.find(
       (entry) => entry.id === "custom-rule-boundaries",
     );
     expect(check?.state).toBe("warn");

@@ -60,6 +60,10 @@ export interface DoctorDeps {
   openStoreProbe?(storePath: string, ttlDays: number): { sessions: number } | { error: string };
   loadGuardConfig(overridePath: string | undefined, workspaceRoot: string): GuardConfig;
   smokeScan(text: string, config: GuardConfig): { findings: number };
+  /** Severity-agnostic scan for the allowlist diagnostics. Defaults to the real
+   * scanner; `smokeScan` is a HIGH-only credential probe and would call a
+   * working MEDIUM/LOW allowlist entry dead. */
+  probeScan?(text: string, config: GuardConfig): { findings: number; exactMatches: number };
   cwd: string;
   home: string;
   xdgConfigHome?: string;
@@ -105,6 +109,13 @@ export function createDoctorDeps(): DoctorDeps {
     smokeScan(text, config) {
       const result = scanText(text, config);
       return { findings: result.findings.filter((f) => f.severity === "HIGH").length };
+    },
+    probeScan(text, config) {
+      const result = scanText(text, config);
+      return {
+        findings: result.findings.length,
+        exactMatches: result.findings.filter((finding) => finding.match_text === text).length,
+      };
     },
     cwd: process.cwd(),
     home: os.homedir(),
@@ -439,44 +450,86 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   }
 
   // Allowlists (issue #32) are an exact-match bypass, so they are surfaced
-  // rather than silent: how many entries exist, that each one actually
-  // suppresses the literal it names, and how many suppressions the scanner in
-  // this process has counted. Entries that match nothing are dead weight with a
-  // bypass shape, so they warn.
+  // rather than silent: which entries exist, whether each still suppresses the
+  // literal it names, and how many suppressions this process counted.
   const globalAllow = guardConfig.settings?.allowlist ?? [];
   const customRules = guardConfig.custom_rules ?? [];
   const ruleAllow = customRules.flatMap((rule) => rule.allow ?? []);
-  const allowEntries = [...new Set([...globalAllow, ...ruleAllow])];
-  if (allowEntries.length > 0) {
-    const sample = allowEntries.slice(0, 8);
-    const withoutAllow = {
-      ...guardConfig,
-      settings: { ...(guardConfig.settings ?? {}), allowlist: [] },
-      custom_rules: customRules.map((rule) => ({ ...rule, allow: undefined })),
-    };
-    const broken = sample.filter((value) => deps.smokeScan(value, guardConfig).findings > 0);
-    const dead = sample.filter((value) => deps.smokeScan(value, withoutAllow).findings === 0);
-    const entryCount = allowEntries.length === 1 ? "1 allowlist entry" : `${allowEntries.length} allowlist entries`;
-    const exercised = sample.length === allowEntries.length ? "all" : `${sample.length} of them`;
-    if (broken.length > 0) {
+  const entries: { value: string; ruleIndex: number }[] = [];
+  const seenEntry = new Set<string>();
+  for (const value of globalAllow) {
+    const key = `global\u0000${value}`;
+    if (seenEntry.has(key)) continue;
+    seenEntry.add(key);
+    entries.push({ value, ruleIndex: -1 });
+  }
+  customRules.forEach((rule, ruleIndex) => {
+    for (const value of rule.allow ?? []) {
+      const key = `rule${ruleIndex}\u0000${value}`;
+      if (seenEntry.has(key)) continue;
+      seenEntry.add(key);
+      entries.push({ value, ruleIndex });
+    }
+  });
+  if (entries.length > 0) {
+    const scan =
+      deps.probeScan ??
+      ((text, config) => {
+        const result = scanText(text, config);
+        return {
+          findings: result.findings.length,
+          exactMatches: result.findings.filter((finding) => finding.match_text === text).length,
+        };
+      });
+    const withoutAllowlists = (config: GuardConfig): GuardConfig => ({
+      ...config,
+      settings: { ...(config.settings ?? {}), allowlist: [] },
+      custom_rules: (config.custom_rules ?? []).map((rule) => ({ ...rule, allow: undefined })),
+    });
+    const sample = entries.slice(0, 8);
+    let broken = 0;
+    let exercised = 0;
+    let unverified = 0;
+    for (const entry of sample) {
+      // A per-rule entry is judged against its own rule only: another rule
+      // matching a longer span is correct, not a broken filter. A global entry
+      // keeps every rule.
+      const scope: GuardConfig =
+        entry.ruleIndex < 0
+          ? guardConfig
+          : {
+              ...guardConfig,
+              settings: { ...(guardConfig.settings ?? {}), allowlist: [] },
+              custom_rules: [customRules[entry.ruleIndex]!],
+            };
+      const matches = scan(entry.value, withoutAllowlists(scope)).findings > 0;
+      const withAllow = scan(entry.value, scope);
+      if (withAllow.exactMatches > 0) broken += 1;
+      else if (matches) exercised += 1;
+      else unverified += 1;
+    }
+    const entryCount = entries.length === 1 ? "1 allowlist entry" : `${entries.length} allowlist entries`;
+    const coverage = sample.length === entries.length ? "all" : `${sample.length} of them`;
+    const counter = `${allowlistSuppressions()} suppression(s) counted in this process`;
+    if (broken > 0) {
       checks.push({
         id: "allowlist",
         state: "fail",
-        detail: `${broken.length} of the ${entryCount} still produce findings (${broken.map((value) => JSON.stringify(value)).join(", ")}). The exact-match filter is not working, so those values are not actually quiet.`,
+        detail: `${broken} allowlisted literal(s) still produce a finding under their own scope. The exact-match filter is not working, so those values are not actually quiet. ${entryCount} total; ${counter}.`,
         fix: "Do not rely on those entries. Re-run the scanner with `--text` on the exact value and report it: an allowlisted literal must produce no finding.",
       });
-    } else if (dead.length > 0) {
+    } else if (unverified > 0) {
       checks.push({
         id: "allowlist",
         state: "warn",
-        detail: `${entryCount} (global ${globalAllow.length}, per-rule ${ruleAllow.length}); ${dead.length} match nothing at all (${dead.map((value) => JSON.stringify(value)).join(", ")}). Every one is an exact-match bypass; an entry that suppresses nothing is only risk.`,
-        fix: "Remove allowlist entries that no longer match anything.",
+        detail: `${entryCount} (global ${globalAllow.length}, per-rule ${ruleAllow.length}), exact match only; ${exercised} suppress when exercised, ${unverified} could not be exercised as a bare literal (a context-dependent pattern is judged only in place). ${coverage} exercised; ${counter}.`,
+        fix: "Review the entries that doctor could not exercise; it cannot prove a context-dependent entry, and an entry that no longer matches anything is only risk.",
       });
     } else {
       checks.push({
         id: "allowlist",
         state: "ok",
-        detail: `${entryCount} (global ${globalAllow.length}, per-rule ${ruleAllow.length}), exact match only; ${exercised} exercised, all suppress; ${allowlistSuppressions()} suppression(s) counted in this process.`,
+        detail: `${entryCount} (global ${globalAllow.length}, per-rule ${ruleAllow.length}), exact match only; ${coverage} exercised, all suppress; ${counter}.`,
       });
     }
   }
@@ -538,6 +591,12 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       state: "warn",
       detail: `${options.wireProtection === false ? "transparent hook-only: content hooks protect their snapshots; no outbound HTTP/WS/SDK admission, transport metadata checks, injected-fetch requirement or provider transport transform. Final bodies/frames are not inspected or remasked. Unknown routes, including /alpha/generate, are not gated. Optional incoming HTTP/WS hooks restore known display protocols after successful scoped host preparation for the same session/kind/model; unsupported or unverified replies remain literal. Tool safety remains. Content added after hooks may be unmasked, including late-added attachments." : "transparent mode protects three HTTP protocols by wire shape (Chat Completions, Anthropic Messages, Responses) and native Responses-family WS frames; unknown outbound dialects and intercepted routes, including /alpha/generate, are refused (fail-closed), not passed. AI SDK providers must honor OpenCode's injected HTTP fetch; missing or unsafe fetch options refuse. Bypass transports are outside coverage, not a proven blocked transport."} Both levels stop rewriting on reply-side SG failures and keep literal originals; provider errors and cancellation still propagate. Content-hook masking failures still refuse the affected model call with a safe reason/stage, never silently send raw content. Attachments policy at content hooks: ${options.attachments === "allow" ? "ALLOW — attachments pass through unscanned with a visible notice (you vouch for their content)" : "block — replaced with an omission notice"}. Complete original-history/restart restoration is not verified.`,
     });
+  }
+
+  // A failed check must not still read as PROTECTED: the allowlist failure is a
+  // real "do not trust this install" signal, like a missing smoke canary.
+  if (checks.some((check) => check.state === "fail")) {
+    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
   }
 
   checks.push({

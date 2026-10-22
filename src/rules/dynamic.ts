@@ -60,19 +60,97 @@ function asciiWordChar(ch: string | undefined): boolean {
  * boundary can be placed there safely, so none is added and `--doctor` says so. */
 const HIDDEN_EDGE = new Set(["(", ")", "[", "]", "{", "}", ".", "*", "+", "?", "|", "\\"]);
 
-const NO_EDGE = { boundary: "", hidden: false } as const;
-
-function edgeBoundary(source: string, side: "lead" | "trail"): { boundary: string; hidden: boolean } {
-  const prefix = side === "lead";
-  if (prefix ? source.startsWith("\\b") : source.endsWith("\\b")) return NO_EDGE;
-  if (prefix ? source.startsWith("^") : source.endsWith("$")) return NO_EDGE;
-  const ch = prefix ? source[0] : source[source.length - 1];
-  if (asciiWordChar(ch)) return { boundary: "\\b", hidden: false };
-  // Non-ASCII edge (CJK and friends): no boundary, for the same reason as
-  // keywordPattern — `\b` never holds between two non-word characters.
-  if (ch !== undefined && HIDDEN_EDGE.has(ch)) return { boundary: "", hidden: true };
-  return NO_EDGE;
+/** End index (exclusive) of the escape sequence starting at `start`. */
+function escapeEnd(source: string, start: number): number {
+  const next = source[start + 1];
+  if (next === undefined) return start + 1;
+  if (next === "x") return Math.min(source.length, start + 4);
+  if (next === "u" || next === "p" || next === "P" || next === "k") {
+    if (source[start + 2] === "{" || source[start + 2] === "<") {
+      const close = source.indexOf(source[start + 2] === "{" ? "}" : ">", start + 3);
+      return close === -1 ? source.length : close + 1;
+    }
+    return next === "u" ? Math.min(source.length, start + 6) : start + 2;
+  }
+  if (/[1-9]/.test(next)) {
+    let index = start + 1;
+    while (index < source.length && /[0-9]/.test(source[index] ?? "")) index += 1;
+    return index;
+  }
+  return Math.min(source.length, start + 2);
 }
+
+/** End index (exclusive) of a character class starting at `start`. */
+function classEnd(source: string, start: number): number {
+  let index = start + 1;
+  if (source[index] === "^") index += 1;
+  while (index < source.length) {
+    const ch = source[index];
+    if (ch === "\\") {
+      index = Math.max(escapeEnd(source, index), index + 1);
+      continue;
+    }
+    if (ch === "]") return index + 1;
+    index += 1;
+  }
+  return source.length;
+}
+
+/** First token of the pattern: one escape, one class, or one character. */
+function firstToken(source: string): string {
+  const ch = source[0];
+  if (ch === undefined) return "";
+  if (ch === "\\") return source.slice(0, escapeEnd(source, 0));
+  if (ch === "[") return source.slice(0, classEnd(source, 0));
+  return ch;
+}
+
+/** Last token of the pattern, walking past escapes and classes. */
+function lastToken(source: string): string {
+  let index = 0;
+  let start = 0;
+  while (index < source.length) {
+    start = index;
+    const ch = source[index];
+    if (ch === "\\") {
+      index = Math.max(escapeEnd(source, index), index + 1);
+      continue;
+    }
+    if (ch === "[") {
+      index = Math.max(classEnd(source, index), index + 1);
+      continue;
+    }
+    index += 1;
+  }
+  return source.slice(start);
+}
+
+type EdgeClass = "word" | "satisfied" | "hidden" | "none";
+
+/**
+ * What a boundary can do at this edge. Only a literal ASCII word character can
+ * take a `\b`. An escape is never assumed to end in a word character: `\D`,
+ * `\x21` or `\u5bc6` all end in something else, and appending `\b` would drop
+ * real matches (including the CJK case the acceptance criteria call out).
+ */
+function classifyEdge(token: string): EdgeClass {
+  if (token === "") return "none";
+  if (token === "\\b" || token === "^" || token === "$") return "satisfied";
+  if (token.startsWith("\\") || token.startsWith("[")) return "hidden";
+  if (token.length === 1) {
+    if (asciiWordChar(token)) return "word";
+    if (HIDDEN_EDGE.has(token)) return "hidden";
+    return "none";
+  }
+  return "hidden";
+}
+
+const EDGE_CLASS: Record<EdgeClass, "added" | "hidden" | "none"> = {
+  word: "added",
+  satisfied: "none",
+  hidden: "hidden",
+  none: "none",
+};
 
 /**
  * Which edges of a rule can actually take a boundary. `word_boundary` can only
@@ -85,11 +163,9 @@ export function customRuleBoundaries(rule: Pick<CustomRuleConfig, "pattern" | "w
   trail: "added" | "hidden" | "none";
 } {
   if (rule.word_boundary !== true) return { lead: "none", trail: "none" };
-  const lead = edgeBoundary(rule.pattern, "lead");
-  const trail = edgeBoundary(rule.pattern, "trail");
   return {
-    lead: lead.boundary === "\\b" ? "added" : lead.hidden ? "hidden" : "none",
-    trail: trail.boundary === "\\b" ? "added" : trail.hidden ? "hidden" : "none",
+    lead: EDGE_CLASS[classifyEdge(firstToken(rule.pattern))],
+    trail: EDGE_CLASS[classifyEdge(lastToken(rule.pattern))],
   };
 }
 
@@ -106,8 +182,8 @@ export function customRuleSource(rule: Pick<CustomRuleConfig, "pattern" | "word_
       `custom rule "${rule.description}": word_boundary cannot be applied to a top-level alternation; group it as (?:${rule.pattern})`,
     );
   }
-  const lead = edgeBoundary(rule.pattern, "lead").boundary;
-  const trail = edgeBoundary(rule.pattern, "trail").boundary;
+  const lead = classifyEdge(firstToken(rule.pattern)) === "word" ? "\\b" : "";
+  const trail = classifyEdge(lastToken(rule.pattern)) === "word" ? "\\b" : "";
   return lead + rule.pattern + trail;
 }
 

@@ -150,14 +150,16 @@ function collectRuleFindings(
       if (rule.validate !== undefined && !rule.validate(matchedText, { text, index: start })) continue;
       const key = `${rule.type}:${start}`;
       if (seen.has(key)) continue;
-      seen.add(key);
 
       const { line, col } = getLineCol(text, start);
       if (ignoredLines.has(line)) continue;
       if (isAllowlisted(matchedText, globalAllow, rule.allow)) {
         noteAllowlistSuppression();
+        // Do NOT reserve the dedupe key: another rule may match a longer span
+        // at the same offset, and suppressing the short one must not hide it.
         continue;
       }
+      seen.add(key);
 
       const preview = redact(matchedText, config.settings.preview_length);
 
@@ -376,6 +378,7 @@ export function redactText(
 
   const matches: MatchEntry[] = [];
   const seen = new Set<string>();
+  const globalAllow = allowSet(config.settings.allowlist);
 
   for (const rule of allRules) {
     rule.pattern.lastIndex = 0;
@@ -384,13 +387,20 @@ export function redactText(
       const offset = rule.skipPrefix ?? 0;
       const start = match.index + offset;
       const end = match.index + match[0].length;
-      if (rule.validate !== undefined && !rule.validate(match[0].slice(offset), { text: truncated, index: start })) continue;
+      const matchedText = match[0].slice(offset);
+      if (rule.validate !== undefined && !rule.validate(matchedText, { text: truncated, index: start })) continue;
       if (overlapsSpan(start, end, protectedSpans)) continue;
       const key = `${start}:${end - start}`;
       if (seen.has(key)) continue;
-      seen.add(key);
       const { line } = getLineCol(truncated, start);
       if (ignoredLines.has(line)) continue;
+      // An allowlisted literal is left as written, exactly as the scanner leaves
+      // it unreported; redacting it would contradict the bypass the user chose.
+      if (isAllowlisted(matchedText, globalAllow, rule.allow)) {
+        noteAllowlistSuppression();
+        continue;
+      }
+      seen.add(key);
       matches.push({ index: start, length: end - start, type: rule.type });
     }
   }
@@ -402,6 +412,11 @@ export function redactText(
       if (matches.some((entry) => entry.index === match.index && entry.length === match.length)) continue;
       const { line } = getLineCol(truncated, match.index);
       if (ignoredLines.has(line)) continue;
+      const matchedText = truncated.slice(match.index, match.index + match.length);
+      if (isAllowlisted(matchedText, globalAllow, undefined)) {
+        noteAllowlistSuppression();
+        continue;
+      }
       matches.push({ index: match.index, length: match.length, type: "ENV_SECRET" });
     }
   }

@@ -503,9 +503,10 @@ settings:
   Caps: 32 entries per rule, 64 globally, 200 characters each.
   **Allowlisting a live secret is a real bypass**: the value still leaves the
   machine unmasked, and LeakShield will report it as safe. Use it only for values
-  you have decided are not sensitive. Every entry is surfaced by `--doctor` (with
-  entries that match nothing flagged), and suppressions are counted rather than
-  silent.
+  you have decided are not sensitive. `--doctor` reports how many entries exist,
+  exercises up to eight of them, and says which ones it could not exercise (a
+  context-dependent pattern can only be judged in place). Suppressions are counted
+  rather than silent.
 - **`path`** — accepted and validated, but path scoping is **not implemented**: the
   scanner has no source path for prompts or tool output. These rules currently
   apply to every scanned text, and `--doctor` warns when `path` is set.

@@ -31,7 +31,7 @@ const CustomRuleSchema = z.object({
   severity: z.enum(["HIGH", "MEDIUM", "LOW"]).default("HIGH"),
   flags: z
     .string()
-    .max(5)
+    .max(6)
     .regex(CUSTOM_FLAG_CHARS, "flags must be a subset of gimsuy; g is always implied")
     .optional(),
   word_boundary: z.boolean().optional(),

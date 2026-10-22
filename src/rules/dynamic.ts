@@ -1,4 +1,4 @@
-import type { GuardConfig, Rule } from "../types.js";
+import type { CustomRuleConfig, GuardConfig, Rule } from "../types.js";
 
 // ReDoS heuristic: run the compiled regex once against a fixed input and
 // measure wall-clock time after exec() returns. This is a heuristic, not a
@@ -12,6 +12,117 @@ const REDOS_TEST_INPUT = "a".repeat(50) + "!";
 
 export type CustomPatternVerdict = "ok" | "invalid" | "redos-suspect";
 
+/**
+ * Is this pattern's top level an alternation (`a|b`, not `(?:a|b)`)? Boundaries
+ * cannot be attached safely to each branch from outside, and `\bfoo|bar\b`
+ * would silently mean something else, so `word_boundary` refuses it.
+ */
+function hasTopLevelAlternation(source: string): boolean {
+  let depth = 0;
+  let escaped = false;
+  let inClass = false;
+  for (const ch of source) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (inClass) {
+      if (ch === "]") inClass = false;
+      continue;
+    }
+    if (ch === "[") {
+      inClass = true;
+      continue;
+    }
+    if (ch === "(") {
+      depth += 1;
+      continue;
+    }
+    if (ch === ")") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (ch === "|" && depth === 0) return true;
+  }
+  return false;
+}
+
+/** The ASCII-word test `keywordPattern` uses for its boundaries. */
+function asciiWordChar(ch: string | undefined): boolean {
+  return ch !== undefined && /^[A-Za-z0-9_]$/.test(ch);
+}
+
+/** Characters that hide the real edge (group, class, quantifier, escape). No
+ * boundary can be placed there safely, so none is added and `--doctor` says so. */
+const HIDDEN_EDGE = new Set(["(", ")", "[", "]", "{", "}", ".", "*", "+", "?", "|", "\\"]);
+
+const NO_EDGE = { boundary: "", hidden: false } as const;
+
+function edgeBoundary(source: string, side: "lead" | "trail"): { boundary: string; hidden: boolean } {
+  const prefix = side === "lead";
+  if (prefix ? source.startsWith("\\b") : source.endsWith("\\b")) return NO_EDGE;
+  if (prefix ? source.startsWith("^") : source.endsWith("$")) return NO_EDGE;
+  const ch = prefix ? source[0] : source[source.length - 1];
+  if (asciiWordChar(ch)) return { boundary: "\\b", hidden: false };
+  // Non-ASCII edge (CJK and friends): no boundary, for the same reason as
+  // keywordPattern — `\b` never holds between two non-word characters.
+  if (ch !== undefined && HIDDEN_EDGE.has(ch)) return { boundary: "", hidden: true };
+  return NO_EDGE;
+}
+
+/**
+ * Which edges of a rule can actually take a boundary. `word_boundary` can only
+ * add `\b` where the edge is a literal ASCII word character; an edge that is a
+ * group, class, quantifier or escape is reported as hidden rather than guessed
+ * at, and `--doctor` warns so the rule does not look stricter than it is.
+ */
+export function customRuleBoundaries(rule: Pick<CustomRuleConfig, "pattern" | "word_boundary">): {
+  lead: "added" | "hidden" | "none";
+  trail: "added" | "hidden" | "none";
+} {
+  if (rule.word_boundary !== true) return { lead: "none", trail: "none" };
+  const lead = edgeBoundary(rule.pattern, "lead");
+  const trail = edgeBoundary(rule.pattern, "trail");
+  return {
+    lead: lead.boundary === "\\b" ? "added" : lead.hidden ? "hidden" : "none",
+    trail: trail.boundary === "\\b" ? "added" : trail.hidden ? "hidden" : "none",
+  };
+}
+
+/**
+ * Pattern source with `word_boundary` applied. A `\b` is added only where the
+ * edge is a literal ASCII word character; an already-written `\b`/`^`/`$` is
+ * respected. A top-level alternation is refused because `\bfoo|bar\b` would
+ * silently mean `(\bfoo)|(bar\b)`; group it as `(?:foo|bar)`.
+ */
+export function customRuleSource(rule: Pick<CustomRuleConfig, "pattern" | "word_boundary" | "description">): string {
+  if (rule.word_boundary !== true) return rule.pattern;
+  if (hasTopLevelAlternation(rule.pattern)) {
+    throw new Error(
+      `custom rule "${rule.description}": word_boundary cannot be applied to a top-level alternation; group it as (?:${rule.pattern})`,
+    );
+  }
+  const lead = edgeBoundary(rule.pattern, "lead").boundary;
+  const trail = edgeBoundary(rule.pattern, "trail").boundary;
+  return lead + rule.pattern + trail;
+}
+
+/** Final flags: `g` is always present; `i` stays the default so existing rules
+ * keep matching as they did before `flags` existed. */
+export function customRuleFlags(rule: Pick<CustomRuleConfig, "flags">): string {
+  const requested = rule.flags ?? "i";
+  return Array.from(new Set(`g${requested}`)).join("");
+}
+
+/** The exact RegExp the scanner uses for a custom rule. */
+export function customRulePattern(rule: CustomRuleConfig): RegExp {
+  return new RegExp(customRuleSource(rule), customRuleFlags(rule));
+}
+
 // The timing check can land on either side of the limit from one run to the
 // next, so the first verdict for a pattern is kept for the life of the
 // process: `--doctor` and the scanner it smoke-tests then agree on which
@@ -19,19 +130,31 @@ export type CustomPatternVerdict = "ok" | "invalid" | "redos-suspect";
 const MAX_REMEMBERED_VERDICTS = 1024;
 const verdicts = new Map<string, CustomPatternVerdict>();
 
-export function checkCustomPattern(pattern: string): CustomPatternVerdict {
-  const remembered = verdicts.get(pattern);
+export function checkCustomPattern(pattern: string, flags = "gi"): CustomPatternVerdict {
+  const key = `${flags}\u0000${pattern}`;
+  const remembered = verdicts.get(key);
   if (remembered !== undefined) return remembered;
-  const verdict = probeCustomPattern(pattern);
+  const verdict = probeCustomPattern(pattern, flags);
   if (verdicts.size >= MAX_REMEMBERED_VERDICTS) verdicts.clear();
-  verdicts.set(pattern, verdict);
+  verdicts.set(key, verdict);
   return verdict;
 }
 
-function probeCustomPattern(pattern: string): CustomPatternVerdict {
+/** Probe the rule's final pattern (flags and boundaries included). */
+export function checkCustomRule(rule: CustomRuleConfig): CustomPatternVerdict {
   let compiled: RegExp;
   try {
-    compiled = new RegExp(pattern, "gi");
+    compiled = customRulePattern(rule);
+  } catch {
+    return "invalid";
+  }
+  return checkCustomPattern(compiled.source, compiled.flags);
+}
+
+function probeCustomPattern(pattern: string, flags: string): CustomPatternVerdict {
+  let compiled: RegExp;
+  try {
+    compiled = new RegExp(pattern, flags);
   } catch {
     return "invalid";
   }
@@ -48,7 +171,7 @@ function probeCustomPattern(pattern: string): CustomPatternVerdict {
 export function skippedCustomRules(config: GuardConfig): { description: string; reason: Exclude<CustomPatternVerdict, "ok"> }[] {
   const skipped: { description: string; reason: Exclude<CustomPatternVerdict, "ok"> }[] = [];
   for (const rule of config.custom_rules ?? []) {
-    const verdict = checkCustomPattern(rule.pattern);
+    const verdict = checkCustomRule(rule);
     if (verdict !== "ok") skipped.push({ description: rule.description, reason: verdict });
   }
   return skipped;
@@ -89,7 +212,7 @@ export function buildDynamicRules(config: GuardConfig): Rule[] {
   }
 
   for (const rule of config.custom_rules) {
-    const verdict = checkCustomPattern(rule.pattern);
+    const verdict = checkCustomRule(rule);
     if (verdict !== "ok") {
       console.warn(
         verdict === "invalid"
@@ -98,11 +221,13 @@ export function buildDynamicRules(config: GuardConfig): Rule[] {
       );
       continue;
     }
+    const allow = (rule.allow ?? []).filter((value) => value.length > 0);
     rules.push({
       type: "CUSTOM",
       severity: rule.severity,
       description: rule.description,
-      pattern: new RegExp(rule.pattern, "gi"),
+      pattern: customRulePattern(rule),
+      ...(allow.length > 0 ? { allow: new Set(allow) } : {}),
     });
   }
 

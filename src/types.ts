@@ -6,6 +6,24 @@ export interface CustomRuleConfig {
   description: string;
   pattern: string;
   severity: "HIGH" | "MEDIUM" | "LOW";
+  /**
+   * Extra regex flags, a subset of `imsuy`; `g` is always added. Invalid flags
+   * fail config load rather than being ignored.
+   */
+  flags?: string;
+  /**
+   * Wrap the pattern edges in `\b` where that edge is an ASCII word character.
+   * CJK edges are left alone for the same reason as `keywordPattern`: `\b` never
+   * holds between two non-word characters.
+   */
+  word_boundary?: boolean;
+  /** Exact strings this rule never reports. Not a regex; not a partial match. */
+  allow?: string[];
+  /**
+   * Reserved. Accepted and validated, but the scanner has no source path for
+   * chat/tool text, so it does not scope anything yet; `--doctor` warns when set.
+   */
+  path?: string[];
 }
 
 export interface GuardConfig {
@@ -25,6 +43,12 @@ export interface GuardConfig {
      * RFC 1918, CGNAT and link-local. Entries are validated at config load.
      */
     private_cidrs?: string[];
+    /**
+     * Exact strings that never produce a finding, for any rule. A bypass
+     * surface: every entry is surfaced by `--doctor`, and every suppression is
+     * counted. Not a regex, not a partial match.
+     */
+    allowlist?: string[];
   };
   /** In-memory only; serializes to a fingerprint without retaining raw values. */
   exact_value_detector?: ExactValueDetector;
@@ -107,6 +131,11 @@ export interface Rule {
   severity: Finding["severity"];
   description: string;
   pattern: RegExp;
+  /**
+   * Exact strings this rule never reports. Compared against the matched text,
+   * never partially. A suppression is counted and surfaced by `--doctor`.
+   */
+  allow?: ReadonlySet<string>;
   /**
    * Stable identifier for built-in rules, the key used by
    * `settings.rule_overrides` in the guard config. Every BUILTIN_RULES entry

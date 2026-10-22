@@ -26,7 +26,8 @@ import { loadConfig } from "./config/loader.js";
 import { defaultKeyfilePath, defaultStorePath } from "./decision/mapping-key.js";
 import { InMemoryMappingKeyProvider, openMappingStore } from "./decision/mapping-store.js";
 import { validatePluginOptions, type PluginOptions } from "./plugin-options.js";
-import { skippedCustomRules } from "./rules/dynamic.js";
+import { skippedCustomRules, customRuleBoundaries } from "./rules/dynamic.js";
+import { allowlistSuppressions } from "./scanner/allowlist.js";
 import { scanText } from "./scanner/engine.js";
 import type { GuardConfig } from "./types.js";
 
@@ -434,6 +435,77 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       state: "warn",
       detail: `${skipped.length} custom rule(s) disabled and not enforced: ${skipped.map((rule) => `"${rule.description}" (${rule.reason === "invalid" ? "pattern does not compile" : "disabled by ReDoS check"})`).join(", ")}. The ReDoS check is a timing heuristic, not a guarantee.`,
       fix: "Rewrite the pattern without nested or overlapping quantifiers, such as (a+)+ or (a|a)*.",
+    });
+  }
+
+  // Allowlists (issue #32) are an exact-match bypass, so they are surfaced
+  // rather than silent: how many entries exist, that each one actually
+  // suppresses the literal it names, and how many suppressions the scanner in
+  // this process has counted. Entries that match nothing are dead weight with a
+  // bypass shape, so they warn.
+  const globalAllow = guardConfig.settings?.allowlist ?? [];
+  const customRules = guardConfig.custom_rules ?? [];
+  const ruleAllow = customRules.flatMap((rule) => rule.allow ?? []);
+  const allowEntries = [...new Set([...globalAllow, ...ruleAllow])];
+  if (allowEntries.length > 0) {
+    const sample = allowEntries.slice(0, 8);
+    const withoutAllow = {
+      ...guardConfig,
+      settings: { ...(guardConfig.settings ?? {}), allowlist: [] },
+      custom_rules: customRules.map((rule) => ({ ...rule, allow: undefined })),
+    };
+    const broken = sample.filter((value) => deps.smokeScan(value, guardConfig).findings > 0);
+    const dead = sample.filter((value) => deps.smokeScan(value, withoutAllow).findings === 0);
+    const entryCount = allowEntries.length === 1 ? "1 allowlist entry" : `${allowEntries.length} allowlist entries`;
+    const exercised = sample.length === allowEntries.length ? "all" : `${sample.length} of them`;
+    if (broken.length > 0) {
+      checks.push({
+        id: "allowlist",
+        state: "fail",
+        detail: `${broken.length} of the ${entryCount} still produce findings (${broken.map((value) => JSON.stringify(value)).join(", ")}). The exact-match filter is not working, so those values are not actually quiet.`,
+        fix: "Do not rely on those entries. Re-run the scanner with `--text` on the exact value and report it: an allowlisted literal must produce no finding.",
+      });
+    } else if (dead.length > 0) {
+      checks.push({
+        id: "allowlist",
+        state: "warn",
+        detail: `${entryCount} (global ${globalAllow.length}, per-rule ${ruleAllow.length}); ${dead.length} match nothing at all (${dead.map((value) => JSON.stringify(value)).join(", ")}). Every one is an exact-match bypass; an entry that suppresses nothing is only risk.`,
+        fix: "Remove allowlist entries that no longer match anything.",
+      });
+    } else {
+      checks.push({
+        id: "allowlist",
+        state: "ok",
+        detail: `${entryCount} (global ${globalAllow.length}, per-rule ${ruleAllow.length}), exact match only; ${exercised} exercised, all suppress; ${allowlistSuppressions()} suppression(s) counted in this process.`,
+      });
+    }
+  }
+
+  // `word_boundary` can only add \b at literal ASCII word edges. Where the edge
+  // is a group/class/quantifier the rule is looser than it looks; say so.
+  const boundaryHidden = customRules.filter((rule) => {
+    if (rule.word_boundary !== true) return false;
+    const edges = customRuleBoundaries(rule);
+    return edges.lead === "hidden" || edges.trail === "hidden";
+  });
+  if (boundaryHidden.length > 0) {
+    checks.push({
+      id: "custom-rule-boundaries",
+      state: "warn",
+      detail: `${boundaryHidden.length} custom rule(s) set word_boundary but end or start with a group, class, quantifier or escape, where no \\b can be added: ${boundaryHidden.map((rule) => `"${rule.description}"`).join(", ")}. Those edges match inside larger words.`,
+      fix: "Write \\b in the pattern yourself, e.g. \\bEMP-\\d{6}\\b, or finish the pattern with a literal word character.",
+    });
+  }
+
+  // `path` is accepted but not implemented: the scanner has no source path for
+  // chat or tool text. Say so instead of letting a rule look scoped when it is not.
+  const pathRules = customRules.filter((rule) => (rule.path ?? []).length > 0);
+  if (pathRules.length > 0) {
+    checks.push({
+      id: "custom-rule-paths",
+      state: "warn",
+      detail: `${pathRules.length} custom rule(s) set \`path\`, but path scoping is not implemented: they apply to every scanned text, including prompts and tool output.`,
+      fix: "Remove `path` from those rules, or rely on the rule's pattern alone, until path scoping ships.",
     });
   }
 

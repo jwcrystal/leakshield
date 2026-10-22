@@ -1,6 +1,7 @@
 import type { GuardConfig, Finding, ScanResult, RedactResult, Rule } from "../types.js";
 import { BUILTIN_RULES } from "../rules/builtin.js";
 import { buildDynamicRules } from "../rules/dynamic.js";
+import { allowSet, isAllowlisted, noteAllowlistSuppression } from "./allowlist.js";
 import { containsAddressInRun, parseCidrList } from "./cidr.js";
 import { redact, getLineCol, getIgnoredLines } from "./utils.js";
 import { t } from "../i18n/index.js";
@@ -80,11 +81,17 @@ function addExactValueFindings(
 ): void {
   const detector = config.exact_value_detector;
   if (!detector) return;
+  const globalAllow = allowSet(config.settings.allowlist);
 
   for (const match of detector.findAll(text)) {
     if (hasMatchingRange(findings, match.index, match.length)) continue;
     const { line, col } = getLineCol(text, match.index);
     if (ignoredLines.has(line)) continue;
+    const matchedText = text.slice(match.index, match.index + match.length);
+    if (isAllowlisted(matchedText, globalAllow, undefined)) {
+      noteAllowlistSuppression();
+      continue;
+    }
     findings.push({
       type: "ENV_SECRET",
       severity: "HIGH",
@@ -94,7 +101,7 @@ function addExactValueFindings(
       description: "Value from configured env file",
       match_start: match.index,
       match_end: match.index + match.length,
-      match_text: text.slice(match.index, match.index + match.length),
+      match_text: matchedText,
     });
   }
 }
@@ -129,6 +136,7 @@ function collectRuleFindings(
 ): Finding[] {
   const findings: Finding[] = [];
   const seen = new Set<string>();
+  const globalAllow = allowSet(config.settings.allowlist);
   for (const rule of rules) {
     // Reuse the compiled RegExp; reset lastIndex before each scan so the
     // stateful global flag starts from the beginning of the input.
@@ -146,6 +154,10 @@ function collectRuleFindings(
 
       const { line, col } = getLineCol(text, start);
       if (ignoredLines.has(line)) continue;
+      if (isAllowlisted(matchedText, globalAllow, rule.allow)) {
+        noteAllowlistSuppression();
+        continue;
+      }
 
       const preview = redact(matchedText, config.settings.preview_length);
 

@@ -7,6 +7,7 @@ import { z } from "zod";
 import { loadExactValueDetector } from "../scanner/exact-values.js";
 import { parseCidr } from "../scanner/cidr.js";
 import { BUILTIN_RULE_IDS } from "../rules/builtin.js";
+import { customRulePattern } from "../rules/dynamic.js";
 import type { GuardConfig } from "../types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -14,11 +15,28 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MAX_DYNAMIC_RULE_LENGTH = 200;
 const MAX_PRIVATE_DOMAIN_LENGTH = 255;
 const MAX_ENV_FILE_PATH_LENGTH = 4096;
+const MAX_ALLOW_ENTRY_LENGTH = 200;
+const MAX_RULE_ALLOW_ENTRIES = 32;
+const MAX_GLOBAL_ALLOW_ENTRIES = 64;
+const MAX_RULE_PATH_ENTRIES = 16;
+const MAX_RULE_PATH_LENGTH = 512;
+// `g` is always added by the scanner; the rest is the documented subset.
+const CUSTOM_FLAG_CHARS = /^[gimsuy]*$/;
+
+const AllowEntry = z.string().min(1).max(MAX_ALLOW_ENTRY_LENGTH);
 
 const CustomRuleSchema = z.object({
   description: z.string().min(1).max(MAX_DYNAMIC_RULE_LENGTH),
   pattern: z.string().min(1).max(MAX_DYNAMIC_RULE_LENGTH),
   severity: z.enum(["HIGH", "MEDIUM", "LOW"]).default("HIGH"),
+  flags: z
+    .string()
+    .max(5)
+    .regex(CUSTOM_FLAG_CHARS, "flags must be a subset of gimsuy; g is always implied")
+    .optional(),
+  word_boundary: z.boolean().optional(),
+  allow: z.array(AllowEntry).max(MAX_RULE_ALLOW_ENTRIES).optional(),
+  path: z.array(z.string().min(1).max(MAX_RULE_PATH_LENGTH)).max(MAX_RULE_PATH_ENTRIES).optional(),
 });
 
 export const GuardConfigSchema = z.object({
@@ -33,6 +51,7 @@ export const GuardConfigSchema = z.object({
     env_files: z.array(z.string().min(1).max(MAX_ENV_FILE_PATH_LENGTH)).max(16).default([]),
     rule_overrides: z.record(z.string().min(1), z.boolean()).default({}),
     private_cidrs: z.array(z.string().min(1).max(64)).max(64).default([]),
+    allowlist: z.array(AllowEntry).max(MAX_GLOBAL_ALLOW_ENTRIES).default([]),
   }).default({}),
 }).superRefine((config, ctx) => {
   // Unknown rule ids in `rule_overrides` fail the parse (fail-closed): a typo
@@ -58,16 +77,18 @@ export const GuardConfigSchema = z.object({
       });
     }
   });
-  // A custom rule whose pattern does not compile fails the parse too: the
-  // scanner would otherwise drop it and report clean text as safe.
+  // A custom rule whose final pattern (flags and word boundaries included) does
+  // not compile fails the parse too: the scanner would otherwise drop it and
+  // report clean text as safe.
   config.custom_rules.forEach((rule, index) => {
     try {
-      new RegExp(rule.pattern, "gi");
+      customRulePattern(rule);
     } catch (error) {
       // V8 messages embed the pattern ("Invalid regular expression: /…/gi:
       // reason"); keep only the reason, since a pattern may itself be a
       // literal the rule exists to protect.
-      const reason = (error as Error).message.split(": ").pop();
+      const message = (error as Error).message;
+      const reason = message.includes(": ") ? message.split(": ").pop() : message;
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["custom_rules", index, "pattern"],

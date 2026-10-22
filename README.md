@@ -478,7 +478,7 @@ custom_rules:
     flags: "i"            # subset of gimsuy; g is always implied
     word_boundary: true   # \b only at literal ASCII word edges
     allow:                # exact strings this rule never reports
-      - "MYCO_EXAMPLE0000000000000000000000"
+      - "MYCO_EXAMPLE0000000000000000000000000"
     # path: ["src/**"]    # accepted, but NOT implemented (see below)
 
 settings:

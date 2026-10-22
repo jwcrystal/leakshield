@@ -31,12 +31,12 @@ custom_rules: []
 #   flags: "i"            # gimsuy 的子集；g 一律自動加上，預設 i
 #   word_boundary: true   # 只在字面 ASCII 單字邊界加 \b；CJK 邊界不加
 #   allow:                # 精確字串，不是 regex、不是子字串
-#     - "MYCO_EXAMPLE0000000000000000000000"
+#     - "MYCO_EXAMPLE0000000000000000000000000"
 #   # path: ["src/**"]    # 已接受但尚未實作；rule 仍會套用到所有文字，--doctor 會警告
 #
 # 注意：allow 與 settings.allowlist 是真正的 bypass —— 值仍會原樣離開機器，
-# 只是不再回報。只放你確認不敏感的內容；每一條都會列在 --doctor，對不到任何
-# 東西的條目也會被提醒。
+# 只是不再回報。只放你確認不敏感的內容；--doctor 會回報條目數，並實際演練
+# 最多 8 條，無法演練的條目會提示（不是逐條斷言）。
 #
 # 信用卡號（Visa／Mastercard 常見格式；未做 Luhn 驗證）
 #   pattern: "\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14})\\b"
@@ -71,6 +71,6 @@ settings:
   #   - 192.168.0.0/16
   # 選用：全域 allowlist（精確字串，不是 regex、不是子字串），對所有規則生效。
   # 這是真正的 bypass：值仍會原樣離開機器。最多 64 條、每條 200 字元；
-  # 每一條都會列在 --doctor，對不到任何命中的條目會被提醒。
+  # --doctor 回報條目數並演練最多 8 條；無法演練的條目會提示。
   # allowlist:
   #   - qa@example.com

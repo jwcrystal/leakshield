@@ -2,7 +2,9 @@
 
 All notable changes are listed here.
 
-## Unreleased
+## 0.1.2 — 2026-10-22
+
+Two changes can affect an existing setup: `url-userinfo` is on by default, so text with a `user:password@` URL is now flagged, and a `custom_rules` pattern that does not compile now fails the config load instead of being skipped. Run `leakshield --doctor` after upgrading.
 
 ### Added
 

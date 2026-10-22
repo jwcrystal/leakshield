@@ -490,6 +490,8 @@ settings:
   existing rules keep matching case-insensitively. An unknown flag (such as `x`)
   fails the config load, and the pattern is compiled with the final flags, so a
   pattern that is only invalid under `u` also fails the load.
+  Zero-length matches are skipped (they contain no value to report or redact);
+  scanning continues to later nonempty matches, including under Unicode flags.
 - **`word_boundary`** — adds `\b` where the pattern's edge is a literal ASCII word
   character. A CJK edge (「機密」) is left alone: `\b` never holds between two
   non-word characters, and wrapping it would stop the rule matching. An edge that

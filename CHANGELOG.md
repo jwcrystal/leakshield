@@ -14,6 +14,7 @@ Two changes can affect an existing setup: `url-userinfo` is on by default, so te
 
 ### Fixed
 
+- Scanning and redaction now advance safely past zero-length regex matches, including Unicode matches next to surrogate pairs. Empty spans produce no finding or replacement; later nonempty matches remain protected. Previously a custom rule such as `\p{ASCII}*` with `flags: "u"` passed configuration validation but could hang both operations. (#32)
 - A dotted run longer than four octets is now reported whole (`10.1.2.3.4` masks the whole run), so an address embedded in it is no longer left unmasked. Before, the pattern consumed the first four groups, the public `1.2.3.4` suffix escaped detection, and transparent mode refused the whole request with `residual_sensitive_content` once the same address appeared elsewhere. ([#40](https://github.com/jwcrystal/leakshield/issues/40))
 - An SSH Git remote (`user@host:path`, `ssh://user@host/…`, `git+ssh://…`) is no longer reported as `PII_EMAIL`. A public repository host is no longer pseudonymized for no privacy gain, and the password half of a remote URL is no longer classified as personal data. Configured private domains and path keywords still apply inside remote URLs. (#34)
 

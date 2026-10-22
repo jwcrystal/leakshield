@@ -138,12 +138,13 @@ function collectRuleFindings(
   const seen = new Set<string>();
   const globalAllow = allowSet(config.settings.allowlist);
   for (const rule of rules) {
-    // Reuse the compiled RegExp; reset lastIndex before each scan so the
-    // stateful global flag starts from the beginning of the input.
+    // Start from the beginning. matchAll advances after empty matches (by a
+    // code point under /u); exec alone leaves lastIndex unchanged and can hang.
     rule.pattern.lastIndex = 0;
-    let match: RegExpExecArray | null;
-
-    while ((match = rule.pattern.exec(text)) !== null) {
+    for (const match of text.matchAll(rule.pattern)) {
+      // A zero-width match contains no value to report or mask. Skip it before
+      // dedupe, validation or suppression, without losing later real matches.
+      if (match[0].length === 0) continue;
       const offset = rule.skipPrefix ?? 0;
       const matchedText = match[0].slice(offset);
       const start = match.index + offset;
@@ -382,8 +383,9 @@ export function redactText(
 
   for (const rule of allRules) {
     rule.pattern.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = rule.pattern.exec(truncated)) !== null) {
+    // Keep the same progress and empty-span contract as collectRuleFindings.
+    for (const match of truncated.matchAll(rule.pattern)) {
+      if (match[0].length === 0) continue;
       const offset = rule.skipPrefix ?? 0;
       const start = match.index + offset;
       const end = match.index + match[0].length;

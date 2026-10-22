@@ -63,8 +63,13 @@ export interface DoctorDeps {
   smokeScan(text: string, config: GuardConfig): { findings: number };
   /** Severity-agnostic scan for the allowlist diagnostics. Defaults to the real
    * scanner; `smokeScan` is a HIGH-only credential probe and would call a
-   * working MEDIUM/LOW allowlist entry dead. */
-  probeScan?(text: string, config: GuardConfig): { findings: number; exactMatches: number };
+   * working MEDIUM/LOW allowlist entry dead. `exact` lists the findings whose
+   * text is exactly this input, tagged so doctor can ignore diagnostics that an
+   * allowlist cannot suppress (the Unicode/homograph warning is one). */
+  probeScan?(
+    text: string,
+    config: GuardConfig,
+  ): { findings: number; exact: { description: string | null; unicodeWarning: boolean }[] };
   cwd: string;
   home: string;
   xdgConfigHome?: string;
@@ -115,7 +120,12 @@ export function createDoctorDeps(): DoctorDeps {
       const result = scanText(text, config);
       return {
         findings: result.findings.length,
-        exactMatches: result.findings.filter((finding) => finding.match_text === text).length,
+        exact: result.findings
+          .filter((finding) => finding.match_text === text)
+          .map((finding) => ({
+            description: finding.description ?? null,
+            unicodeWarning: (finding as { unicode_detected?: unknown }).unicode_detected !== undefined,
+          })),
       };
     },
     cwd: process.cwd(),
@@ -479,9 +489,25 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
         const result = scanText(text, config);
         return {
           findings: result.findings.length,
-          exactMatches: result.findings.filter((finding) => finding.match_text === text).length,
+          exact: result.findings
+            .filter((finding) => finding.match_text === text)
+            .map((finding) => ({
+              description: finding.description ?? null,
+              unicodeWarning: (finding as { unicode_detected?: unknown }).unicode_detected !== undefined,
+            })),
         };
       });
+    // An allowlist only suppresses a rule's own finding or an exact env value.
+    // The Unicode/homograph warning is a standing diagnostic, not a rule match,
+    // so it must neither count as suppression nor as a broken filter.
+    const suppressible = (
+      exact: { description: string | null; unicodeWarning: boolean }[],
+      ruleDescription: string | undefined,
+    ) =>
+      exact.filter(
+        (finding) =>
+          !finding.unicodeWarning && (ruleDescription === undefined || finding.description === ruleDescription),
+      );
     const withoutAllowlists = (config: GuardConfig): GuardConfig => ({
       ...config,
       settings: { ...(config.settings ?? {}), allowlist: [] },
@@ -510,12 +536,13 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     });
     for (const entry of sample) {
       const scope: GuardConfig = entry.ruleIndex < 0 ? guardConfig : isolateRule(entry.ruleIndex);
+      const ruleDescription = entry.ruleIndex < 0 ? undefined : customRules[entry.ruleIndex]!.description;
       // Only an exact matched span can be suppressed, so the baseline must ask
       // for one: a rule matching a substring of the entry says nothing about it.
       const baseline = scan(entry.value, withoutAllowlists(scope));
       const withAllow = scan(entry.value, scope);
-      if (withAllow.exactMatches > 0) broken += 1;
-      else if (baseline.exactMatches > 0) exercised += 1;
+      if (suppressible(withAllow.exact, ruleDescription).length > 0) broken += 1;
+      else if (suppressible(baseline.exact, ruleDescription).length > 0) exercised += 1;
       else unverified += 1;
     }
     const entryCount = entries.length === 1 ? "1 allowlist entry" : `${entries.length} allowlist entries`;

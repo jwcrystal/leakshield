@@ -314,6 +314,18 @@ describe("doctor allowlist reporting", () => {
     expect(check?.state).toBe("ok");
   });
 
+  it("ignores the standing Unicode warning when judging a per-rule entry", async () => {
+    // A Cyrillic character makes an always-on homograph warning with the same
+    // exact text; it is not a rule match, so it must not read as broken.
+    const pattern = "KEY\u0430";
+    const config = parse({
+      nda_keywords: [],
+      custom_rules: [{ description: "safe fixture", pattern, allow: [pattern] }],
+    });
+    const check = (await runDoctor(makeDoctorFixture(config))).checks.find((entry) => entry.id === "allowlist");
+    expect(check?.state).toBe("ok");
+  });
+
   it("does not claim suppression when the entry is not an exact matched span", async () => {
     const config = parse({
       nda_keywords: [],
@@ -335,7 +347,7 @@ describe("doctor allowlist reporting", () => {
   it("fails, and reports BROKEN, when an allowlisted literal still produces a finding", async () => {
     const config = parse({ settings: { allowlist: ["user@example.com"] } });
     const deps = makeDoctorFixture(config, {
-      probeScan: () => ({ findings: 1, exactMatches: 1 }),
+      probeScan: () => ({ findings: 1, exact: [{ description: "x", unicodeWarning: false }] }),
     });
     const report = await runDoctor(deps);
     const check = report.checks.find((entry) => entry.id === "allowlist");
@@ -345,7 +357,7 @@ describe("doctor allowlist reporting", () => {
 
   it("reports BROKEN on a v1 host too", async () => {
     const config = parse({ settings: { allowlist: ["user@example.com"] } });
-    const deps = makeDoctorFixture(config, { probeScan: () => ({ findings: 1, exactMatches: 1 }), v1: true });
+    const deps = makeDoctorFixture(config, { probeScan: () => ({ findings: 1, exact: [{ description: "x", unicodeWarning: false }] }), v1: true });
     const report = await runDoctor(deps);
     expect(report.status).toBe("BROKEN");
   });

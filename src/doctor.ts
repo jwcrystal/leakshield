@@ -553,7 +553,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
         id: "allowlist",
         state: "fail",
         detail: `${broken} allowlisted literal(s) still produce a finding under their own scope. The exact-match filter is not working, so those values are not actually quiet. ${entryCount} total; ${counter}.`,
-        fix: "Do not rely on those entries. Re-run the scanner with `--text` on the exact value and report it: an allowlisted literal must produce no finding.",
+        fix: "Do not rely on those entries. Re-run the scanner with `--text` on the exact value and report it: an allowlisted literal must produce no rule or env finding (a standing Unicode warning is separate).",
       });
     } else if (unverified > 0) {
       checks.push({

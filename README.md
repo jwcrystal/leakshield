@@ -482,7 +482,7 @@ custom_rules:
     # path: ["src/**"]    # accepted, but NOT implemented (see below)
 
 settings:
-  allowlist:              # exact strings that never produce a finding
+  allowlist:              # exact strings no rule reports (see the bypass warning)
     - "qa@example.com"
 ```
 
@@ -502,11 +502,14 @@ settings:
   applies to every rule, including the built-in ones and exact `.env` values.
   Caps: 32 entries per rule, 64 globally, 200 characters each.
   **Allowlisting a live secret is a real bypass**: the value still leaves the
-  machine unmasked, and LeakShield will report it as safe. Use it only for values
-  you have decided are not sensitive. `--doctor` reports how many entries exist,
-  exercises up to eight of them, and reports how many it could not exercise (a
-  context-dependent pattern can only be judged in place). Suppressions are counted
-  rather than silent.
+  machine unmasked, and LeakShield will not report that value as a rule or
+  `.env` finding. Use it only for values you have decided are not sensitive.
+  Standing diagnostics are separate: a Unicode/homograph warning is about the
+  text's script mixture, not about a rule match, and an allowlist does not
+  silence it. `--doctor` reports how many entries exist, exercises up to eight
+  of them, and reports how many it could not exercise (a context-dependent
+  pattern can only be judged in place). Suppressions are counted rather than
+  silent.
 - **`path`** — accepted and validated, but path scoping is **not implemented**: the
   scanner has no source path for prompts or tool output. These rules currently
   apply to every scanned text, and `--doctor` warns when `path` is set.

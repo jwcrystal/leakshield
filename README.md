@@ -504,7 +504,7 @@ settings:
   **Allowlisting a live secret is a real bypass**: the value still leaves the
   machine unmasked, and LeakShield will report it as safe. Use it only for values
   you have decided are not sensitive. `--doctor` reports how many entries exist,
-  exercises up to eight of them, and says which ones it could not exercise (a
+  exercises up to eight of them, and reports how many it could not exercise (a
   context-dependent pattern can only be judged in place). Suppressions are counted
   rather than silent.
 - **`path`** — accepted and validated, but path scoping is **not implemented**: the

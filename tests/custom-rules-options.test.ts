@@ -114,6 +114,13 @@ describe("custom rule word boundaries", () => {
     expect(scan("這是機密文件", config)).toHaveLength(1);
   });
 
+  it("treats control and octal escapes as hidden edges", () => {
+    // `\cA` and `\07` are one token each, and neither ends in a word character.
+    expect(customRuleBoundaries({ pattern: "KEY\\cA", word_boundary: true })).toEqual({ lead: "added", trail: "hidden" });
+    expect(customRuleBoundaries({ pattern: "KEY\\07", word_boundary: true })).toEqual({ lead: "added", trail: "hidden" });
+    expect(customRuleSource({ description: "x", pattern: "KEY\\cA", word_boundary: true })).toBe("\\bKEY\\cA");
+  });
+
   it("respects a boundary the pattern already writes", () => {
     expect(customRuleSource({ description: "x", pattern: "\\bEMP-\\d{6}\\b", word_boundary: true })).toBe(
       "\\bEMP-\\d{6}\\b",
@@ -223,18 +230,19 @@ describe("allowlist fingerprint", () => {
 
 function makeDoctorFixture(
   guardConfig: GuardConfig,
-  options: { smokeScan?: DoctorDeps["smokeScan"]; probeScan?: DoctorDeps["probeScan"] } = {},
+  options: { smokeScan?: DoctorDeps["smokeScan"]; probeScan?: DoctorDeps["probeScan"]; v1?: boolean } = {},
 ) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sg-doctor-allow-"));
   const dist = path.join(tmp, "leakshield", "dist");
   fs.mkdirSync(dist, { recursive: true });
   fs.writeFileSync(path.join(dist, "index.js"), "export {};");
-  fs.writeFileSync(
-    path.join(tmp, "opencode.json"),
-    JSON.stringify({ plugins: [{ package: path.join(tmp, "leakshield", "dist") }] }, null, 2),
-  );
+  fs.writeFileSync(path.join(dist, "opencode.js"), "export {};");
+  const config = options.v1
+    ? { plugin: [path.join(dist, "opencode.js")] }
+    : { plugins: [{ package: dist }] };
+  fs.writeFileSync(path.join(tmp, "opencode.json"), JSON.stringify(config, null, 2));
   const deps: DoctorDeps = {
-    opencodeVersion: () => "opencode v2.0.23",
+    opencodeVersion: () => (options.v1 ? "opencode 1.18.29" : "opencode v2.0.23"),
     readIfExists(p) {
       try {
         return fs.readFileSync(p, "utf8");
@@ -289,6 +297,34 @@ describe("doctor allowlist reporting", () => {
     expect(check?.state).toBe("ok");
   });
 
+  it("isolates a per-rule entry from built-in detectors", async () => {
+    // The literal is also an email, so a scope that kept the built-in detector
+    // would find a second exact match and wrongly call the filter broken.
+    const config = parse({
+      nda_keywords: [],
+      custom_rules: [
+        {
+          description: "corp email",
+          pattern: "corp-[a-z]+@example\\.com",
+          allow: ["corp-qa@example.com"],
+        },
+      ],
+    });
+    const check = (await runDoctor(makeDoctorFixture(config))).checks.find((entry) => entry.id === "allowlist");
+    expect(check?.state).toBe("ok");
+  });
+
+  it("does not claim suppression when the entry is not an exact matched span", async () => {
+    const config = parse({
+      nda_keywords: [],
+      custom_rules: [{ description: "prefix", pattern: "PUBLIC" }],
+      settings: { allowlist: ["PUBLIC-REAL"] },
+    });
+    const check = (await runDoctor(makeDoctorFixture(config))).checks.find((entry) => entry.id === "allowlist");
+    expect(check?.state).toBe("warn");
+    expect(check?.detail).toContain("could not be exercised");
+  });
+
   it("does not call a context-dependent entry dead", async () => {
     const config = parse({ settings: { allowlist: ["nobody-matches-me"] } });
     const check = (await runDoctor(makeDoctorFixture(config))).checks.find((entry) => entry.id === "allowlist");
@@ -304,6 +340,13 @@ describe("doctor allowlist reporting", () => {
     const report = await runDoctor(deps);
     const check = report.checks.find((entry) => entry.id === "allowlist");
     expect(check?.state).toBe("fail");
+    expect(report.status).toBe("BROKEN");
+  });
+
+  it("reports BROKEN on a v1 host too", async () => {
+    const config = parse({ settings: { allowlist: ["user@example.com"] } });
+    const deps = makeDoctorFixture(config, { probeScan: () => ({ findings: 1, exactMatches: 1 }), v1: true });
+    const report = await runDoctor(deps);
     expect(report.status).toBe("BROKEN");
   });
 

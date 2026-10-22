@@ -72,6 +72,18 @@ function escapeEnd(source: string, start: number): number {
     }
     return next === "u" ? Math.min(source.length, start + 6) : start + 2;
   }
+  // Control escapes: \cA is one token, and A is not a literal word character.
+  if (next === "c") return Math.min(source.length, start + 3);
+  // Legacy octal: \0, \012 (at most two digits after the leading 0).
+  if (next === "0") {
+    let index = start + 1;
+    let digits = 0;
+    while (index < source.length && digits < 3 && /[0-7]/.test(source[index] ?? "")) {
+      index += 1;
+      digits += 1;
+    }
+    return index;
+  }
   if (/[1-9]/.test(next)) {
     let index = start + 1;
     while (index < source.length && /[0-9]/.test(source[index] ?? "")) index += 1;

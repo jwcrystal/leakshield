@@ -396,10 +396,7 @@ export function redactText(
       if (ignoredLines.has(line)) continue;
       // An allowlisted literal is left as written, exactly as the scanner leaves
       // it unreported; redacting it would contradict the bypass the user chose.
-      if (isAllowlisted(matchedText, globalAllow, rule.allow)) {
-        noteAllowlistSuppression();
-        continue;
-      }
+      if (isAllowlisted(matchedText, globalAllow, rule.allow)) continue;
       seen.add(key);
       matches.push({ index: start, length: end - start, type: rule.type });
     }
@@ -413,10 +410,7 @@ export function redactText(
       const { line } = getLineCol(truncated, match.index);
       if (ignoredLines.has(line)) continue;
       const matchedText = truncated.slice(match.index, match.index + match.length);
-      if (isAllowlisted(matchedText, globalAllow, undefined)) {
-        noteAllowlistSuppression();
-        continue;
-      }
+      if (isAllowlisted(matchedText, globalAllow, undefined)) continue;
       matches.push({ index: match.index, length: match.length, type: "ENV_SECRET" });
     }
   }

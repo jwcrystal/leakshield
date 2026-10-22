@@ -26,6 +26,7 @@ import { loadConfig } from "./config/loader.js";
 import { defaultKeyfilePath, defaultStorePath } from "./decision/mapping-key.js";
 import { InMemoryMappingKeyProvider, openMappingStore } from "./decision/mapping-store.js";
 import { validatePluginOptions, type PluginOptions } from "./plugin-options.js";
+import { BUILTIN_RULE_IDS } from "./rules/builtin.js";
 import { skippedCustomRules, customRuleBoundaries } from "./rules/dynamic.js";
 import { allowlistSuppressions } from "./scanner/allowlist.js";
 import { scanText } from "./scanner/engine.js";
@@ -490,22 +491,31 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     let broken = 0;
     let exercised = 0;
     let unverified = 0;
+    // A per-rule entry must be judged against that rule alone: leaving built-in
+    // detectors in place would report a correct suppression as BROKEN when the
+    // same literal is also an email, a keyword or an env value.
+    const isolateRule = (ruleIndex: number): GuardConfig => ({
+      nda_keywords: [],
+      private_domains: [],
+      custom_rules: [customRules[ruleIndex]!],
+      exact_value_detector: undefined,
+      settings: {
+        ...(guardConfig.settings ?? {}),
+        allowlist: [],
+        env_files: [],
+        encoding_detection: false,
+        private_cidrs: [],
+        rule_overrides: Object.fromEntries([...BUILTIN_RULE_IDS].map((id) => [id, false])),
+      },
+    });
     for (const entry of sample) {
-      // A per-rule entry is judged against its own rule only: another rule
-      // matching a longer span is correct, not a broken filter. A global entry
-      // keeps every rule.
-      const scope: GuardConfig =
-        entry.ruleIndex < 0
-          ? guardConfig
-          : {
-              ...guardConfig,
-              settings: { ...(guardConfig.settings ?? {}), allowlist: [] },
-              custom_rules: [customRules[entry.ruleIndex]!],
-            };
-      const matches = scan(entry.value, withoutAllowlists(scope)).findings > 0;
+      const scope: GuardConfig = entry.ruleIndex < 0 ? guardConfig : isolateRule(entry.ruleIndex);
+      // Only an exact matched span can be suppressed, so the baseline must ask
+      // for one: a rule matching a substring of the entry says nothing about it.
+      const baseline = scan(entry.value, withoutAllowlists(scope));
       const withAllow = scan(entry.value, scope);
       if (withAllow.exactMatches > 0) broken += 1;
-      else if (matches) exercised += 1;
+      else if (baseline.exactMatches > 0) exercised += 1;
       else unverified += 1;
     }
     const entryCount = entries.length === 1 ? "1 allowlist entry" : `${entries.length} allowlist entries`;
@@ -576,6 +586,13 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
   }
 
+  // A failed check must not still read as PARTIAL or PROTECTED: an allowlist
+  // failure is a "do not trust this install" signal, like a missing canary.
+  // This runs before the v1 early return so a v1 host cannot mask it either.
+  if (checks.some((check) => check.state === "fail")) {
+    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
+  }
+
   if (host.generation === "v1") {
     checks.push({
       id: "coverage",
@@ -595,9 +612,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
 
   // A failed check must not still read as PROTECTED: the allowlist failure is a
   // real "do not trust this install" signal, like a missing smoke canary.
-  if (checks.some((check) => check.state === "fail")) {
-    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
-  }
+  // (Handled before the v1 return above.)
 
   checks.push({
     id: "runtime",

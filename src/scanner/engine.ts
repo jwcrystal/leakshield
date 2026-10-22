@@ -1,6 +1,7 @@
 import type { GuardConfig, Finding, ScanResult, RedactResult, Rule } from "../types.js";
 import { BUILTIN_RULES } from "../rules/builtin.js";
 import { buildDynamicRules } from "../rules/dynamic.js";
+import { allowSet, isAllowlisted, noteAllowlistSuppression } from "./allowlist.js";
 import { containsAddressInRun, parseCidrList } from "./cidr.js";
 import { redact, getLineCol, getIgnoredLines } from "./utils.js";
 import { t } from "../i18n/index.js";
@@ -80,11 +81,17 @@ function addExactValueFindings(
 ): void {
   const detector = config.exact_value_detector;
   if (!detector) return;
+  const globalAllow = allowSet(config.settings.allowlist);
 
   for (const match of detector.findAll(text)) {
     if (hasMatchingRange(findings, match.index, match.length)) continue;
     const { line, col } = getLineCol(text, match.index);
     if (ignoredLines.has(line)) continue;
+    const matchedText = text.slice(match.index, match.index + match.length);
+    if (isAllowlisted(matchedText, globalAllow, undefined)) {
+      noteAllowlistSuppression();
+      continue;
+    }
     findings.push({
       type: "ENV_SECRET",
       severity: "HIGH",
@@ -94,7 +101,7 @@ function addExactValueFindings(
       description: "Value from configured env file",
       match_start: match.index,
       match_end: match.index + match.length,
-      match_text: text.slice(match.index, match.index + match.length),
+      match_text: matchedText,
     });
   }
 }
@@ -129,23 +136,31 @@ function collectRuleFindings(
 ): Finding[] {
   const findings: Finding[] = [];
   const seen = new Set<string>();
+  const globalAllow = allowSet(config.settings.allowlist);
   for (const rule of rules) {
-    // Reuse the compiled RegExp; reset lastIndex before each scan so the
-    // stateful global flag starts from the beginning of the input.
+    // Start from the beginning. matchAll advances after empty matches (by a
+    // code point under /u); exec alone leaves lastIndex unchanged and can hang.
     rule.pattern.lastIndex = 0;
-    let match: RegExpExecArray | null;
-
-    while ((match = rule.pattern.exec(text)) !== null) {
+    for (const match of text.matchAll(rule.pattern)) {
+      // A zero-width match contains no value to report or mask. Skip it before
+      // dedupe, validation or suppression, without losing later real matches.
+      if (match[0].length === 0) continue;
       const offset = rule.skipPrefix ?? 0;
       const matchedText = match[0].slice(offset);
       const start = match.index + offset;
       if (rule.validate !== undefined && !rule.validate(matchedText, { text, index: start })) continue;
       const key = `${rule.type}:${start}`;
       if (seen.has(key)) continue;
-      seen.add(key);
 
       const { line, col } = getLineCol(text, start);
       if (ignoredLines.has(line)) continue;
+      if (isAllowlisted(matchedText, globalAllow, rule.allow)) {
+        noteAllowlistSuppression();
+        // Do NOT reserve the dedupe key: another rule may match a longer span
+        // at the same offset, and suppressing the short one must not hide it.
+        continue;
+      }
+      seen.add(key);
 
       const preview = redact(matchedText, config.settings.preview_length);
 
@@ -364,21 +379,27 @@ export function redactText(
 
   const matches: MatchEntry[] = [];
   const seen = new Set<string>();
+  const globalAllow = allowSet(config.settings.allowlist);
 
   for (const rule of allRules) {
     rule.pattern.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = rule.pattern.exec(truncated)) !== null) {
+    // Keep the same progress and empty-span contract as collectRuleFindings.
+    for (const match of truncated.matchAll(rule.pattern)) {
+      if (match[0].length === 0) continue;
       const offset = rule.skipPrefix ?? 0;
       const start = match.index + offset;
       const end = match.index + match[0].length;
-      if (rule.validate !== undefined && !rule.validate(match[0].slice(offset), { text: truncated, index: start })) continue;
+      const matchedText = match[0].slice(offset);
+      if (rule.validate !== undefined && !rule.validate(matchedText, { text: truncated, index: start })) continue;
       if (overlapsSpan(start, end, protectedSpans)) continue;
       const key = `${start}:${end - start}`;
       if (seen.has(key)) continue;
-      seen.add(key);
       const { line } = getLineCol(truncated, start);
       if (ignoredLines.has(line)) continue;
+      // An allowlisted literal is left as written, exactly as the scanner leaves
+      // it unreported; redacting it would contradict the bypass the user chose.
+      if (isAllowlisted(matchedText, globalAllow, rule.allow)) continue;
+      seen.add(key);
       matches.push({ index: start, length: end - start, type: rule.type });
     }
   }
@@ -390,6 +411,8 @@ export function redactText(
       if (matches.some((entry) => entry.index === match.index && entry.length === match.length)) continue;
       const { line } = getLineCol(truncated, match.index);
       if (ignoredLines.has(line)) continue;
+      const matchedText = truncated.slice(match.index, match.index + match.length);
+      if (isAllowlisted(matchedText, globalAllow, undefined)) continue;
       matches.push({ index: match.index, length: match.length, type: "ENV_SECRET" });
     }
   }

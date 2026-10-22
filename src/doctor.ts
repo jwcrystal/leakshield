@@ -26,7 +26,9 @@ import { loadConfig } from "./config/loader.js";
 import { defaultKeyfilePath, defaultStorePath } from "./decision/mapping-key.js";
 import { InMemoryMappingKeyProvider, openMappingStore } from "./decision/mapping-store.js";
 import { validatePluginOptions, type PluginOptions } from "./plugin-options.js";
-import { skippedCustomRules } from "./rules/dynamic.js";
+import { BUILTIN_RULE_IDS } from "./rules/builtin.js";
+import { skippedCustomRules, customRuleBoundaries } from "./rules/dynamic.js";
+import { allowlistSuppressions } from "./scanner/allowlist.js";
 import { scanText } from "./scanner/engine.js";
 import type { GuardConfig } from "./types.js";
 
@@ -59,12 +61,42 @@ export interface DoctorDeps {
   openStoreProbe?(storePath: string, ttlDays: number): { sessions: number } | { error: string };
   loadGuardConfig(overridePath: string | undefined, workspaceRoot: string): GuardConfig;
   smokeScan(text: string, config: GuardConfig): { findings: number };
+  /** Severity-agnostic scan for the allowlist diagnostics. Defaults to the real
+   * scanner; `smokeScan` is a HIGH-only credential probe and would call a
+   * working MEDIUM/LOW allowlist entry dead. `exact` lists the findings whose
+   * text is exactly this input, tagged so doctor can ignore diagnostics that an
+   * allowlist cannot suppress (the Unicode/homograph warning is one). */
+  probeScan?(
+    text: string,
+    config: GuardConfig,
+  ): { findings: number; exact: { description: string | null; unicodeWarning: boolean }[] };
   cwd: string;
   home: string;
   xdgConfigHome?: string;
 }
 
 const SMOKE_CANARY = "Smoke test only. Do not reveal or use this token: sk-AAAAAAAAAAAAAAAAAAAA";
+
+/**
+ * Severity-agnostic probe for the allowlist diagnostics: every finding, plus
+ * the ones whose matched text is exactly the input. Findings carrying
+ * `unicode_detected` are tagged because an allowlist cannot suppress them.
+ */
+function defaultProbeScan(
+  text: string,
+  config: GuardConfig,
+): { findings: number; exact: { description: string | null; unicodeWarning: boolean }[] } {
+  const result = scanText(text, config);
+  return {
+    findings: result.findings.length,
+    exact: result.findings
+      .filter((finding) => finding.match_text === text)
+      .map((finding) => ({
+        description: finding.description ?? null,
+        unicodeWarning: (finding as { unicode_detected?: unknown }).unicode_detected !== undefined,
+      })),
+  };
+}
 
 export function createDoctorDeps(): DoctorDeps {
   return {
@@ -104,6 +136,9 @@ export function createDoctorDeps(): DoctorDeps {
     smokeScan(text, config) {
       const result = scanText(text, config);
       return { findings: result.findings.filter((f) => f.severity === "HIGH").length };
+    },
+    probeScan(text, config) {
+      return defaultProbeScan(text, config);
     },
     cwd: process.cwd(),
     home: os.homedir(),
@@ -437,6 +472,132 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     });
   }
 
+  // Allowlists (issue #32) are an exact-match bypass, so they are surfaced
+  // rather than silent: which entries exist, whether each still suppresses the
+  // literal it names, and how many suppressions this process counted.
+  const globalAllow = guardConfig.settings?.allowlist ?? [];
+  const customRules = guardConfig.custom_rules ?? [];
+  const ruleAllow = customRules.flatMap((rule) => rule.allow ?? []);
+  const entries: { value: string; ruleIndex: number }[] = [];
+  const seenEntry = new Set<string>();
+  for (const value of globalAllow) {
+    const key = `global\u0000${value}`;
+    if (seenEntry.has(key)) continue;
+    seenEntry.add(key);
+    entries.push({ value, ruleIndex: -1 });
+  }
+  customRules.forEach((rule, ruleIndex) => {
+    for (const value of rule.allow ?? []) {
+      const key = `rule${ruleIndex}\u0000${value}`;
+      if (seenEntry.has(key)) continue;
+      seenEntry.add(key);
+      entries.push({ value, ruleIndex });
+    }
+  });
+  if (entries.length > 0) {
+    const scan = deps.probeScan ?? defaultProbeScan;
+    // An allowlist only suppresses a rule's own finding or an exact env value.
+    // The Unicode/homograph warning is a standing diagnostic, not a rule match,
+    // so it must neither count as suppression nor as a broken filter.
+    const suppressible = (
+      exact: { description: string | null; unicodeWarning: boolean }[],
+      ruleDescription: string | undefined,
+    ) =>
+      exact.filter(
+        (finding) =>
+          !finding.unicodeWarning && (ruleDescription === undefined || finding.description === ruleDescription),
+      );
+    const withoutAllowlists = (config: GuardConfig): GuardConfig => ({
+      ...config,
+      settings: { ...(config.settings ?? {}), allowlist: [] },
+      custom_rules: (config.custom_rules ?? []).map((rule) => ({ ...rule, allow: undefined })),
+    });
+    const sample = entries.slice(0, 8);
+    let broken = 0;
+    let exercised = 0;
+    let unverified = 0;
+    // A per-rule entry must be judged against that rule alone: leaving built-in
+    // detectors in place would report a correct suppression as BROKEN when the
+    // same literal is also an email, a keyword or an env value.
+    const isolateRule = (ruleIndex: number): GuardConfig => ({
+      nda_keywords: [],
+      private_domains: [],
+      custom_rules: [customRules[ruleIndex]!],
+      exact_value_detector: undefined,
+      settings: {
+        ...(guardConfig.settings ?? {}),
+        allowlist: [],
+        env_files: [],
+        encoding_detection: false,
+        private_cidrs: [],
+        rule_overrides: Object.fromEntries([...BUILTIN_RULE_IDS].map((id) => [id, false])),
+      },
+    });
+    for (const entry of sample) {
+      const scope: GuardConfig = entry.ruleIndex < 0 ? guardConfig : isolateRule(entry.ruleIndex);
+      const ruleDescription = entry.ruleIndex < 0 ? undefined : customRules[entry.ruleIndex]!.description;
+      // Only an exact matched span can be suppressed, so the baseline must ask
+      // for one: a rule matching a substring of the entry says nothing about it.
+      const baseline = scan(entry.value, withoutAllowlists(scope));
+      const withAllow = scan(entry.value, scope);
+      if (suppressible(withAllow.exact, ruleDescription).length > 0) broken += 1;
+      else if (suppressible(baseline.exact, ruleDescription).length > 0) exercised += 1;
+      else unverified += 1;
+    }
+    const entryCount = entries.length === 1 ? "1 allowlist entry" : `${entries.length} allowlist entries`;
+    const coverage = sample.length === entries.length ? "all" : `${sample.length} of them`;
+    const counter = `${allowlistSuppressions()} suppression(s) counted in this process`;
+    if (broken > 0) {
+      checks.push({
+        id: "allowlist",
+        state: "fail",
+        detail: `${broken} allowlisted literal(s) still produce a finding under their own scope. The exact-match filter is not working, so those values are not actually quiet. ${entryCount} total; ${counter}.`,
+        fix: "Do not rely on those entries. Re-run the scanner with `--text` on the exact value and report it: an allowlisted literal must produce no rule or env finding (a standing Unicode warning is separate).",
+      });
+    } else if (unverified > 0) {
+      checks.push({
+        id: "allowlist",
+        state: "warn",
+        detail: `${entryCount} (global ${globalAllow.length}, per-rule ${ruleAllow.length}), exact match only; ${exercised} suppress when exercised, ${unverified} could not be exercised as a bare literal (a context-dependent pattern is judged only in place). ${coverage} exercised; ${counter}.`,
+        fix: "Review the entries that doctor could not exercise; it cannot prove a context-dependent entry, and an entry that no longer matches anything is only risk.",
+      });
+    } else {
+      checks.push({
+        id: "allowlist",
+        state: "ok",
+        detail: `${entryCount} (global ${globalAllow.length}, per-rule ${ruleAllow.length}), exact match only; ${coverage} exercised, all suppress; ${counter}.`,
+      });
+    }
+  }
+
+  // `word_boundary` can only add \b at literal ASCII word edges. Where the edge
+  // is a group/class/quantifier the rule is looser than it looks; say so.
+  const boundaryHidden = customRules.filter((rule) => {
+    if (rule.word_boundary !== true) return false;
+    const edges = customRuleBoundaries(rule);
+    return edges.lead === "hidden" || edges.trail === "hidden";
+  });
+  if (boundaryHidden.length > 0) {
+    checks.push({
+      id: "custom-rule-boundaries",
+      state: "warn",
+      detail: `${boundaryHidden.length} custom rule(s) set word_boundary but end or start with a group, class, quantifier or escape, where no \\b can be added: ${boundaryHidden.map((rule) => `"${rule.description}"`).join(", ")}. Those edges match inside larger words.`,
+      fix: "Write \\b in the pattern yourself, e.g. \\bEMP-\\d{6}\\b, or finish the pattern with a literal word character.",
+    });
+  }
+
+  // `path` is accepted but not implemented: the scanner has no source path for
+  // chat or tool text. Say so instead of letting a rule look scoped when it is not.
+  const pathRules = customRules.filter((rule) => (rule.path ?? []).length > 0);
+  if (pathRules.length > 0) {
+    checks.push({
+      id: "custom-rule-paths",
+      state: "warn",
+      detail: `${pathRules.length} custom rule(s) set \`path\`, but path scoping is not implemented: they apply to every scanned text, including prompts and tool output.`,
+      fix: "Remove `path` from those rules, or rely on the rule's pattern alone, until path scoping ships.",
+    });
+  }
+
   // Smoke: the local scanner must flag a synthetic credential
   const smoke = deps.smokeScan(SMOKE_CANARY, guardConfig);
   if (smoke.findings > 0) {
@@ -448,6 +609,13 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       detail: "Synthetic sk- canary NOT detected — the guard config disables the rules this install relies on.",
       fix: "Restore credential rules in the guard config, or remove configPath to use defaults.",
     });
+    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
+  }
+
+  // A failed check must not still read as PARTIAL or PROTECTED: an allowlist
+  // failure is a "do not trust this install" signal, like a missing canary.
+  // This runs before the v1 early return so a v1 host cannot mask it either.
+  if (checks.some((check) => check.state === "fail")) {
     return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
   }
 
@@ -467,6 +635,10 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       detail: `${options.wireProtection === false ? "transparent hook-only: content hooks protect their snapshots; no outbound HTTP/WS/SDK admission, transport metadata checks, injected-fetch requirement or provider transport transform. Final bodies/frames are not inspected or remasked. Unknown routes, including /alpha/generate, are not gated. Optional incoming HTTP/WS hooks restore known display protocols after successful scoped host preparation for the same session/kind/model; unsupported or unverified replies remain literal. Tool safety remains. Content added after hooks may be unmasked, including late-added attachments." : "transparent mode protects three HTTP protocols by wire shape (Chat Completions, Anthropic Messages, Responses) and native Responses-family WS frames; unknown outbound dialects and intercepted routes, including /alpha/generate, are refused (fail-closed), not passed. AI SDK providers must honor OpenCode's injected HTTP fetch; missing or unsafe fetch options refuse. Bypass transports are outside coverage, not a proven blocked transport."} Both levels stop rewriting on reply-side SG failures and keep literal originals; provider errors and cancellation still propagate. Content-hook masking failures still refuse the affected model call with a safe reason/stage, never silently send raw content. Attachments policy at content hooks: ${options.attachments === "allow" ? "ALLOW — attachments pass through unscanned with a visible notice (you vouch for their content)" : "block — replaced with an omission notice"}. Complete original-history/restart restoration is not verified.`,
     });
   }
+
+  // A failed check must not still read as PROTECTED: the allowlist failure is a
+  // real "do not trust this install" signal, like a missing smoke canary.
+  // (Handled before the v1 return above.)
 
   checks.push({
     id: "runtime",

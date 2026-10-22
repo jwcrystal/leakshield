@@ -468,6 +468,57 @@ After editing:
 - **OpenCode Plugin**: Restart OpenCode to reload the plugin configuration
 - **Web UI**: Restart the local server
 
+### Custom Rules
+
+```yaml
+custom_rules:
+  - description: "Company token"
+    pattern: "MYCO_[A-Z0-9]{32}"
+    severity: HIGH
+    flags: "i"            # subset of gimsuy; g is always implied
+    word_boundary: true   # \b only at literal ASCII word edges
+    allow:                # exact strings this rule never reports
+      - "MYCO_EXAMPLE0000000000000000000000000"
+    # path: ["src/**"]    # accepted, but NOT implemented (see below)
+
+settings:
+  allowlist:              # exact strings no rule reports (see the bypass warning)
+    - "qa@example.com"
+```
+
+- **`flags`** — any subset of `gimsuy`; `g` is always added. The default is `i`, so
+  existing rules keep matching case-insensitively. An unknown flag (such as `x`)
+  fails the config load, and the pattern is compiled with the final flags, so a
+  pattern that is only invalid under `u` also fails the load.
+  Zero-length matches are skipped (they contain no value to report or redact);
+  scanning continues to later nonempty matches, including under Unicode flags.
+- **`word_boundary`** — adds `\b` where the pattern's edge is a literal ASCII word
+  character. A CJK edge (「機密」) is left alone: `\b` never holds between two
+  non-word characters, and wrapping it would stop the rule matching. An edge that
+  is a group, character class, quantifier or escape cannot take a boundary safely,
+  so none is added and `--doctor` warns that the rule is looser than it looks —
+  write `\b` in the pattern yourself, e.g. `\bEMP-\d{6}\b`. A top-level alternation
+  (`a|b`) is a config error; group it as `(?:a|b)`.
+- **`allow` / `settings.allowlist`** — exact matches against the matched text, not
+  substrings and not regexes. `allow` applies to that rule; `settings.allowlist`
+  applies to every rule, including the built-in ones and exact `.env` values.
+  Caps: 32 entries per rule, 64 globally, 200 characters each.
+  **Allowlisting a live secret is a real bypass**: the value still leaves the
+  machine unmasked, and LeakShield will not report that value as a rule or
+  `.env` finding. Use it only for values you have decided are not sensitive.
+  Standing diagnostics are separate: a Unicode/homograph warning is about the
+  text's script mixture, not about a rule match, and an allowlist does not
+  silence it. `--doctor` reports how many entries exist, exercises up to eight
+  of them, and reports how many it could not exercise (a context-dependent
+  pattern can only be judged in place). Suppressions are counted rather than
+  silent.
+- **`path`** — accepted and validated, but path scoping is **not implemented**: the
+  scanner has no source path for prompts or tool output. These rules currently
+  apply to every scanned text, and `--doctor` warns when `path` is set.
+
+Allowlist entries are part of the config file, so they change its fingerprint
+(sha256 of the file), which is what authorizations compare against.
+
 ---
 
 ## Practical Examples

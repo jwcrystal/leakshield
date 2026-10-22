@@ -121,6 +121,19 @@ describe("custom rule word boundaries", () => {
     expect(customRuleSource({ description: "x", pattern: "KEY\\cA", word_boundary: true })).toBe("\\bKEY\\cA");
   });
 
+  it("does not repeat the pattern in the config error", () => {
+    const pattern = "SYNTHETIC_INTERNAL_TOKEN|OTHER";
+    let message = "";
+    try {
+      parse({ custom_rules: [{ description: "x", pattern, word_boundary: true }] });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain("top-level alternation");
+    // A pattern may itself be the literal the rule protects: never echo it.
+    expect(message).not.toContain("SYNTHETIC_INTERNAL_TOKEN");
+  });
+
   it("respects a boundary the pattern already writes", () => {
     expect(customRuleSource({ description: "x", pattern: "\\bEMP-\\d{6}\\b", word_boundary: true })).toBe(
       "\\bEMP-\\d{6}\\b",

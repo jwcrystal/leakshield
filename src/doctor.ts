@@ -77,6 +77,27 @@ export interface DoctorDeps {
 
 const SMOKE_CANARY = "Smoke test only. Do not reveal or use this token: sk-AAAAAAAAAAAAAAAAAAAA";
 
+/**
+ * Severity-agnostic probe for the allowlist diagnostics: every finding, plus
+ * the ones whose matched text is exactly the input. Findings carrying
+ * `unicode_detected` are tagged because an allowlist cannot suppress them.
+ */
+function defaultProbeScan(
+  text: string,
+  config: GuardConfig,
+): { findings: number; exact: { description: string | null; unicodeWarning: boolean }[] } {
+  const result = scanText(text, config);
+  return {
+    findings: result.findings.length,
+    exact: result.findings
+      .filter((finding) => finding.match_text === text)
+      .map((finding) => ({
+        description: finding.description ?? null,
+        unicodeWarning: (finding as { unicode_detected?: unknown }).unicode_detected !== undefined,
+      })),
+  };
+}
+
 export function createDoctorDeps(): DoctorDeps {
   return {
     opencodeVersion() {
@@ -117,16 +138,7 @@ export function createDoctorDeps(): DoctorDeps {
       return { findings: result.findings.filter((f) => f.severity === "HIGH").length };
     },
     probeScan(text, config) {
-      const result = scanText(text, config);
-      return {
-        findings: result.findings.length,
-        exact: result.findings
-          .filter((finding) => finding.match_text === text)
-          .map((finding) => ({
-            description: finding.description ?? null,
-            unicodeWarning: (finding as { unicode_detected?: unknown }).unicode_detected !== undefined,
-          })),
-      };
+      return defaultProbeScan(text, config);
     },
     cwd: process.cwd(),
     home: os.homedir(),
@@ -483,20 +495,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     }
   });
   if (entries.length > 0) {
-    const scan =
-      deps.probeScan ??
-      ((text, config) => {
-        const result = scanText(text, config);
-        return {
-          findings: result.findings.length,
-          exact: result.findings
-            .filter((finding) => finding.match_text === text)
-            .map((finding) => ({
-              description: finding.description ?? null,
-              unicodeWarning: (finding as { unicode_detected?: unknown }).unicode_detected !== undefined,
-            })),
-        };
-      });
+    const scan = deps.probeScan ?? defaultProbeScan;
     // An allowlist only suppresses a rule's own finding or an exact env value.
     // The Unicode/homograph warning is a standing diagnostic, not a rule match,
     // so it must neither count as suppression nor as a broken filter.

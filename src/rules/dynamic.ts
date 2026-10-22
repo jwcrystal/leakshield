@@ -190,12 +190,16 @@ export function customRuleBoundaries(rule: Pick<CustomRuleConfig, "pattern" | "w
 export function customRuleSource(rule: Pick<CustomRuleConfig, "pattern" | "word_boundary" | "description">): string {
   if (rule.word_boundary !== true) return rule.pattern;
   if (hasTopLevelAlternation(rule.pattern)) {
+    // Static example on purpose: a config error must not repeat the pattern,
+    // which may itself be the literal the rule exists to protect.
     throw new Error(
-      `custom rule "${rule.description}": word_boundary cannot be applied to a top-level alternation; group it as (?:${rule.pattern})`,
+      `custom rule "${rule.description}": word_boundary cannot be applied to a top-level alternation; group it as (?:foo|bar)`,
     );
   }
-  const lead = classifyEdge(firstToken(rule.pattern)) === "word" ? "\\b" : "";
-  const trail = classifyEdge(lastToken(rule.pattern)) === "word" ? "\\b" : "";
+  // One boundary decision for both enforcement and what `--doctor` reports.
+  const edges = customRuleBoundaries(rule);
+  const lead = edges.lead === "added" ? "\\b" : "";
+  const trail = edges.trail === "added" ? "\\b" : "";
   return lead + rule.pattern + trail;
 }
 

@@ -2,6 +2,12 @@
 
 All notable changes are listed here.
 
+## Unreleased
+
+### Fixed
+
+- Cyrillic or Greek text no longer refuses a transparent-mode request on its own. The homograph check used to flag any text that contained a word like `key`, `token` or `api` together with three Cyrillic or Greek letters (or one Cyrillic look-alike), so locale files, Russian comments and Greek math were refused as `unicode_evasion`. Look-alike letters are now folded to Latin and the text is rescanned, the same way zero-width characters are handled; only a finding that appears after folding is reported, as HIGH. On 1,410 files from installed packages this removed 27 of 35 refusals. ([#46](https://github.com/jwcrystal/leakshield/issues/46))
+
 ## 0.1.2 — 2026-10-22
 
 Two changes can affect an existing setup: `url-userinfo` is on by default, so text with a `user:password@` URL is now flagged, and a `custom_rules` pattern that does not compile now fails the config load instead of being skipped. Run `leakshield --doctor` after upgrading.

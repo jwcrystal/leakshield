@@ -506,9 +506,10 @@ settings:
   **Allowlisting a live secret is a real bypass**: the value still leaves the
   machine unmasked, and LeakShield will not report that value as a rule or
   `.env` finding. Use it only for values you have decided are not sensitive.
-  Standing diagnostics are separate: a Unicode/homograph warning is about the
-  text's script mixture, not about a rule match, and an allowlist does not
-  silence it. `--doctor` reports how many entries exist, exercises up to eight
+  Unicode evasion diagnostics are separate: a zero-width or look-alike-letter
+  warning means removing those characters exposes a finding the raw text hides,
+  and an allowlist on the raw text does not silence it. Cyrillic or Greek text
+  on its own is not flagged. `--doctor` reports how many entries exist, exercises up to eight
   of them, and reports how many it could not exercise (a context-dependent
   pattern can only be judged in place). Suppressions are counted rather than
   silent.

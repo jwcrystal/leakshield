@@ -366,6 +366,40 @@ describe("scanText() — zero-width characters flag only when they hide a findin
   });
 });
 
+describe("scanText() — look-alike letters flag only when they hide a finding (#46)", () => {
+  const isUnicodeFinding = (finding: unknown) =>
+    (finding as { unicode_detected?: unknown }).unicode_detected !== undefined;
+
+  it.each([
+    ["a Russian locale entry next to a key identifier", 'export const ru = { apiKey: "Неверный ключ API", token: "Токен истёк" };'],
+    ["a Belarusian error string", 'const messages = { invalid_key: "Няправільны ключ" };'],
+    ["Greek math next to a token variable", "const αβγ = token.length * Math.PI; // secret sauce"],
+    ["a single Cyrillic letter near the word key", "monkey \u0430 business"],
+  ])("does not flag %s", (_name, text) => {
+    const result = scanText(text, defaultConfig);
+    expect(result.findings.some(isUnicodeFinding)).toBe(false);
+    expect(result.safe).toBe(true);
+  });
+
+  it("still reports real findings next to harmless Cyrillic text", () => {
+    const result = scanText("Ключ: sk-Abcdef1234567890abcdef", defaultConfig);
+    expect(result.findings.some(isUnicodeFinding)).toBe(false);
+    expect(result.findings.some((finding) => finding.type === "API_KEY")).toBe(true);
+  });
+
+  it.each([
+    ["a secret keyword with a Cyrillic р", "\u0440assword=Tr0ub4dor&3xYz"],
+    ["an API key prefix with a Cyrillic ѕ", "\u0455k-ant-Abcdef1234567890abcdefghij"],
+    ["an API key prefix with a Greek κ in sk-", "s\u03BA-Abcdef1234567890abcdef"],
+    ["an email with a Cyrillic е before @", "alic\u0435@example.com"],
+    ["a keyword split by both ZWSP and a Cyrillic а", "p\u0430ss\u200Bword=Tr0ub4dor&3xYz"],
+  ])("flags look-alike letters that hide %s", (_name, text) => {
+    const result = scanText(text, defaultConfig);
+    expect(result.findings.find(isUnicodeFinding)?.severity).toBe("HIGH");
+    expect(result.safe).toBe(false);
+  });
+});
+
 describe("scanText() — zero-width characters cannot hide encoded secrets", () => {
   const encodingConfig: GuardConfig = { ...defaultConfig, settings: { ...defaultConfig.settings, encoding_detection: true } };
   const secret = "api key sk-Abcdef1234567890abcdef";

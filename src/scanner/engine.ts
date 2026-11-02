@@ -6,7 +6,7 @@ import { containsAddressInRun, parseCidrList } from "./cidr.js";
 import { redact, getLineCol, getIgnoredLines } from "./utils.js";
 import { t } from "../i18n/index.js";
 import * as encoding from "./encoding.js";
-import { sanitizeForScanning, isLikelyHomographAttack, detectSuspiciousUnicode } from "./unicode.js";
+import { sanitizeForScanning, isLikelyHomographAttack, detectSuspiciousUnicode, foldConfusables } from "./unicode.js";
 
 // Dynamic rules are derived from config; cache per config object so they are
 // rebuilt only when the config reference changes (e.g. after reload_config).
@@ -183,6 +183,39 @@ function collectRuleFindings(
 }
 
 /**
+ * True when `transform` (an evasion-undoing normalization that never moves
+ * line breaks) makes the rules find something the raw text does not. Raw
+ * findings are compared by type and transformed matched text, so a value that
+ * is already detected raw does not count twice.
+ */
+function transformHidesFinding(
+  text: string,
+  transform: (value: string) => string,
+  rawFindings: readonly Finding[],
+  rules: ReturnType<typeof getRules>,
+  config: GuardConfig,
+  ignoredLines: Set<number>,
+): boolean {
+  const transformed = transform(text);
+  if (transformed === text) return false;
+  const identity = (finding: Finding): string => `${finding.type}\0${transform(finding.match_text ?? "")}`;
+  const unmatched = new Map<string, number>();
+  for (const finding of rawFindings) {
+    const id = identity(finding);
+    unmatched.set(id, (unmatched.get(id) ?? 0) + 1);
+  }
+  for (const finding of collectRuleFindings(transformed, rules, config, ignoredLines)) {
+    const id = identity(finding);
+    const remaining = unmatched.get(id) ?? 0;
+    if (remaining === 0) return true;
+    unmatched.set(id, remaining - 1);
+  }
+  return false;
+}
+
+const stripZeroWidth = (value: string): string => value.replace(ZERO_WIDTH_CHARS, "");
+
+/**
  * Zero-width characters are common in harmless text: emoji ZWJ sequences, a
  * BOM at the start of a file, ZWNJ in Persian. They only matter when they
  * splice a sensitive value so the rules miss it (`pass\u200Dword=…`, a key
@@ -197,22 +230,29 @@ function zeroWidthHidesFinding(
   config: GuardConfig,
   ignoredLines: Set<number>,
 ): boolean {
-  const stripped = text.replace(ZERO_WIDTH_CHARS, "");
-  if (stripped === text) return false;
-  const identity = (finding: Finding): string =>
-    `${finding.type}\0${(finding.match_text ?? "").replace(ZERO_WIDTH_CHARS, "")}`;
-  const unmatched = new Map<string, number>();
-  for (const finding of rawFindings) {
-    const id = identity(finding);
-    unmatched.set(id, (unmatched.get(id) ?? 0) + 1);
-  }
-  for (const finding of collectRuleFindings(stripped, rules, config, ignoredLines)) {
-    const id = identity(finding);
-    const remaining = unmatched.get(id) ?? 0;
-    if (remaining === 0) return true;
-    unmatched.set(id, remaining - 1);
-  }
-  return false;
+  return transformHidesFinding(text, stripZeroWidth, rawFindings, rules, config, ignoredLines);
+}
+
+/**
+ * Cyrillic and Greek text is common and harmless in source code: locale
+ * files, comments, UI strings, math. Look-alike letters only matter when they
+ * disguise a sensitive value (`рassword=…` with a Cyrillic `р`, an `sk-` key
+ * with a Greek `κ`). Fold confusables to Latin (zero-width characters removed
+ * too, so a combined splice is caught), rescan, and report only when the
+ * folded text yields a finding the raw text does not (issue #46).
+ */
+function homoglyphHidesFinding(
+  text: string,
+  rawFindings: readonly Finding[],
+  rules: ReturnType<typeof getRules>,
+  config: GuardConfig,
+  ignoredLines: Set<number>,
+): boolean {
+  // Text with zero-width characters but no look-alikes was already judged by
+  // zeroWidthHidesFinding; skip the identical rescan.
+  if (foldConfusables(text) === text) return false;
+  const fold = (value: string): string => foldConfusables(stripZeroWidth(value));
+  return transformHidesFinding(text, fold, rawFindings, rules, config, ignoredLines);
 }
 
 /**
@@ -233,13 +273,14 @@ function scanTextInternal(text: string, config: GuardConfig, opts?: ScanOptions)
 
   // Step 3: Flag suspicious Unicode only when it is an actual threat. This
   // doesn't modify the text, just detects issues.
-  const suspicious = detectSuspiciousUnicode(truncated);
   const zeroWidthEvasion = zeroWidthHidesFinding(truncated, ruleFindings, allRules, config, ignoredLines);
+  const homoglyphEvasion =
+    !zeroWidthEvasion && homoglyphHidesFinding(truncated, ruleFindings, allRules, config, ignoredLines);
   const findings: Finding[] = [];
-  if (zeroWidthEvasion || suspicious.hasHomographs) {
+  if (zeroWidthEvasion || homoglyphEvasion) {
     findings.push({
       type: "CUSTOM",
-      severity: zeroWidthEvasion ? "HIGH" : "MEDIUM",
+      severity: "HIGH",
       line: 1,
       column: 1,
       preview: "****",
@@ -251,8 +292,8 @@ function scanTextInternal(text: string, config: GuardConfig, opts?: ScanOptions)
       match_text: truncated.substring(0, 50), // Only store first 50 chars
       unicode_detected: {
         had_zero_width: zeroWidthEvasion,
-        had_homographs: suspicious.hasHomographs,
-        details: suspicious.details,
+        had_homographs: homoglyphEvasion,
+        details: [zeroWidthEvasion ? "zero-width characters hide a finding" : "look-alike letters hide a finding"],
       },
     } as any);
   }
@@ -278,7 +319,7 @@ function scanTextInternal(text: string, config: GuardConfig, opts?: ScanOptions)
   // Add warnings for Unicode issues and truncation
   const warnings = [];
   if (zeroWidthEvasion) warnings.push("零寬字符");
-  if (suspicious.hasHomographs) warnings.push("可疑 Unicode");
+  if (homoglyphEvasion) warnings.push("可疑 Unicode");
   if (wasTruncated) warnings.push("內容截斷");
 
   const finalSummary = warnings.length > 0

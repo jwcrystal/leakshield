@@ -193,3 +193,35 @@ export function sanitizeForScanning(text: string): {
     },
   };
 }
+
+/**
+ * Cyrillic and Greek letters that render like a Latin letter in common fonts,
+ * mapped to that Latin letter. One UTF-16 unit in, one out, so offsets and
+ * line numbers of the folded text match the original.
+ */
+const CONFUSABLE_TO_LATIN: Readonly<Record<string, string>> = {
+  // Cyrillic lowercase
+  "а": "a", "е": "e", "о": "o", "р": "p", "с": "c",
+  "х": "x", "у": "y", "і": "i", "ј": "j", "ѕ": "s",
+  "ԁ": "d", "һ": "h", "ӏ": "l", "ԛ": "q", "ԝ": "w",
+  // Cyrillic uppercase
+  "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M",
+  "Н": "H", "О": "O", "Р": "P", "С": "C", "Т": "T",
+  "Х": "X", "У": "Y", "І": "I", "Ј": "J", "Ѕ": "S",
+  // Greek lowercase
+  "α": "a", "ο": "o", "ρ": "p", "ν": "v", "ι": "i",
+  "κ": "k", "υ": "u", "χ": "x",
+  // Greek uppercase
+  "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H",
+  "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N", "Ο": "O",
+  "Ρ": "P", "Τ": "T", "Υ": "Y", "Χ": "X",
+};
+const CONFUSABLE_PATTERN = new RegExp(`[${Object.keys(CONFUSABLE_TO_LATIN).join("")}]`, "g");
+
+/**
+ * Replaces Cyrillic/Greek look-alike letters with their Latin counterparts.
+ * Length-preserving; returns the input unchanged when it has none.
+ */
+export function foldConfusables(text: string): string {
+  return text.replace(CONFUSABLE_PATTERN, (char) => CONFUSABLE_TO_LATIN[char] ?? char);
+}

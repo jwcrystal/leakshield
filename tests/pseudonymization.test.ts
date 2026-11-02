@@ -548,6 +548,23 @@ describe("fail-closed content hazards", () => {
     expect(ps.protectText("s", longUnicode)).toEqual({ ok: true, text: longUnicode });
   });
 
+  it("refuses look-alike letters only when they hide a finding (#46)", () => {
+    const ps = makeService();
+    const locale = 'export const ru = { apiKey: "Неверный ключ API", token: "Токен истёк" };';
+    expect(ps.protectText("s", locale)).toEqual({ ok: true, text: locale });
+
+    const disguised = `note s\u03BA${KEY1.slice(2)}`;
+    expect(ps.protectText("s", disguised)).toEqual({ ok: false, reason: "unicode_evasion" });
+  });
+
+  it("refuses an encoded secret disguised with a look-alike letter (#46)", () => {
+    const ps = makeService();
+    const encoded = Buffer.from(`api key ${KEY1}`).toString("base64");
+    const index = encoded.indexOf("a", 12);
+    const disguised = `${encoded.slice(0, index)}\u0430${encoded.slice(index + 1)}`;
+    expect(ps.protectText("s", `api key: ${disguised}`).ok).toBe(false);
+  });
+
   it("refuses an encoded secret split by zero-width characters", () => {
     const ps = makeService();
     const encoded = Buffer.from(`api key ${KEY1}`).toString("base64");

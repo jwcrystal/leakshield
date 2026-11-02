@@ -674,6 +674,57 @@ function validateFindingSpans(
   return { ok: true, spans: deduped };
 }
 
+/**
+ * Other occurrences of detected values that the rules did not report (#52).
+ * Most rules depend on context — `\b` boundaries, validators that look at
+ * neighbours — so the same characters can be a finding in one place and not
+ * in another (`1318289051000.1` vs `1318289051000n`). The absence check below
+ * would then refuse the whole string. Masking those occurrences with the same
+ * token masks strictly more, so they are added here instead. An occurrence
+ * that overlaps a finding, a validated token or a preserved marker is left
+ * alone and still fails the absence check.
+ */
+function repeatOccurrences(
+  text: string,
+  sources: readonly FindingSpan[],
+  blocked: readonly Span[],
+): FindingSpan[] {
+  // One flag per UTF-16 unit: overlap checks cost the span's length, not the
+  // number of spans already taken. Searching each distinct value once costs
+  // the same as the absence check that follows.
+  const taken = new Uint8Array(text.length);
+  const mark = (span: Span): void => {
+    taken.fill(1, span.start, span.end);
+  };
+  const free = (span: Span): boolean => {
+    for (let i = span.start; i < span.end; i++) if (taken[i] === 1) return false;
+    return true;
+  };
+  for (const span of blocked) mark(span);
+  const repeats: FindingSpan[] = [];
+  const seen = new Set<string>();
+  // Longest value first, so a shorter value never splits a longer repeat.
+  const ordered = [...sources].sort((a, b) => b.value.length - a.value.length);
+  for (const source of ordered) {
+    if (source.value.length === 0 || seen.has(source.value)) continue;
+    seen.add(source.value);
+    let from = 0;
+    for (;;) {
+      const at = text.indexOf(source.value, from);
+      if (at === -1) break;
+      const span: Span = { start: at, end: at + source.value.length };
+      if (!free(span)) {
+        from = at + 1;
+        continue;
+      }
+      repeats.push({ ...span, value: source.value, type: source.type, severity: source.severity });
+      mark(span);
+      from = span.end;
+    }
+  }
+  return repeats;
+}
+
 /** Every occurrence of `original` must sit inside a validated token span. */
 function absenceHolds(text: string, original: string, tokenSpans: Span[]): boolean {
   let from = 0;
@@ -799,6 +850,15 @@ function protectStringTx(
     if (owned.spans.some((tokenSpan) => spansOverlap(span, tokenSpan))) {
       return fail("token_overlap");
     }
+  }
+  const repeats = repeatOccurrences(text, [...actionable, ...candidates], [
+    ...actionable,
+    ...owned.spans,
+    ...owned.preserved,
+  ]);
+  if (repeats.length > 0) {
+    actionable.push(...repeats);
+    actionable.sort((a, b) => a.start - b.start);
   }
   for (const finding of candidates) tx.detectedOriginals.add(finding.value);
   for (const span of actionable) tx.detectedOriginals.add(span.value);

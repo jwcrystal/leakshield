@@ -565,6 +565,22 @@ describe("fail-closed content hazards", () => {
     expect(ps.protectText("s", `api key: ${disguised}`).ok).toBe(false);
   });
 
+  it.each([
+    ["a Luhn-shaped number followed by a BigInt suffix", "birthtimeMs: 1318289051000.1,\natimeMs: 1318289051000n,", "1318289051000"],
+    ["a public IPv4 glued to a leading digit", 'ipv4.parse("1213.174.246.205");\nipv6.parse("213.174.246.205");', "213.174.246.205"],
+    ["an email the remote-URL classifier skips", "// username@hostname.com:user/repo\n// proto://username@hostname.com:user/repo", "username@hostname.com"],
+  ])("masks undetected repeats of a detected value instead of refusing: %s (#52)", (_name, text, value) => {
+    const ps = makeService();
+    const result = ps.protectText("s", text);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.text).not.toContain(value);
+    const tokens = tokensIn(result.text);
+    expect(tokens.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(tokens).size).toBe(1);
+    expect(ps.restoreText("s", result.text)).toEqual({ ok: true, text });
+  });
+
   it("refuses an encoded secret split by zero-width characters", () => {
     const ps = makeService();
     const encoded = Buffer.from(`api key ${KEY1}`).toString("base64");

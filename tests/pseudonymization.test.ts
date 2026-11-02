@@ -581,6 +581,21 @@ describe("fail-closed content hazards", () => {
     expect(ps.restoreText("s", result.text)).toEqual({ ok: true, text });
   });
 
+  it.each([
+    ["the detected string comes first", ["ipv6.parse(\"213.174.246.205\")", "ipv4.parse(\"1213.174.246.205\")"]],
+    ["the undetected repeat comes first", ["ipv4.parse(\"1213.174.246.205\")", "ipv6.parse(\"213.174.246.205\")"]],
+  ])("masks undetected repeats across strings of one JSON request when %s (#52)", (_name, parts) => {
+    const ps = makeService();
+    const input = { messages: parts.map((content) => ({ role: "user", content })) };
+    const result = ps.protectJsonForModel("s", input);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const serialized = JSON.stringify(result.value);
+    expect(serialized).not.toContain("213.174.246.205");
+    expect(new Set(tokensIn(serialized)).size).toBe(1);
+    expect(ps.restoreJson("s", result.value)).toEqual({ ok: true, value: input });
+  });
+
   it("refuses an encoded secret split by zero-width characters", () => {
     const ps = makeService();
     const encoded = Buffer.from(`api key ${KEY1}`).toString("base64");

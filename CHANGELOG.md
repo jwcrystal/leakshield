@@ -6,6 +6,8 @@ All notable changes are listed here.
 
 ### Fixed
 
+- Three built-in rules no longer report ordinary source code as secrets. `generic-secret` skips an unquoted value that is a code expression: an env or config member read (`process.env.DB_PASSWORD`, `config.clientSecret`, `os.environ["DB_SECRET"]`) or a call chain (`z.string().min(6)`, `getPassword()`). A call whose arguments hold any other string literal (`decrypt("hunter2hunter2")`) is still reported, and so is a bare `word.word` value. `credit-card` skips a run of one repeated digit and digits inside a UUID. `url-userinfo` and `db-connection` skip a URL whose password is a `${…}`, `{{…}}` or `<…>` placeholder. On 1,410 files from installed packages this cut findings from these four rules from 182 to 58; the rest are literal values such as `password: "aaaaaaaa"`. ([#49](https://github.com/jwcrystal/leakshield/issues/49))
+
 - Cyrillic or Greek text no longer refuses a transparent-mode request on its own. The homograph check used to flag any text that contained a word like `key`, `token` or `api` together with three Cyrillic or Greek letters (or one Cyrillic look-alike), so locale files, Russian comments and Greek math were refused as `unicode_evasion`. Look-alike letters are now folded to Latin and the text is rescanned, the same way zero-width characters are handled; only a finding that appears after folding is reported, as HIGH. On 1,410 files from installed packages this removed 27 of 35 refusals. ([#46](https://github.com/jwcrystal/leakshield/issues/46))
 
 ## 0.1.2 — 2026-10-22

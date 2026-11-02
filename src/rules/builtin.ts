@@ -66,6 +66,79 @@ function publicIPv4(raw: string): boolean {
   return true;
 }
 
+/**
+ * Values on the right of `password:` / `secret =` that are source code, not a
+ * literal: environment lookups, a method-call chain, or a member read off a
+ * config-like object (issue #49). Only the unquoted branch of generic-secret
+ * reaches this, and every form here is narrow on purpose: a bare
+ * `word.word` could be a real password, so it is not exempt.
+ */
+// Call arguments and bracket keys may hold identifiers, numbers or an
+// ENV_NAME-style string, never another literal: `decrypt("hunter2hunter2")`
+// keeps being reported.
+const ARG = `(?:[^()'"\\[\\]]|'[A-Z][A-Z0-9_]*'|"[A-Z][A-Z0-9_]*")*`;
+const IDENT = "[A-Za-z_$][\\w$]*";
+const STEP = `(?:\\??\\.${IDENT}|\\[${ARG}\\]|\\(${ARG}\\))`;
+const TAIL = "[;,)]*$";
+/**
+ * A member/call chain: `z.string().min(6)`, `getPassword()`, `os.getenv("DB_PASS")`.
+ * Every STEP alternative starts with a different character, so matching is
+ * linear; "contains a call" is checked separately rather than with a second
+ * quantified group that would backtrack.
+ */
+const CODE_CHAIN = new RegExp(`^${IDENT}${STEP}*${TAIL}`);
+/** A member read off an env or config-like root: `process.env.X`, `config.clientSecret`. */
+const CONFIG_MEMBER = new RegExp(
+  `^(?:process\\.env|import\\.meta\\.env|os\\.environ|ENV|this|self|config|cfg|conf|settings|options|opts|props|params|args|req|request|ctx|context|env|secrets)${STEP}+${TAIL}`,
+);
+
+/** Longer values are not exempted; a real expression on one line is short. */
+const MAX_EXPRESSION_LENGTH = 256;
+
+function isCodeExpressionValue(match: string): boolean {
+  const value = match.replace(/^[^:=]*[:=]\s*/, "");
+  if (value.length > MAX_EXPRESSION_LENGTH) return false;
+  if (value.startsWith("'") || value.startsWith('"')) return false;
+  return (value.includes("(") && CODE_CHAIN.test(value)) || CONFIG_MEMBER.test(value);
+}
+
+/** A whole-token template placeholder: `${…}`, `{{…}}` or `<…>`. */
+const PLACEHOLDER = /^(?:\$\{[^{}]*\}|\{\{[^{}]*\}\}|<[^<>]*>)$/;
+
+/**
+ * True when the password part of `user:password@` is a template placeholder,
+ * as in `mongodb://${user}:${pass}@host` or `postgres://<user>:<password>@…`.
+ * `userinfo` runs from just after `://` to (and possibly including) the `@`.
+ */
+function placeholderPassword(userinfo: string): boolean {
+  const at = userinfo.lastIndexOf("@");
+  const body = at === -1 ? userinfo : userinfo.slice(0, at);
+  const colon = body.indexOf(":");
+  if (colon === -1) return false;
+  return PLACEHOLDER.test(body.slice(colon + 1));
+}
+
+const UUID_SHAPE = /[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}/g;
+
+/** True when [index, index+length) lies inside a UUID-shaped run in `text`. */
+function insideUuid(text: string, index: number, length: number): boolean {
+  const from = Math.max(0, index - 36);
+  const window = text.slice(from, index + length + 36);
+  for (const uuid of window.matchAll(UUID_SHAPE)) {
+    const start = from + uuid.index;
+    if (start <= index && index + length <= start + uuid[0].length) return true;
+  }
+  return false;
+}
+
+/** Luhn plus shape checks: not one repeated digit, not part of a UUID (#49). */
+function creditCardValid(match: string, context: { text: string; index: number }): boolean {
+  const digits = match.replace(/[^0-9]/g, "");
+  if (/^(\d)\1*$/.test(digits)) return false;
+  if (insideUuid(context.text, context.index, match.length)) return false;
+  return luhnValid(match);
+}
+
 export const BUILTIN_RULES: Rule[] = [
   // ── API Keys / Secrets / Tokens ──────────────────────────────────────────
   {
@@ -147,6 +220,8 @@ export const BUILTIN_RULES: Rule[] = [
     // (?!\$\{) 排除環境變數參照 ${VAR}；(?!\*) 排除遮罩值 ********
     pattern:
       /(?:password|passwd|secret|private_key|client_secret)\s*[:=]\s*(?:['"](?!\$\{)[^'"]{8,}['"]|(?!['"\$\*])\S{8,})/gi,
+    // 無引號值若是程式碼表達式（process.env.X、z.string()、config.secret）不算機密（#49）
+    validate: (match) => !isCodeExpressionValue(match),
   },
   {
     id: "url-userinfo",
@@ -159,6 +234,8 @@ export const BUILTIN_RULES: Rule[] = [
     // 重掃造成二次方成長。
     pattern: /:\/\/[^\s/?#:]*:[^\s/?#]*@/gi,
     skipPrefix: 3,
+    // 密碼段是 ${…}／{{…}}／<…> 模板佔位時不是憑證（#49）
+    validate: (match) => !placeholderPassword(match),
   },
   {
     id: "jwt",
@@ -270,6 +347,8 @@ export const BUILTIN_RULES: Rule[] = [
     description: "資料庫連線字串（含密碼）",
     pattern:
       /(?:mongodb(?:\+srv)?|postgresql|postgres|mysql|redis|mssql):\/\/[^:\s]+:[^@\s]+@[^\s"']+/gi,
+    // 密碼段是模板佔位時不是憑證（#49）
+    validate: (match) => !placeholderPassword(match.slice(match.indexOf("://") + 3)),
   },
   {
     id: "db-connection-ado",
@@ -289,7 +368,7 @@ export const BUILTIN_RULES: Rule[] = [
     description: "信用卡號（Luhn 驗證）",
     // 13–19 位數字，允許空格或連字號分隔；Luhn 不過由 validate 排除
     pattern: /\b(?:[0-9][ -]?){12,18}[0-9]\b/g,
-    validate: luhnValid,
+    validate: creditCardValid,
   },
   {
     id: "iban",

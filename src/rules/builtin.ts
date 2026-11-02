@@ -76,7 +76,9 @@ function publicIPv4(raw: string): boolean {
 // Call arguments and bracket keys may hold identifiers, numbers or an
 // ENV_NAME-style string, never another literal: `decrypt("hunter2hunter2")`
 // keeps being reported.
-const ARG = `(?:[^()'"\\[\\]]|'[A-Z][A-Z0-9_]*'|"[A-Z][A-Z0-9_]*")*`;
+// Backticks and `=` are excluded too, so a template literal or a keyword
+// argument (`hash(pw=…)`) never qualifies.
+const ARG = `(?:[^()'"\`=\\[\\]]|'[A-Z][A-Z0-9_]*'|"[A-Z][A-Z0-9_]*")*`;
 const IDENT = "[A-Za-z_$][\\w$]*";
 const STEP = `(?:\\??\\.${IDENT}|\\[${ARG}\\]|\\(${ARG}\\))`;
 const TAIL = "[;,)]*$";
@@ -102,8 +104,13 @@ function isCodeExpressionValue(match: string): boolean {
   return (value.includes("(") && CODE_CHAIN.test(value)) || CONFIG_MEMBER.test(value);
 }
 
-/** A whole-token template placeholder: `${…}`, `{{…}}` or `<…>`. */
-const PLACEHOLDER = /^(?:\$\{[^{}]*\}|\{\{[^{}]*\}\}|<[^<>]*>)$/;
+/**
+ * A whole-token template placeholder that only names a variable:
+ * `${pass}`, `${cfg.db.password}`, `{{ password }}`, `<password>`. An
+ * interpolation holding a literal (`${"S3cr3tPass"}`) is not a placeholder.
+ */
+const PLACEHOLDER =
+  /^(?:\$\{\s*[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\}|\{\{\s*[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*\s*\}\}|<[A-Za-z][\w -]*>)$/;
 
 /**
  * True when the password part of `user:password@` is a template placeholder,

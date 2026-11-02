@@ -39,6 +39,9 @@ describe("generic-secret — code expressions are not secrets", () => {
     'password = decrypt("hunter2hunter2")',
     // A code-shaped prefix must not hide a literal glued after it.
     "password=process.env.X;secret=realvalue123",
+    // Template literals and keyword arguments are literals, not references.
+    "password = bcrypt.hashSync(`MyRealPass1`)",
+    "password = hash(pw=MyRealPass1)",
   ])("still flags %s", (text) => {
     expect(types(text)).toContain("SECRET");
   });
@@ -66,6 +69,8 @@ describe("url-userinfo / db-connection — template placeholders are not credent
     "mongodb://admin:${DB_PASS}@db.example.com/app",
     "postgres://<user>:<password>@localhost/db",
     "https://{{user}}:{{pass}}@example.com",
+    "postgres://app:${cfg.db.password}@localhost/db",
+    "https://{{ user }}:{{ pass }}@example.com",
   ])("does not flag %s", (text) => {
     const found = types(text);
     expect(found).not.toContain("SECRET");
@@ -76,6 +81,8 @@ describe("url-userinfo / db-connection — template placeholders are not credent
     ["mongodb://admin:S3cr3tPass@db.example.com", "DB_CONNECTION"],
     ["https://u:realpass@host.com", "SECRET"],
     ["mongodb://u:${x}tail@h.example.com", "DB_CONNECTION"],
+    ['mongodb://admin:${"S3cr3tPass"}@db.example.com/app', "DB_CONNECTION"],
+    ["https://admin:${'S3cr3tPass'}@example.com", "SECRET"],
   ])("still flags %s", (text, type) => {
     expect(types(text)).toContain(type);
   });

@@ -339,6 +339,12 @@ interface Transaction {
   staged: SessionMaps | undefined;
   baseline: { entries: number; units: number };
   detectedOriginals: Set<string>;
+  /**
+   * Category of every value detected so far in this operation, so a later
+   * string can mask an undetected repeat of it with the same token (#52).
+   * A JSON retry seeds it from the failed first pass to cover earlier strings.
+   */
+  detectedValues: Map<string, { type: FindingType; severity: Finding["severity"] }>;
   outputStrings: string[];
 }
 
@@ -674,6 +680,57 @@ function validateFindingSpans(
   return { ok: true, spans: deduped };
 }
 
+/**
+ * Other occurrences of detected values that the rules did not report (#52).
+ * Most rules depend on context — `\b` boundaries, validators that look at
+ * neighbours — so the same characters can be a finding in one place and not
+ * in another (`1318289051000.1` vs `1318289051000n`). The absence check below
+ * would then refuse the whole string. Masking those occurrences with the same
+ * token masks strictly more, so they are added here instead. An occurrence
+ * that overlaps a finding, a validated token or a preserved marker is left
+ * alone and still fails the absence check.
+ */
+function repeatOccurrences(
+  text: string,
+  sources: readonly FindingSpan[],
+  blocked: readonly Span[],
+): FindingSpan[] {
+  // One flag per UTF-16 unit: overlap checks cost the span's length, not the
+  // number of spans already taken. Searching each distinct value once costs
+  // the same as the absence check that follows.
+  const taken = new Uint8Array(text.length);
+  const mark = (span: Span): void => {
+    taken.fill(1, span.start, span.end);
+  };
+  const free = (span: Span): boolean => {
+    for (let i = span.start; i < span.end; i++) if (taken[i] === 1) return false;
+    return true;
+  };
+  for (const span of blocked) mark(span);
+  const repeats: FindingSpan[] = [];
+  const seen = new Set<string>();
+  // Longest value first, so a shorter value never splits a longer repeat.
+  const ordered = [...sources].sort((a, b) => b.value.length - a.value.length);
+  for (const source of ordered) {
+    if (source.value.length === 0 || seen.has(source.value)) continue;
+    seen.add(source.value);
+    let from = 0;
+    for (;;) {
+      const at = text.indexOf(source.value, from);
+      if (at === -1) break;
+      const span: Span = { start: at, end: at + source.value.length };
+      if (!free(span)) {
+        from = at + 1;
+        continue;
+      }
+      repeats.push({ ...span, value: source.value, type: source.type, severity: source.severity });
+      mark(span);
+      from = span.end;
+    }
+  }
+  return repeats;
+}
+
 /** Every occurrence of `original` must sit inside a validated token span. */
 function absenceHolds(text: string, original: string, tokenSpans: Span[]): boolean {
   let from = 0;
@@ -799,6 +856,22 @@ function protectStringTx(
     if (owned.spans.some((tokenSpan) => spansOverlap(span, tokenSpan))) {
       return fail("token_overlap");
     }
+  }
+  for (const span of [...actionable, ...candidates]) {
+    if (!tx.detectedValues.has(span.value)) {
+      tx.detectedValues.set(span.value, { type: span.type, severity: span.severity });
+    }
+  }
+  const known: FindingSpan[] = [];
+  for (const [value, category] of tx.detectedValues) known.push({ start: 0, end: 0, value, ...category });
+  const repeats = repeatOccurrences(text, known, [
+    ...actionable,
+    ...owned.spans,
+    ...owned.preserved,
+  ]);
+  if (repeats.length > 0) {
+    actionable.push(...repeats);
+    actionable.sort((a, b) => a.start - b.start);
   }
   for (const finding of candidates) tx.detectedOriginals.add(finding.value);
   for (const span of actionable) tx.detectedOriginals.add(span.value);
@@ -1194,6 +1267,7 @@ function buildService(config: GuardConfig, limits: PseudonymLimits): Pseudonymiz
     staged: undefined,
     baseline: { entries: 0, units: 0 },
     detectedOriginals: new Set(),
+    detectedValues: new Map(),
     outputStrings: [],
   });
 
@@ -1294,29 +1368,45 @@ function buildService(config: GuardConfig, limits: PseudonymLimits): Pseudonymiz
   ): PseudonymJsonResult => {
     if (!isValidSessionId(sessionId)) return fail("invalid_session");
     try {
-      const tx = newTransaction(sessionId);
-      const budget: WalkBudget = { nodes: 0, units: 0 };
-      const result = walkStrictJson(value, 0, new Set(), budget, limits, (text) => {
-        const protectedString = protectStringTx(tx, config, limits, text, budget.units, preserveUnknownMarkers);
-        if (protectedString.ok) tx.outputStrings.push(protectedString.text);
-        return protectedString;
-      });
-      if (!result.ok) return result;
-      for (const outputString of tx.outputStrings) {
-        const tokenSpans = scanOwnedTokenSpans(
-          outputString,
-          (token) => tx.live?.reverse.get(token) !== undefined || tx.staged?.reverse.get(token) !== undefined,
-          preserveUnknownMarkers,
-        );
-        if (!tokenSpans.ok) return tokenSpans;
-        for (const original of tx.detectedOriginals) {
-          if (!absenceHolds(outputString, original, tokenSpans.spans)) {
-            return fail("residual_sensitive_content");
+      // One pass masks a repeat only in strings walked after the value was
+      // detected. If an earlier string still holds one, the cross-string check
+      // refuses; a single retry seeded with every value the first pass found
+      // covers it (#52). Nothing is committed until a pass verifies.
+      let seed: Transaction["detectedValues"] | undefined;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const tx = newTransaction(sessionId);
+        if (seed !== undefined) tx.detectedValues = new Map(seed);
+        const budget: WalkBudget = { nodes: 0, units: 0 };
+        const result = walkStrictJson(value, 0, new Set(), budget, limits, (text) => {
+          const protectedString = protectStringTx(tx, config, limits, text, budget.units, preserveUnknownMarkers);
+          if (protectedString.ok) tx.outputStrings.push(protectedString.text);
+          return protectedString;
+        });
+        if (!result.ok) return result;
+        let residual = false;
+        for (const outputString of tx.outputStrings) {
+          const tokenSpans = scanOwnedTokenSpans(
+            outputString,
+            (token) => tx.live?.reverse.get(token) !== undefined || tx.staged?.reverse.get(token) !== undefined,
+            preserveUnknownMarkers,
+          );
+          if (!tokenSpans.ok) return tokenSpans;
+          for (const original of tx.detectedOriginals) {
+            if (!absenceHolds(outputString, original, tokenSpans.spans)) {
+              residual = true;
+              break;
+            }
           }
+          if (residual) break;
         }
+        if (residual) {
+          seed = tx.detectedValues;
+          continue;
+        }
+        commitTransaction(tx);
+        return result;
       }
-      commitTransaction(tx);
-      return result;
+      return fail("residual_sensitive_content");
     } catch {
       return fail("internal_failure");
     }

@@ -248,6 +248,9 @@ function homoglyphHidesFinding(
   config: GuardConfig,
   ignoredLines: Set<number>,
 ): boolean {
+  // Text with zero-width characters but no look-alikes was already judged by
+  // zeroWidthHidesFinding; skip the identical rescan.
+  if (foldConfusables(text) === text) return false;
   const fold = (value: string): string => foldConfusables(stripZeroWidth(value));
   return transformHidesFinding(text, fold, rawFindings, rules, config, ignoredLines);
 }

@@ -497,7 +497,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   if (entries.length > 0) {
     const scan = deps.probeScan ?? defaultProbeScan;
     // An allowlist only suppresses a rule's own finding or an exact env value.
-    // The Unicode/homograph warning is a standing diagnostic, not a rule match,
+    // A Unicode evasion warning (zero-width or look-alike letters) is not a rule match,
     // so it must neither count as suppression nor as a broken filter.
     const suppressible = (
       exact: { description: string | null; unicodeWarning: boolean }[],

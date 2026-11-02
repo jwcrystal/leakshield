@@ -328,9 +328,10 @@ describe("doctor allowlist reporting", () => {
   });
 
   it("ignores the standing Unicode warning when judging a per-rule entry", async () => {
-    // A Cyrillic character makes an always-on homograph warning with the same
-    // exact text; it is not a rule match, so it must not read as broken.
-    const pattern = "KEY\u0430";
+    // A Cyrillic look-alike that folds into an OpenAI key raises a Unicode
+    // evasion warning with the same exact text; it is not a rule match, so it
+    // must not read as broken.
+    const pattern = "\u0455k-Abcdef1234567890abcdef";
     const config = parse({
       nda_keywords: [],
       custom_rules: [{ description: "safe fixture", pattern, allow: [pattern] }],

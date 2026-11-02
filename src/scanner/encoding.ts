@@ -5,6 +5,7 @@
 
 import type { GuardConfig, ScanResult } from "../types.js";
 import { ZERO_WIDTH_CHARS, scanTextInternal, type ScanOptions } from "./engine.js";
+import { foldConfusables } from "./unicode.js";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -213,7 +214,10 @@ export function scanTextWithDecoding(text: string, config: GuardConfig, opts?: S
   // (a ZWSP in Base64 or hex), so decode the stripped form as well. Each
   // candidate is decoded once even when both forms contain it.
   const stripped = text.replace(ZERO_WIDTH_CHARS, "");
-  const sources = stripped === text ? [text] : [text, stripped];
+  // A Cyrillic/Greek look-alike swapped into an encoded run hides it the same
+  // way, so decode the folded form too (#46). Decoding never recurses.
+  const folded = foldConfusables(stripped);
+  const sources = [...new Set([text, stripped, folded])];
   const decodedCandidates = new Set<string>();
   const firstSighting = (kind: string, candidate: string): boolean => {
     const id = `${kind}\0${candidate}`;

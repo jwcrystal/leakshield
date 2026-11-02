@@ -400,6 +400,17 @@ describe("scanText() — look-alike letters flag only when they hide a finding (
   });
 });
 
+describe("scanText() — look-alike letters cannot hide encoded secrets (#46)", () => {
+  it("flags Base64 whose run is broken by a Cyrillic look-alike", () => {
+    const encoded = Buffer.from("api key sk-Abcdef1234567890abcdef").toString("base64");
+    const index = encoded.indexOf("a", 12);
+    expect(index).toBeGreaterThan(0);
+    const disguised = `${encoded.slice(0, index)}\u0430${encoded.slice(index + 1)}`;
+    const result = scanText(`api key: ${disguised}`, { ...defaultConfig, settings: { ...defaultConfig.settings, encoding_detection: true } });
+    expect(result.safe).toBe(false);
+  });
+});
+
 describe("scanText() — zero-width characters cannot hide encoded secrets", () => {
   const encodingConfig: GuardConfig = { ...defaultConfig, settings: { ...defaultConfig.settings, encoding_detection: true } };
   const secret = "api key sk-Abcdef1234567890abcdef";

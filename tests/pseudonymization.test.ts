@@ -557,6 +557,14 @@ describe("fail-closed content hazards", () => {
     expect(ps.protectText("s", disguised)).toEqual({ ok: false, reason: "unicode_evasion" });
   });
 
+  it("refuses an encoded secret disguised with a look-alike letter (#46)", () => {
+    const ps = makeService();
+    const encoded = Buffer.from(`api key ${KEY1}`).toString("base64");
+    const index = encoded.indexOf("a", 12);
+    const disguised = `${encoded.slice(0, index)}\u0430${encoded.slice(index + 1)}`;
+    expect(ps.protectText("s", `api key: ${disguised}`).ok).toBe(false);
+  });
+
   it("refuses an encoded secret split by zero-width characters", () => {
     const ps = makeService();
     const encoded = Buffer.from(`api key ${KEY1}`).toString("base64");

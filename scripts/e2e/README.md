@@ -48,6 +48,12 @@ Env knobs: `OPENCODE_BIN`, `E2E_TIMEOUT_MS` (default 240000), `E2E_PRINT_LOGS=1`
 | C11-transparent-tool | `{mode:"transparent"}` + `notes.txt` canaries; server forces a `read {path:"notes.txt"}` tool_call on the first main-agent reply | no canary across the tool round-trip; tool result re-masked before the follow-up provider request; ≥1 `[SGP…]` token present. |
 | C12-transparent-resume | `{mode:"transparent"}`; run 1 history contains synthetic sensitive values plus valid foreign and malformed literals of both token versions; run 2 is `--continue` with a canary-free follow-up | both runs must exit cleanly and reach the provider; no canary in either run; minted tokens (the literals do not count) and all literal marker examples must appear in provider requests from both runs. The harness fails if the follow-up prompt itself contains a canary. |
 | C13-transparent-restore | `{mode:"transparent"}` + single secret prompt; the capture server returns the first `[SGP…]` token within a `read {path:…}` tool_call; an isolated fixture's filename equals the original key | no canary in provider requests; the OpenCode `read` tool must complete on the expected repository-relative fixture path (with the original key as basename), and the run must exit cleanly — otherwise `observe`. The captured stdout log redacts this synthetic original. |
+| C19-ws-http-fallback | `{mode:"transparent"}` + Responses provider with `transport: "websocket"` against the HTTP-only capture server | the host's WebSocket connect fails and logs `session websocket connect failed; using http`; the run must exit cleanly, a tools-bearing primary request must carry a `[SGP…]` token over HTTP, and no canary may reach the provider. A missing fallback log fails the case, so a real WebSocket connection or a host change cannot pass silently. |
+
+The capture server has no WebSocket endpoint, so this case covers only the
+host's HTTP fallback. Real WebSocket frame coverage (handshake, send, receive,
+reused connections) is in `run-responses-ws.mjs`, which runs a local `ws`
+server.
 
 C6 doubles as a harness sanity check: if the canary does *not* leak there,
 global (user-level) plugins probably contaminated the run — the orchestrator

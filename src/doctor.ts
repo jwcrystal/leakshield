@@ -228,12 +228,24 @@ function isLeakshieldPath(resolved: string): boolean {
  * LeakShield's rather than as some other plugin.
  */
 function invalidFileUrlId(ref: string): string {
-  let parts: string[];
+  let pathname: string;
   try {
-    parts = new URL(ref).pathname.split("/").filter(Boolean).map((part) => decodeURIComponent(part));
+    pathname = new URL(ref).pathname;
   } catch {
     return ref;
   }
+  const parts = pathname
+    .split("/")
+    .filter(Boolean)
+    .map((part) => {
+      // A malformed escape must not lose the segments after it: the intact
+      // `/leakshield/dist` suffix still identifies the entry.
+      try {
+        return decodeURIComponent(part);
+      } catch {
+        return part;
+      }
+    });
   if (isLeakshieldParts(parts)) return "leakshield";
   return parts[parts.length - 1] ?? ref;
 }

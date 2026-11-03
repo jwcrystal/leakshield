@@ -547,14 +547,25 @@ describe("runDoctor", () => {
   });
 
   it("reports a LeakShield entry with an invalid file:// URL as unloadable (#65)", async () => {
+    // A malformed escape is not a path on any platform, unlike a remote host (a
+    // valid UNC URL on Windows).
     const { deps } = makeFixture({
-      config: () => ({ plugins: ["file://remote-host/opt/leakshield/dist"] }),
+      config: () => ({ plugins: ["file:///bad%/leakshield/dist"] }),
     });
     const report = await runDoctor(deps);
     expect(report.status).toBe("BROKEN");
     const dist = report.checks.find((c) => c.id === "dist");
     expect(dist?.state).toBe("fail");
     expect(dist?.detail).toContain("not a file URL");
+  });
+
+  it("keeps a valid registration from hiding an invalid LeakShield URL (#65)", async () => {
+    const { deps } = makeFixture({
+      config: () => ({ plugins: ["leakshield", "file:///bad%/leakshield/dist"] }),
+    });
+    // Before the tolerant decode this returned PROTECTED: the unloadable entry
+    // was not recognised as LeakShield, so it escaped both checks.
+    expect((await runDoctor(deps)).status).toBe("BROKEN");
   });
 
   it("resolves a relative plugin path from the config file that declared it (#65)", async () => {

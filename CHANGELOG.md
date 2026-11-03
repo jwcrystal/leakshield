@@ -23,6 +23,7 @@ All notable changes are listed here.
 ### Fixed
 
 - A transparent-mode request refused because a string, before or after masking, exceeded `settings.max_chars` now says so. The refusal carried only `reason=truncated_content`; it now names the configured bound and asks to raise it or split the content. Nothing is sent unscanned either way, and the limit's documentation no longer says "truncate", which is what the standalone scanner does, not transparent mode. ([#47](https://github.com/jwcrystal/leakshield/issues/47))
+- Encoded content that decodes to a finding is masked with an `ENCODED` token and restored exactly, instead of refusing the whole transparent-mode request, when the decoder can report the run's exact source span: a percent-encoded email, an encoded email in a URL query string, a `+tag` local part, and a key's whole Base64 or raw hex run. An encoded run hidden by zero-width or look-alike characters, one that crosses an existing token, a structural identifier that carries a secret, and a run whose span cannot be attributed still refuse. ([#48](https://github.com/jwcrystal/leakshield/issues/48))
 
 ## 0.1.3 — 2026-11-03
 

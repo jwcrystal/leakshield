@@ -638,22 +638,26 @@ const CASES = [
     },
   },
   {
-    id: "C19-ws-refused",
-    description: "Explicit WebSocket config overrides plugin HTTP preference: primary route must refuse with a content-free diagnostic",
+    id: "C19-ws-http-fallback",
+    description:
+      "Explicit WebSocket transport on the Responses provider against an HTTP-only capture server: the host's WS connect fails and falls back to HTTP, and the protected HTTP primary carries tokens with no canary",
     plugins: [{ package: DIST_DIR, options: { mode: "transparent" } }],
     prompt: CANARY_PROMPT,
     responsesProvider: true,
     responsesTransport: "websocket",
     printLogs: true,
-    control: { label: "C19-ws-refused" },
+    control: { label: "C19-ws-http-fallback" },
     expectation: (r) => {
       if (r.canariesInProviderRequests.length > 0)
-        return { verdict: "fail", reason: "canary leaked while rejecting WebSocket" };
-      if (r.requests.some((q) => q.hasTools))
-        return { verdict: "fail", reason: "unsupported primary request unexpectedly reached HTTP capture" };
-      if (r.timedOut || r.exitCode === 0 || !r.refusedHooks.includes("experimental.ws.handshake"))
-        return { verdict: "fail", reason: "expected explicit WS handshake refusal was not observed" };
-      return { verdict: "pass", reason: "explicit WS config refused with identified handshake hook; no primary outbound capture" };
+        return { verdict: "fail", reason: "canary leaked to the provider during the WebSocket fallback" };
+      if (r.timedOut || r.exitCode !== 0)
+        return { verdict: "fail", reason: "primary run failed or timed out; the HTTP fallback is not proven" };
+      if (!r.wsHttpFallbackLogged)
+        return { verdict: "fail", reason: "host did not log 'session websocket connect failed; using http': host behaviour changed or a real WebSocket connection was made; inspect out/logs" };
+      const tokenRequests = r.requests.filter((q) => q.hasTools && q.markers.includes("transparentToken")).length;
+      if (tokenRequests === 0)
+        return { verdict: "fail", reason: "no token-bearing primary request reached the HTTP capture after the fallback" };
+      return { verdict: "pass", reason: "WebSocket connect failed and the host fell back to protected HTTP: tokens on the wire, no canary" };
     },
   },
 ];
@@ -1097,6 +1101,7 @@ async function runCase(caseDef, port) {
     assistantParts,
     assistantText,
     refusedHooks: [...new Set((run1.stderr.match(/\[hook=([a-z.]+)\]/g) ?? []).map((value) => value.slice(6, -1)))],
+    wsHttpFallbackLogged: run1.stderr.includes("session websocket connect failed; using http"),
     restoredExactPathRead,
     workdir,
   };

@@ -223,31 +223,29 @@ function isLeakshieldPath(resolved: string): boolean {
 }
 
 /**
- * Best-effort id for a `file://` URL that has no path on this platform, read
- * from its URL path segments, so an unloadable LeakShield entry is reported as
- * LeakShield's rather than as some other plugin.
+ * Best-effort id for a `file://` URL that has no path on this platform. The URL
+ * cannot become a path, so it is read as text: a `leakshield` path segment
+ * anywhere means the entry is LeakShield's and must be reported as unloadable
+ * rather than skipped. Reading the text (instead of URL segments) also covers
+ * the forms that do not parse or do not normalise — a bad host, a malformed
+ * escape, `.` or `..` segments, encoded separators.
  */
 function invalidFileUrlId(ref: string): string {
-  let pathname: string;
-  try {
-    pathname = new URL(ref).pathname;
-  } catch {
-    // The URL is not parseable at all (a bad host, say), but its text can still
-    // end in LeakShield's path: read the segments from the raw reference.
-    pathname = ref.replace(/^file:\/\//, "").split(/[?#]/)[0] ?? "";
-  }
-  const parts = pathname
+  const text = ref.replace(/^file:\/\//, "").split(/[?#]/)[0] ?? "";
+  const parts = text
     .split("/")
     .filter(Boolean)
     .map((part) => {
-      // A malformed escape must not lose the segments after it: the intact
-      // `/leakshield/dist` suffix still identifies the entry.
       try {
         return decodeURIComponent(part);
       } catch {
         return part;
       }
     });
+  const isLeakshieldSegment = parts.some(
+    (part) => part === "leakshield" || part.split(/[\\/]/).includes("leakshield"),
+  );
+  if (isLeakshieldSegment) return "leakshield";
   if (isLeakshieldParts(parts)) return "leakshield";
   return parts[parts.length - 1] ?? ref;
 }

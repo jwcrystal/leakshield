@@ -565,13 +565,24 @@ describe("runDoctor", () => {
     });
     // Before the tolerant decode this returned PROTECTED: the unloadable entry
     // was not recognised as LeakShield, so it escaped both checks.
-    expect((await runDoctor(deps)).status).toBe("BROKEN");
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("BROKEN");
+    const dist = report.checks.find((c) => c.id === "dist");
+    expect(dist?.state).toBe("fail");
+    expect(dist?.detail).toContain("not a file URL");
   });
 
   it("keeps the LeakShield id when the URL itself is unparsable (#65)", async () => {
-    // `new URL` throws on the host, so the id comes from the raw suffix.
+    // `new URL` throws on the host, so the id comes from the raw text.
     const { deps } = makeFixture({
       config: () => ({ plugins: ["leakshield", "file://[bad]/leakshield/dist"] }),
+    });
+    expect((await runDoctor(deps)).status).toBe("BROKEN");
+  });
+
+  it("normalises dot segments in an unloadable file URL (#65)", async () => {
+    const { deps } = makeFixture({
+      config: () => ({ plugins: ["leakshield", "file://[bad]/leakshield/./dist"] }),
     });
     expect((await runDoctor(deps)).status).toBe("BROKEN");
   });

@@ -2,7 +2,13 @@
 
 All notable changes are listed here.
 
-## Unreleased
+## 0.1.3 — 2026-11-03
+
+Mostly fewer false refusals in transparent mode. Three changes narrow detection on purpose and can affect an existing setup: `generic-secret` skips code expressions, `credit-card` skips repeated digits and digits inside a UUID, and `url-userinfo` and `db-connection` skip placeholder passwords. Cyrillic or Greek look-alikes are now reported only when folding them to Latin reveals a finding. The `custom_rules` options below were listed under 0.1.2 by mistake; they ship in this release. Run `leakshield --doctor` after upgrading.
+
+### Added
+
+- `custom_rules` entries accept `flags`, `word_boundary`, `allow` and (reserved) `path`, and `settings.allowlist` adds a global exact-match bypass. `flags` must be a subset of `gimsuy` (`g` is implied, `i` stays the default) and the pattern is compiled with its final flags, so an invalid combination fails the config load. `word_boundary` adds `\b` only at literal ASCII word edges: CJK edges and escaped edges are left alone, an edge that is a group, class or quantifier gets no boundary and `--doctor` warns that the rule is looser than it looks, and a top-level alternation is refused. Allowlists are exact-string only (32 per rule, 64 global, 200 chars each), are surfaced by `--doctor` (which exercises up to eight entries and reports entries it cannot exercise), and are counted when they suppress. `path` is accepted and validated but does not scope yet; `--doctor` says so. ([#32](https://github.com/jwcrystal/leakshield/issues/32))
 
 ### Fixed
 
@@ -12,19 +18,19 @@ All notable changes are listed here.
 
 - Cyrillic or Greek text no longer refuses a transparent-mode request on its own. The homograph check used to flag any text that contained a word like `key`, `token` or `api` together with three Cyrillic or Greek letters (or one Cyrillic look-alike), so locale files, Russian comments and Greek math were refused as `unicode_evasion`. Look-alike letters are now folded to Latin and the text is rescanned, the same way zero-width characters are handled; only a finding that appears after folding is reported, as HIGH. On 1,410 files from installed packages this removed 27 of 35 refusals. ([#46](https://github.com/jwcrystal/leakshield/issues/46))
 
+- Scanning and redaction now advance safely past zero-length regex matches, including Unicode matches next to surrogate pairs. Empty spans produce no finding or replacement; later nonempty matches remain protected. Previously a custom rule such as `\p{ASCII}*` with `flags: "u"` passed configuration validation but could hang both operations. (#32)
+
 ## 0.1.2 — 2026-10-22
 
 Two changes can affect an existing setup: `url-userinfo` is on by default, so text with a `user:password@` URL is now flagged, and a `custom_rules` pattern that does not compile now fails the config load instead of being skipped. Run `leakshield --doctor` after upgrading.
 
 ### Added
 
-- `custom_rules` entries accept `flags`, `word_boundary`, `allow` and (reserved) `path`, and `settings.allowlist` adds a global exact-match bypass. `flags` must be a subset of `gimsuy` (`g` is implied, `i` stays the default) and the pattern is compiled with its final flags, so an invalid combination fails the config load. `word_boundary` adds `\b` only at literal ASCII word edges: CJK edges and escaped edges are left alone, an edge that is a group, class or quantifier gets no boundary and `--doctor` warns that the rule is looser than it looks, and a top-level alternation is refused. Allowlists are exact-string only (32 per rule, 64 global, 200 chars each), are surfaced by `--doctor` (which exercises up to eight entries and reports entries it cannot exercise), and are counted when they suppress. `path` is accepted and validated but does not scope yet; `--doctor` says so. ([#32](https://github.com/jwcrystal/leakshield/issues/32))
 - `url-userinfo` reports the `user:password@` span of an authenticated `scheme://` URL as a HIGH SECRET finding. Only the userinfo is masked; the scheme and host stay readable, and the span is no longer mislabelled as an email address. ([#34](https://github.com/jwcrystal/leakshield/issues/34))
 - `private-ipv4` reports RFC 1918, CGNAT and link-local addresses as `PII_IP`. It is opt-in (`rule_overrides["private-ipv4"]: true`) because address literals also match version numbers and timestamps. `settings.private_cidrs` narrows the rule to an organisation's own networks; an entry that does not parse fails the config load. ([#31](https://github.com/jwcrystal/leakshield/issues/31))
 
 ### Fixed
 
-- Scanning and redaction now advance safely past zero-length regex matches, including Unicode matches next to surrogate pairs. Empty spans produce no finding or replacement; later nonempty matches remain protected. Previously a custom rule such as `\p{ASCII}*` with `flags: "u"` passed configuration validation but could hang both operations. (#32)
 - A dotted run longer than four octets is now reported whole (`10.1.2.3.4` masks the whole run), so an address embedded in it is no longer left unmasked. Before, the pattern consumed the first four groups, the public `1.2.3.4` suffix escaped detection, and transparent mode refused the whole request with `residual_sensitive_content` once the same address appeared elsewhere. ([#40](https://github.com/jwcrystal/leakshield/issues/40))
 - An SSH Git remote (`user@host:path`, `ssh://user@host/…`, `git+ssh://…`) is no longer reported as `PII_EMAIL`. A public repository host is no longer pseudonymized for no privacy gain, and the password half of a remote URL is no longer classified as personal data. Configured private domains and path keywords still apply inside remote URLs. (#34)
 

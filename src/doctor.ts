@@ -757,7 +757,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     detail: options.configPath
       ? `Loaded ${options.configPath}.`
       : validated.length > 1
-        ? `Default guard config resolved for ${validated.length} entries.`
+        ? `Guard configs resolved for ${validated.length} entries.`
         : "Default guard config resolved.",
   });
 

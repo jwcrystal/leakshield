@@ -653,10 +653,13 @@ describe("runDoctor", () => {
   });
 
   it("reports allow when any transparent entry allows attachments (#67)", async () => {
-    const { deps, tmp } = makeFixture({ config: () => ({ plugins: ["leakshield"] }) });
-    writeGlobalConfig(tmp, {
-      plugins: [{ package: "leakshield", options: { mode: "transparent", attachments: "allow" } }],
+    const { deps, tmp } = makeFixture({
+      config: () => ({
+        plugins: [{ package: "leakshield", options: { mode: "transparent", attachments: "allow" } }],
+      }),
     });
+    // The stricter entry comes first, so it wins the tie without the aggregate.
+    writeGlobalConfig(tmp, { plugins: ["leakshield"] });
     const report = await runDoctor(deps);
     expect(report.checks.find((c) => c.id === "coverage")?.detail).toContain("ALLOW");
   });

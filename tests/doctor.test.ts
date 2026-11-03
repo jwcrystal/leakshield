@@ -58,6 +58,15 @@ function makeFixture(overrides: {
 
 const distRef = (tmp: string) => path.join(tmp, "leakshield", "dist");
 
+/** Config in the `.opencode/` directory, which the host applies after the project file. */
+function writeRepoConfig(tmp: string, config: unknown): string {
+  const dir = path.join(tmp, ".opencode");
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, "opencode.json");
+  fs.writeFileSync(file, JSON.stringify(config, null, 2));
+  return file;
+}
+
 /** Global config at the primary root `configRootGroups` probes for `home: tmp`. */
 function writeGlobalConfig(
   tmp: string,
@@ -336,29 +345,51 @@ describe("runDoctor", () => {
     expect(report.checks.find((c) => c.id === "config")?.detail).toBe(file);
   });
 
-  it("reports NOT_REGISTERED when a nearer config replaces the list without LeakShield (#65)", async () => {
+  it("keeps a global registration when the project list adds other plugins (#65)", async () => {
     const { deps, tmp } = makeFixture({ config: () => ({ plugins: ["some-other-plugin"] }) });
-    const globalPath = writeGlobalConfig(tmp, { plugins: ["leakshield"] });
+    writeGlobalConfig(tmp, { plugins: [{ package: "leakshield", options: { mode: "transparent" } }] });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("PROTECTED");
+    expect(report.checks.find((c) => c.id === "registration")?.detail).toContain("with options");
+  });
+
+  it("keeps a global registration when the project list is empty (#65)", async () => {
+    const { deps, tmp } = makeFixture({ config: () => ({ plugins: [] }) });
+    writeGlobalConfig(tmp, { plugins: ["leakshield"] });
+    expect((await runDoctor(deps)).status).toBe("PROTECTED");
+  });
+
+  it("reports the disable entry that would stop the host loading LeakShield (#65)", async () => {
+    const { deps, tmp } = makeFixture({
+      config: () => ({ $schema: "https://opencode.ai/config.json" }),
+    });
+    writeGlobalConfig(tmp, { plugins: ["leakshield"] });
+    const disablePath = writeRepoConfig(tmp, { plugins: ["-leakshield"] });
     const report = await runDoctor(deps);
     expect(report.status).toBe("NOT_REGISTERED");
     const detail = report.checks.find((c) => c.id === "registration")?.detail ?? "";
-    expect(detail).toContain(globalPath);
-    expect(detail).toContain(path.join(tmp, "opencode.json"));
-    expect(detail).toContain("replaces the whole list");
+    expect(detail).toContain(disablePath);
+    expect(detail).toContain('"-leakshield"');
   });
 
-  it("treats an explicit empty project list as replacing the global one (#65)", async () => {
-    const { deps, tmp } = makeFixture({ config: () => ({ plugins: [] }) });
-    const globalPath = writeGlobalConfig(tmp, { plugins: ["leakshield"] });
-    const report = await runDoctor(deps);
-    expect(report.status).toBe("NOT_REGISTERED");
-    expect(report.checks.find((c) => c.id === "registration")?.detail).toContain(globalPath);
+  it("treats -* as disabling every plugin (#65)", async () => {
+    const { deps, tmp } = makeFixture({ config: () => ({ plugins: ["-*"] }) });
+    writeGlobalConfig(tmp, { plugins: ["leakshield"] });
+    expect((await runDoctor(deps)).status).toBe("NOT_REGISTERED");
   });
 
-  it("takes options from the config file that wins the list (#65)", async () => {
-    // If the global entry won, wireProtection=false would make this PARTIAL.
+  it("lets a later entry re-enable what a project list disabled (#65)", async () => {
+    const { deps, tmp } = makeFixture({ config: () => ({ plugins: ["-leakshield"] }) });
+    writeGlobalConfig(tmp, { plugins: ["leakshield"] });
+    writeRepoConfig(tmp, { plugins: ["leakshield"] });
+    expect((await runDoctor(deps)).status).toBe("PROTECTED");
+  });
+
+  it("validates the options of the entry that applied last (#65)", async () => {
+    // The project entry re-applies the plugin without options, so the validated
+    // options are the defaults; the global wireProtection=false no longer wins.
     const { deps, tmp } = makeFixture({ config: () => ({ plugins: [{ package: "leakshield" }] }) });
-    const globalPath = writeGlobalConfig(tmp, {
+    writeGlobalConfig(tmp, {
       plugins: [{ package: "leakshield", options: { mode: "transparent", wireProtection: false } }],
     });
     const report = await runDoctor(deps);
@@ -367,7 +398,6 @@ describe("runDoctor", () => {
     expect(report.checks.find((c) => c.id === "registration")?.detail).toContain(
       `(from ${path.join(tmp, "opencode.json")})`,
     );
-    expect(report.checks.find((c) => c.id === "registration")?.detail).not.toContain(globalPath);
   });
 
   it("reports BROKEN for an unparsable file anywhere in the chain (#65)", async () => {

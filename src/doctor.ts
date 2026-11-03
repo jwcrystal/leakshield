@@ -181,26 +181,6 @@ function matchesLeakshield(entry: string): boolean {
   return /\/leakshield(\/dist(\/opencode\.js)?)?$/.test(entry);
 }
 
-function findRegistration(config: unknown): RegistrationMatch | null {
-  if (!config || typeof config !== "object") return null;
-  const plugins = (config as Record<string, unknown>).plugins;
-  if (Array.isArray(plugins)) {
-    for (const entry of plugins) {
-      if (typeof entry === "string" && matchesLeakshield(entry)) {
-        return { packageRef: entry, options: {}, isLocalDistPath: entry.includes("/") };
-      }
-      if (entry && typeof entry === "object" && !Array.isArray(entry)) {
-        const pkg = (entry as Record<string, unknown>).package;
-        if (typeof pkg === "string" && matchesLeakshield(pkg)) {
-          const options = (entry as Record<string, unknown>).options ?? {};
-          return { packageRef: pkg, options, isLocalDistPath: pkg.includes("/") };
-        }
-      }
-    }
-  }
-  return null;
-}
-
 function registrationSnippet(distDir: string): string {
   return [
     '"plugins": [',
@@ -213,15 +193,21 @@ function registrationSnippet(distDir: string): string {
 }
 
 /**
- * Config locations grouped by root. Within a root, `.json` wins over `.jsonc`;
- * across roots, the workspace is merged with the user config, but the two
- * global roots are alternatives rather than two merged files: the OpenCode
- * docs name `~/.config/opencode` as the user config directory and
- * `/Library/Application Support/opencode` (system-wide) as the managed one, so
- * `~/Library/Application Support/opencode` is only a fallback for a host that
- * keeps its user config there (https://opencode.ai/docs/config/#locations).
+ * Config locations grouped by precedence, highest first.
+ *
+ * OpenCode applies `plugins` from the user config dir, the project root and
+ * `.opencode/`, lowest precedence first (https://opencode.ai/v2/docs/plugins/#configure
+ * lists exactly those three). The two global roots are alternatives rather
+ * than two merged files: the docs name `~/.config/opencode` as the user config
+ * directory, so `~/Library/Application Support/opencode` is only a fallback for
+ * a host that keeps its user config there. Within a root, `.json` wins over
+ * `.jsonc`.
  */
 function configRootGroups(deps: DoctorDeps): string[][] {
+  const dotOpencode = [
+    path.join(deps.cwd, ".opencode", "opencode.json"),
+    path.join(deps.cwd, ".opencode", "opencode.jsonc"),
+  ];
   const workspace = [
     path.join(deps.cwd, "opencode.json"),
     path.join(deps.cwd, "opencode.jsonc"),
@@ -231,6 +217,7 @@ function configRootGroups(deps: DoctorDeps): string[][] {
     path.join(deps.home, "Library", "Application Support"),
   ];
   return [
+    dotOpencode,
     workspace,
     ...configRoots.map((root) => [
       path.join(root, "opencode", "opencode.json"),
@@ -253,23 +240,16 @@ function readConfigFile(deps: DoctorDeps, candidates: string[]): { path: string;
 }
 
 /**
- * Every config file OpenCode reads, in precedence order.
- *
- * OpenCode merges config files instead of replacing them: "Later configs
- * override earlier ones only for conflicting keys. Non-conflicting settings
- * from all configs are preserved" (https://opencode.ai/docs/config/#locations).
- * Judging registration from the first file that exists makes a project
- * `opencode.json` that only sets `$schema` hide a registration in the global
- * config, so doctor reads the whole chain: the workspace file plus the one
- * active global root. A stale file in the inactive fallback root is not read,
- * so it cannot turn a working install into a failure.
+ * Config files doctor reads, highest precedence first: `.opencode/`, the
+ * workspace file, and the one active global root. A stale file in the inactive
+ * fallback root is not read, so it cannot turn a working install into a failure.
  */
 function loadConfigSources(deps: DoctorDeps): {
   sources: ConfigSource[];
   broken: { path: string; error: string } | null;
 } {
-  const [workspaceGroup, ...globalGroups] = configRootGroups(deps);
-  const chosen = [readConfigFile(deps, workspaceGroup)];
+  const [dotOpencodeGroup, workspaceGroup, ...globalGroups] = configRootGroups(deps);
+  const chosen = [readConfigFile(deps, dotOpencodeGroup), readConfigFile(deps, workspaceGroup)];
   for (const group of globalGroups) {
     const file = readConfigFile(deps, group);
     if (!file) continue;
@@ -289,49 +269,83 @@ function loadConfigSources(deps: DoctorDeps): {
   return { sources, broken: null };
 }
 
-function definesPlugins(config: unknown): boolean {
-  return (
-    !!config &&
-    typeof config === "object" &&
-    Object.prototype.hasOwnProperty.call(config, "plugins")
-  );
+function pluginEntryId(entry: unknown): string | null {
+  if (typeof entry === "string") return entry;
+  if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+    const pkg = (entry as Record<string, unknown>).package;
+    return typeof pkg === "string" ? pkg : null;
+  }
+  return null;
 }
 
-interface ResolvedRegistration {
-  registration: RegistrationMatch | null;
-  /** File that supplied the winning `plugins` list. */
-  source: string | null;
-  /** A higher-precedence file replaces the list without LeakShield in it. */
-  replacesAt: string | null;
-  /** The lower-precedence file that does register LeakShield. */
-  registeredAt: string | null;
+interface AppliedPlugin {
+  id: string;
+  options: unknown;
+  source: string;
 }
 
 /**
- * Registration from the merged view: the highest-precedence file that defines
- * `plugins` supplies the list, because an array is replaced as a whole rather
- * than merged element-wise. A project list without LeakShield therefore does
- * unregister a global one, and that case stays a failure — it is reported with
- * both files named instead of as a bare "not registered".
+ * Apply every `plugins` array doctor can read, lowest precedence first, the way
+ * the host does: entries accumulate across files instead of replacing one
+ * another, `-id` / `-prefix.*` / `-*` remove an entry, and a later entry
+ * re-enables it (https://opencode.ai/v2/docs/plugins/#configure, #control).
  */
-function resolveRegistration(sources: ConfigSource[]): ResolvedRegistration {
-  for (let index = 0; index < sources.length; index += 1) {
-    const owner = sources[index];
-    if (!definesPlugins(owner.config)) continue;
-    const registration = findRegistration(owner.config);
-    if (registration) {
-      return { registration, source: owner.path, replacesAt: null, registeredAt: null };
+function applyPluginLists(sourcesLowToHigh: ConfigSource[]): {
+  registered: AppliedPlugin | null;
+  disabled: { source: string; entry: string } | null;
+} {
+  const enabled = new Map<string, AppliedPlugin>();
+  let disabled: { source: string; entry: string } | null = null;
+
+  const removeWhere = (source: string, entry: string, matches: (id: string) => boolean): void => {
+    let removed = false;
+    for (const id of [...enabled.keys()]) {
+      if (!matches(id)) continue;
+      enabled.delete(id);
+      if (matchesLeakshield(id)) removed = true;
     }
-    const registered = sources.slice(index + 1).find((source) => findRegistration(source.config));
-    return {
-      registration: null,
-      source: owner.path,
-      replacesAt: registered ? owner.path : null,
-      registeredAt: registered?.path ?? null,
-    };
+    if (removed) disabled = { source, entry };
+  };
+
+  for (const source of sourcesLowToHigh) {
+    const config = source.config;
+    if (!config || typeof config !== "object") continue;
+    const list = (config as Record<string, unknown>).plugins;
+    if (!Array.isArray(list)) continue;
+    for (const entry of list) {
+      if (typeof entry === "string") {
+        if (entry.startsWith("-")) {
+          const pattern = entry.slice(1);
+          const prefix = pattern.endsWith(".*") ? pattern.slice(0, -2) : null;
+          removeWhere(source.path, entry, (id) =>
+            pattern === "*"
+              ? true
+              : prefix !== null
+                ? id === prefix || id.startsWith(`${prefix}.`)
+                : id === pattern,
+          );
+          continue;
+        }
+        if (entry === "*") continue; // wildcard enable: nothing specific to add
+        enabled.set(entry, { id: entry, options: {}, source: source.path });
+        if (matchesLeakshield(entry)) disabled = null;
+        continue;
+      }
+      const id = pluginEntryId(entry);
+      if (!id) continue;
+      const options = (entry as Record<string, unknown>).options ?? {};
+      enabled.set(id, { id, options, source: source.path });
+      if (matchesLeakshield(id)) disabled = null;
+    }
   }
-  return { registration: null, source: null, replacesAt: null, registeredAt: null };
+
+  let registered: AppliedPlugin | null = null;
+  for (const applied of enabled.values()) {
+    if (matchesLeakshield(applied.id)) registered = applied;
+  }
+  return { registered, disabled: registered ? null : disabled };
 }
+
 
 /**
  * W2 (B5) persistence status — a warn/ok/skip check, never a status flip:
@@ -457,16 +471,22 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     checks.push({ id: "config", state: "ok", detail: configPaths.join(", ") });
   }
 
-  const resolved = resolveRegistration(sources);
-  const registration = resolved.registration;
+  const applied = applyPluginLists([...sources].reverse());
+  const registration: RegistrationMatch | null = applied.registered
+    ? {
+        packageRef: applied.registered.id,
+        options: applied.registered.options,
+        isLocalDistPath: applied.registered.id.includes("/"),
+      }
+    : null;
   const distDir = path.resolve(deps.cwd, "dist");
 
   if (!registration) {
     checks.push({
       id: "registration",
       state: "fail",
-      detail: resolved.registeredAt
-        ? `LeakShield is registered in ${resolved.registeredAt}, but ${resolved.replacesAt} also sets "plugins" without it, and a later config replaces the whole list.`
+      detail: applied.disabled
+        ? `LeakShield is disabled by "${applied.disabled.entry}" in ${applied.disabled.source}, so the host does not load it.`
         : "LeakShield is not registered in the OpenCode config.",
       fix: "Add it (snippet below), then rerun this doctor.",
     });
@@ -479,7 +499,8 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       snippet: registrationSnippet(distDir),
     };
   }
-  const fromSource = resolved.source && sources.length > 1 ? ` (from ${resolved.source})` : "";
+  const fromSource =
+    applied.registered && sources.length > 1 ? ` (from ${applied.registered.source})` : "";
   checks.push({
     id: "registration",
     state: "ok",

@@ -32,7 +32,7 @@
  *                  (new process = new master key; placeholder stability is
  *                  scoped to one live session/server)
  *   C10 transparent leakshield {mode:"transparent"} + canary prompt
- *                  (issue #22): canaries replaced by [SGP1:… tokens at the
+ *                  (issue #22): canaries replaced by [SGP…] tokens at the
  *                  provider boundary; none reach it raw
  *   C11 transparent-tool
  *                  {mode:"transparent"} + notes.txt canaries (capture server
@@ -44,7 +44,7 @@
  *                  must be re-masked; no canary may cross the provider boundary
  *   C13 transparent-restore
  *                  {mode:"transparent"} + single-secret prompt; the capture
- *                  server echoes the [SGP1:…] token back as a tool_call so the
+ *                  server echoes the [SGP…] token back as a tool_call so the
  *                  plugin's pre-execution restoration is proved by the file the
  *                  tool writes (provider never sees the plaintext)
  *   C14 context-file
@@ -61,7 +61,7 @@
  *                  follow-up request must carry the masked error, not the raw one
  *   C17 reply-restore
  *                  {mode:"transparent"}; the provider's text reply references
- *                  the [SGP1:…] token; the user-facing assistant output must
+ *                  the [SGP…] token; the user-facing assistant output must
  *                  show the RESTORED original, never a raw token
  *
  * Safety: all canaries are synthetic (example-test.invalid / sk-CANARYTEST…),
@@ -89,6 +89,7 @@ import path from "node:path";
 import { statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resultExitCode } from "./result-status.mjs";
+import { hasTransparentToken, TRANSPARENT_TOKEN } from "./transparent-token.mjs";
 
 const E2E_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(E2E_DIR, "..", "..");
@@ -118,14 +119,16 @@ const MARKERS = {
   blockedNotice: "[LeakShield blocked",
   redacted: "[REDACTED_",
   deidentified: "[SG-EMAIL-",
-  transparentToken: "[SGP1:",
+  transparentToken: TRANSPARENT_TOKEN.source,
   secondPluginMarker: "SECOND-PLUGIN-MARKER",
 };
 const CANARY_PROMPT =
   "Contact alice.canary@example-test.invalid and bob.canary@example-test.invalid about sk-CANARYTEST1234567890abcdef rotation.";
 const LITERAL_MARKER_FIXTURES = [
   { id: "foreign-valid", value: `[SGP1:${"deadbeef".repeat(4)}-00000001]` },
+  { id: "foreign-valid-v2", value: "[SGP2:PII_EMAIL-abcd-efgh-ijkl]" },
   { id: "malformed-example", value: "[SGP1:…]" },
+  { id: "malformed-example-v2", value: "[SGP2:…]" },
 ];
 
 // ------------------------------------------------------------------ cases --
@@ -327,7 +330,7 @@ const CASES = [
   {
     id: "C10-transparent",
     description:
-      "transparent pseudonymization (issue #22): {mode:\"transparent\"}; canaries must be replaced with [SGP1:… tokens at the provider boundary, none reach it raw",
+      "transparent pseudonymization (issue #22): {mode:\"transparent\"}; canaries must be replaced with [SGP…] tokens at the provider boundary, none reach it raw",
     plugins: [{ package: DIST_DIR, options: { mode: "transparent" } }],
     prompt: CANARY_PROMPT,
     expectation: (r) => {
@@ -343,16 +346,16 @@ const CASES = [
       if (tokenRequests === 0)
         return {
           verdict: "fail",
-          reason: "no [SGP1:… token in any provider request — content was neither blocked nor pseudonymized (check mode/options)",
+          reason: "no [SGP…] token in any provider request — content was neither blocked nor pseudonymized (check mode/options)",
         };
       if (r.timedOut || r.exitCode !== 0)
         return {
           verdict: "observe",
-          reason: `no canary and [SGP1:… tokens present, but the run did not exit cleanly (exit=${r.exitCode}, timedOut=${r.timedOut}); inspect out/logs`,
+          reason: `no canary and [SGP…] tokens present, but the run did not exit cleanly (exit=${r.exitCode}, timedOut=${r.timedOut}); inspect out/logs`,
         };
       return {
         verdict: "pass",
-        reason: `no canary in any provider request; [SGP1:… tokens present in ${tokenRequests} request(s)`,
+        reason: `no canary in any provider request; [SGP…] tokens present in ${tokenRequests} request(s)`,
       };
     },
   },
@@ -377,10 +380,10 @@ const CASES = [
         };
       const tokenRequests = r.requests.filter((q) => q.markers.includes("transparentToken")).length;
       if (tokenRequests === 0)
-        return { verdict: "fail", reason: "no [SGP1:… token in any provider request — tool output was neither blocked nor pseudonymized" };
+        return { verdict: "fail", reason: "no [SGP…] token in any provider request — tool output was neither blocked nor pseudonymized" };
       return {
         verdict: "pass",
-        reason: `no canary across the tool round-trip; [SGP1:… tokens present in ${tokenRequests} request(s)`,
+        reason: `no canary across the tool round-trip; [SGP…] tokens present in ${tokenRequests} request(s)`,
       };
     },
   },
@@ -433,14 +436,14 @@ const CASES = [
         };
       return {
         verdict: "pass",
-        reason: `no canary in any provider request; protected tokens and both literal marker examples observed in run 1 and run 2 after a canary-free follow-up prompt`,
+        reason: `no canary in any provider request; protected tokens and all literal marker examples observed in run 1 and run 2 after a canary-free follow-up prompt`,
       };
     },
   },
   {
     id: "C13-transparent-restore",
     description:
-      "transparent + tool restoration (issue #22): the provider returns a [SGP1:…] token as a read path; the tool must read a local fixture whose filename is the original key, while the provider never sees the plaintext",
+      "transparent + tool restoration (issue #22): the provider returns a [SGP…] token as a read path; the tool must read a local fixture whose filename is the original key, while the provider never sees the plaintext",
     plugins: [{ package: DIST_DIR, options: { mode: "transparent" } }],
     prompt: "Read the deployment key file sk-CANARYTEST1234567890abcdef.",
     control: { label: "C13-transparent-restore", echoTokenNext: true },
@@ -450,7 +453,7 @@ const CASES = [
         return { verdict: "fail", reason: "canary leaked to provider in the transparent restore case" };
       const tokenRequests = r.requests.filter((q) => q.markers.includes("transparentToken")).length;
       if (tokenRequests === 0)
-        return { verdict: "fail", reason: "no [SGP1:… token in any provider request — content was not pseudonymized" };
+        return { verdict: "fail", reason: "no [SGP…] token in any provider request — content was not pseudonymized" };
       if (r.timedOut || r.exitCode !== 0)
         return {
           verdict: "observe",
@@ -481,11 +484,11 @@ const CASES = [
       if (tokenRequests === 0)
         return {
           verdict: "observe",
-          reason: "no [SGP1:… token in any request — this host version may not load AGENTS.md as context in standalone runs; inspect out/captured",
+          reason: "no [SGP…] token in any request — this host version may not load AGENTS.md as context in standalone runs; inspect out/captured",
         };
       return {
         verdict: "pass",
-        reason: "instruction-file canaries replaced by [SGP1:… tokens at the provider boundary",
+        reason: "instruction-file canaries replaced by [SGP…] tokens at the provider boundary",
       };
     },
   },
@@ -538,7 +541,7 @@ const CASES = [
       if (later.some((q) => q.markers.includes("transparentToken")))
         return {
           verdict: "pass",
-          reason: "canary-bearing tool error re-masked ([SGP1:… present) before the follow-up request",
+          reason: "canary-bearing tool error re-masked ([SGP…] present) before the follow-up request",
         };
       return { verdict: "observe", reason: "follow-up clean but no token evidence; inspect out/captured" };
     },
@@ -546,7 +549,7 @@ const CASES = [
   {
     id: "C17-reply-restore",
     description:
-      "transparent + normal conversation: the provider's text reply references the [SGP1:…] token; the user-facing assistant output must show the RESTORED original, never a raw token",
+      "transparent + normal conversation: the provider's text reply references the [SGP…] token; the user-facing assistant output must show the RESTORED original, never a raw token",
     plugins: [{ package: DIST_DIR, options: { mode: "transparent" } }],
     prompt: CANARY_PROMPT,
     control: { label: "C17-reply-restore", echoTokenInTextNext: true },
@@ -564,10 +567,10 @@ const CASES = [
           verdict: "observe",
           reason: "no assistant text observed; rerun with E2E_DUMP_STDOUT=1 and inspect out/logs/C17-reply-restore.stdout.txt",
         };
-      const rawTokenVisible = /\[SGP1:[0-9a-f]{32}-\d{8,12}\]/.test(scoped);
+      const rawTokenVisible = TRANSPARENT_TOKEN.test(scoped);
       const restoredVisible = scoped.includes("alice.canary@example-test.invalid");
       if (rawTokenVisible && !restoredVisible)
-        return { verdict: "fail", reason: "user-facing assistant output shows a raw [SGP1:… token — display restoration missing" };
+        return { verdict: "fail", reason: "user-facing assistant output shows a raw [SGP…] token — display restoration missing" };
       if (rawTokenVisible && restoredVisible)
         return { verdict: "fail", reason: "restored original AND raw token both visible in user-facing output" };
       if (restoredVisible)
@@ -578,7 +581,7 @@ const CASES = [
   {
     id: "C18-anthropic-transparent",
     description:
-      "Phase 3 / Anthropic Messages native protocol: {mode:'transparent'} over an Anthropic-native provider — canaries must arrive as [SGP1:… tokens on /v1/messages, and the token-bearing reply must display restored originals",
+      "Phase 3 / Anthropic Messages native protocol: {mode:'transparent'} over an Anthropic-native provider — canaries must arrive as [SGP…] tokens on /v1/messages, and the token-bearing reply must display restored originals",
     plugins: [{ package: DIST_DIR, options: { mode: "transparent" } }],
     prompt: CANARY_PROMPT,
     anthropicProvider: true,
@@ -592,15 +595,15 @@ const CASES = [
         return { verdict: "fail", reason: "canary leaked to the Anthropic-native provider" };
       const tokenRequests = requests.filter((q) => q.markers.includes("transparentToken")).length;
       if (tokenRequests === 0)
-        return { verdict: "fail", reason: "no [SGP1:… token in any /v1/messages request — body was not pseudonymized" };
+        return { verdict: "fail", reason: "no [SGP…] token in any /v1/messages request — body was not pseudonymized" };
       // Display restore: the reply embeds a token; user-facing output shows originals
       const parts = r.assistantParts ?? [];
       const assistantRole = parts.filter((p) => p.role === "assistant");
       const scoped = assistantRole.length > 0 ? assistantRole.map((p) => p.text).join("\n") : (r.assistantText ?? "");
-      const rawTokenVisible = /\[SGP1:[0-9a-f]{32}-\d{8,12}\]/.test(scoped);
+      const rawTokenVisible = TRANSPARENT_TOKEN.test(scoped);
       const restoredVisible = scoped.includes("alice.canary@example-test.invalid");
       if (rawTokenVisible)
-        return { verdict: "fail", reason: "user-facing output shows a raw [SGP1:… token over the Anthropic route" };
+        return { verdict: "fail", reason: "user-facing output shows a raw [SGP…] token over the Anthropic route" };
       if (restoredVisible)
         return { verdict: "pass", reason: "Anthropic-native round-trip: tokens on the wire, originals in display" };
       return { verdict: "observe", reason: "wire masking proven; display-restore signal missing (reply arming may have missed); inspect out/logs" };
@@ -609,7 +612,7 @@ const CASES = [
   {
     id: "C19-responses-transparent",
     description:
-      "Phase 3 / OpenAI Responses native protocol: {mode:'transparent'} over the OpenAI Responses provider — canaries must arrive as [SGP1:… tokens on /v1/responses, and the token-bearing reply must display restored originals",
+      "Phase 3 / OpenAI Responses native protocol: {mode:'transparent'} over the OpenAI Responses provider — canaries must arrive as [SGP…] tokens on /v1/responses, and the token-bearing reply must display restored originals",
     plugins: [{ package: DIST_DIR, options: { mode: "transparent" } }],
     prompt: CANARY_PROMPT,
     responsesProvider: true,
@@ -627,8 +630,8 @@ const CASES = [
       const parts = r.assistantParts ?? [];
       const assistantRole = parts.filter((p) => p.role === "assistant");
       const scoped = assistantRole.length > 0 ? assistantRole.map((p) => p.text).join("\n") : (r.assistantText ?? "");
-      if (/\[SGP1:[0-9a-f]{32}-\d{8,12}\]/.test(scoped))
-        return { verdict: "fail", reason: "user-facing output shows a raw [SGP1:… token over the Responses route" };
+      if (TRANSPARENT_TOKEN.test(scoped))
+        return { verdict: "fail", reason: "user-facing output shows a raw [SGP…] token over the Responses route" };
       if (scoped.includes("alice.canary@example-test.invalid"))
         return { verdict: "pass", reason: "Responses-native round-trip: tokens on the wire, originals in display" };
       return { verdict: "fail", reason: "primary display-restore signal missing; inspect out/logs" };
@@ -994,6 +997,7 @@ async function runCase(caseDef, port) {
   // channels, so all requests are scanned for canaries.
   const requests = attributed.map((e) => {
     const s = JSON.stringify(e.body);
+    const literalValues = (caseDef.literalMarkers ?? []).map((marker) => marker.value);
     const placeholderCounts = {};
     let m;
     const placeholderRe = /\[SG-EMAIL-([0-9a-f]{16})\]/g;
@@ -1009,7 +1013,7 @@ async function runCase(caseDef, port) {
       file: path.basename(CAPTURED_DIR) + "/" + `${caseDef.id}-${e.seq}.json`,
       canaries: CANARIES.filter((c) => s.includes(c.value)).map((c) => c.key),
       markers: Object.entries(MARKERS)
-        .filter(([, v]) => s.includes(v))
+        .filter(([k, v]) => (k === "transparentToken" ? hasTransparentToken(s, literalValues) : s.includes(v)))
         .map(([k]) => k),
       literalMarkerIds: (caseDef.literalMarkers ?? [])
         .filter((marker) => s.includes(marker.value))

@@ -29,6 +29,7 @@
 import http from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { TRANSPARENT_TOKEN } from "./transparent-token.mjs";
 
 const portArg = process.argv[2] !== undefined ? Number(process.argv[2]) : Number(process.env.PORT || 0);
 if (!Number.isFinite(portArg) || portArg < 0 || portArg > 65535) {
@@ -45,7 +46,7 @@ const state = {
   toolName: "read",
   // Verified against OpenCode v2.0.19: the built-in `read` tool takes `path`.
   toolArgs: { path: "notes.txt" },
-  // One-shot: on the next tools-bearing request, echo the first [SGP1:…] token
+  // One-shot: on the next tools-bearing request, echo the first [SGP…] token
   // found in the body back as a tool_call so the plugin's restoration can be
   // observed (case C13).
   echoTokenNext: false,
@@ -53,7 +54,7 @@ const state = {
   // One-shot (case C15): on the next tools-bearing request, stream a partial
   // reply and destroy the connection — no finish chunk, no [DONE].
   cutStreamNext: false,
-  // One-shot (case C17): the reply TEXT embeds a [SGP1:…] token seen in the
+  // One-shot (case C17): the reply TEXT embeds a [SGP…] token seen in the
   // request, so the orchestrator can verify display restoration end-to-end.
   echoTokenInTextNext: false,
 };
@@ -105,8 +106,8 @@ function nextAssistantMessage(parsed) {
     const userMessages = (parsed.messages || []).filter((m) => m.role === "user");
     const userText = JSON.stringify(userMessages[userMessages.length - 1] ?? {});
     const token =
-      userText.match(/\[SGP1:[0-9a-f]{32}-\d{8,12}\]/)?.[0] ??
-      JSON.stringify(parsed).match(/\[SGP1:[0-9a-f]{32}-\d{8,12}\]/)?.[0];
+      userText.match(TRANSPARENT_TOKEN)?.[0] ??
+      JSON.stringify(parsed).match(TRANSPARENT_TOKEN)?.[0];
     if (token) {
       return {
         message: { role: "assistant", content: `Noted. I will contact ${token} about the rotation.` },
@@ -122,8 +123,8 @@ function nextAssistantMessage(parsed) {
     const userMessages = (parsed.messages || []).filter((m) => m.role === "user");
     const userText = JSON.stringify(userMessages[userMessages.length - 1] ?? {});
     const token =
-      userText.match(/\[SGP1:[0-9a-f]{32}-\d{8,12}\]/)?.[0] ??
-      JSON.stringify(parsed).match(/\[SGP1:[0-9a-f]{32}-\d{8,12}\]/)?.[0];
+      userText.match(TRANSPARENT_TOKEN)?.[0] ??
+      JSON.stringify(parsed).match(TRANSPARENT_TOKEN)?.[0];
     const toolNames = new Set(
       (parsed.tools || []).map((tool) => tool?.function?.name).filter(Boolean),
     );
@@ -274,8 +275,8 @@ function anthropicReplyText(parsed) {
       userMessages[userMessages.length - 1]?.content ?? userMessages[userMessages.length - 1] ?? {},
     );
     const token =
-      userText.match(/\[SGP1:[0-9a-f]{32}-\d{8,12}\]/)?.[0] ??
-      JSON.stringify(parsed).match(/\[SGP1:[0-9a-f]{32}-\d{8,12}\]/)?.[0];
+      userText.match(TRANSPARENT_TOKEN)?.[0] ??
+      JSON.stringify(parsed).match(TRANSPARENT_TOKEN)?.[0];
     if (token) return `Noted. I will contact ${token} about the rotation.`;
   }
   return `ok ${state.label}`;
@@ -333,14 +334,14 @@ function writeAnthropicSse(res, parsed) {
 }
 
 /** OpenAI Responses SSE reply (Phase 3, C19). The reply text embeds an armed
- * [SGP1:…] token (echoTokenInTextNext) so display restoration is provable. */
+ * [SGP…] token (echoTokenInTextNext) so display restoration is provable. */
 function writeResponsesSse(res, parsed) {
   const mainAgentRequest = Array.isArray(parsed?.tools) && parsed.tools.length > 0;
   let text = `ok ${state.label}`;
   if (state.echoTokenInTextNext && mainAgentRequest) {
     state.echoTokenInTextNext = false; // one-shot
     const serialized = JSON.stringify(parsed);
-    const token = serialized.match(/\[SGP1:[0-9a-f]{32}-\d{8,12}\]/)?.[0];
+    const token = serialized.match(TRANSPARENT_TOKEN)?.[0];
     if (token) text = `Noted. I will contact ${token} about the rotation.`;
   }
   const event = (name, data) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;

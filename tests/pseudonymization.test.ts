@@ -355,7 +355,7 @@ describe("issued-token epochs and interior overlaps (deterministic crypto)", () 
     expect(created.restoreText("s", neighbor.text)).toEqual({ ok: true, text: `${KEY1} again ${KEY1}` });
   });
 
-  it("keeps rejecting genuine encoded content adjacent to an owned token", () => {
+  it("masks genuine encoded content adjacent to an owned token (#48)", () => {
     epochHex = EPOCH_HEX_INERT;
     const qRule = { description: "q-marker", pattern: "Q", severity: "HIGH" as const };
     const created = createWithEpoch(configWith({}, [qRule]));
@@ -366,10 +366,16 @@ describe("issued-token epochs and interior overlaps (deterministic crypto)", () 
     if (!first.ok) return;
     // A contiguous 32-hex-char run next to the token decodes to sixteen
     // Qs (passes the detector's 10-char minimum; \x51 escapes decode to a
-    // single char per candidate and stay under it).
-    expect(created.protectText("s", `${first.text} ${"51".repeat(16)}`))
-      .toEqual({ ok: false, reason: "encoded_content" });
-    // The token itself stays restorable next to that refusal.
+    // single char per candidate and stay under it). Its source span is the
+    // whole hex run, so it is masked instead of refused.
+    const run = "51".repeat(16);
+    const masked = created.protectText("s", `${first.text} ${run}`);
+    expect(masked.ok).toBe(true);
+    if (!masked.ok) return;
+    expect(masked.text).not.toContain(run);
+    expect(tokensIn(masked.text)).toHaveLength(2);
+    expect(created.restoreText("s", masked.text)).toEqual({ ok: true, text: `Q ${run}` });
+    // The token itself stays restorable.
     expect(created.restoreText("s", first.text)).toEqual({ ok: true, text: "Q" });
   });
 
@@ -503,15 +509,20 @@ describe("issued-token epochs and interior overlaps (deterministic crypto)", () 
 });
 
 describe("fail-closed content hazards", () => {
-  it("rejects encoded sensitive content regardless of the encoding flag", () => {
+  it("masks encoded sensitive content regardless of the encoding flag (#48)", () => {
     const encoded = Buffer.from(KEY1).toString("base64");
     const withEncoding = createPseudonymizer(configWith({ encoding_detection: true }));
     const withoutEncoding = createPseudonymizer(configWith({ encoding_detection: false }));
     for (const created of [withEncoding, withoutEncoding]) {
       expect(created.ok).toBe(true);
       if (!created.ok) continue;
-      const result = created.protectText("s", `deploy ${encoded} now`);
-      expect(result).toEqual({ ok: false, reason: "encoded_content" });
+      const input = `deploy ${encoded} now`;
+      const result = created.protectText("s", input);
+      expect(result.ok).toBe(true);
+      if (!result.ok) continue;
+      expect(result.text).not.toContain(encoded);
+      expect(result.text).toMatch(/^deploy \[SGP2:ENCODED-[a-z]{4}-[a-z]{4}-[a-z]{4}\] now$/);
+      expect(created.restoreText("s", result.text)).toEqual({ ok: true, text: input });
     }
   });
 
@@ -1397,5 +1408,155 @@ describe("P1 best-effort masking (2026-10-06b policy revision)", () => {
     expect(result.text).not.toContain("KEYWORD-OVERLAP");
     expect(result.text).not.toContain("sk-QwertyuiopAsdfghjklZx");
     expect(tokensIn(result.text)).toHaveLength(1);
+  });
+});
+
+describe("encoded runs are masked when their source span is attributable (#48)", () => {
+  const ENCODED_TOKEN = /\[SGP2:ENCODED-[a-z]{4}-[a-z]{4}-[a-z]{4}\]/g;
+
+  it("masks a percent-encoded email and restores the exact original", () => {
+    const ps = makeService();
+    const result = ps.protectText("s", "user%40example.com");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.text).toMatch(/^\[SGP2:ENCODED-[a-z]{4}-[a-z]{4}-[a-z]{4}\]$/);
+    expect(ps.restoreText("s", result.text)).toEqual({ ok: true, text: "user%40example.com" });
+    // The plain form still masks under its own category.
+    const plain = ps.protectText("s", EMAIL1);
+    expect(plain.ok && tokensIn(plain.text)[0]).toMatch(/^\[SGP2:PII_EMAIL-/);
+  });
+
+  it("masks only the encoded value inside a URL query string", () => {
+    const ps = makeService();
+    const input = "GET https://app.test/path?next=%2Fhome&mail=user%40example.com&page=2 HTTP/1.1";
+    const result = ps.protectText("s", input);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.text.startsWith("GET https://app.test/path?next=%2Fhome&mail=[SGP2:ENCODED-")).toBe(true);
+    expect(result.text.endsWith("]&page=2 HTTP/1.1")).toBe(true);
+    expect(result.text).not.toContain("example.com");
+    expect(result.text.match(ENCODED_TOKEN)).toHaveLength(1);
+    expect(ps.restoreText("s", result.text)).toEqual({ ok: true, text: input });
+  });
+
+  it("masks a plus-tagged local part in full, with no residual prefix", () => {
+    const ps = makeService();
+    const input = "mail=alice.smith+tag%40example.com!";
+    const result = ps.protectText("s", input);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.text).not.toContain("alice");
+    expect(result.text).not.toContain("tag");
+    expect(ps.restoreText("s", result.text)).toEqual({ ok: true, text: input });
+  });
+
+  it("masks a local part longer than the 50-unit window in full, with no residual prefix", () => {
+    const ps = makeService();
+    const input = `mail=${"u".repeat(60)}%40example.com!`;
+    const result = ps.protectText("s", input);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.text).not.toContain("uuuu");
+    expect(result.text).not.toContain("example");
+    expect(result.text.startsWith("mail=[SGP2:ENCODED-")).toBe(true);
+    expect(result.text.endsWith("]!")).toBe(true);
+    expect(ps.restoreText("s", result.text)).toEqual({ ok: true, text: input });
+  });
+
+  it("masks the whole Base64 run of a key and restores exactly", () => {
+    const ps = makeService();
+    const encoded = Buffer.from(KEY1).toString("base64");
+    const input = `blob=${encoded};end`;
+    const result = ps.protectText("s", input);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.text).toMatch(/^blob=\[SGP2:ENCODED-[a-z]{4}-[a-z]{4}-[a-z]{4}\];end$/);
+    expect(ps.restoreText("s", result.text)).toEqual({ ok: true, text: input });
+  });
+
+  it("masks the whole raw hex run of a key and restores exactly", () => {
+    const ps = makeService();
+    const hex = Buffer.from(KEY1).toString("hex");
+    const input = `dump ${hex} end`;
+    const result = ps.protectText("s", input);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.text).not.toContain(hex);
+    expect(result.text.startsWith("dump [SGP2:")).toBe(true);
+    expect(result.text.endsWith("] end")).toBe(true);
+    expect(ps.restoreText("s", result.text)).toEqual({ ok: true, text: input });
+  });
+
+  it("leaves percent text that decodes to nothing sensitive unchanged", () => {
+    const ps = makeService();
+    const input = "q=hello%20world%21&path=%2Fusr%2Flocal";
+    expect(ps.protectText("s", input)).toEqual({ ok: true, text: input });
+  });
+
+  it("masks an encoded email within 50 units of an owned token instead of refusing", () => {
+    const ps = makeService();
+    const issued = ps.protectText("s", KEY1);
+    expect(issued.ok).toBe(true);
+    if (!issued.ok) return;
+    const t = tokensIn(issued.text)[0];
+    const result = ps.protectText("s", `${t} then user%40example.com`);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.text.startsWith(`${t} then [SGP2:ENCODED-`)).toBe(true);
+    expect(result.text).not.toContain("example.com");
+    expect(ps.restoreText("s", result.text)).toEqual({ ok: true, text: `${KEY1} then user%40example.com` });
+  });
+
+  it("gives the same encoded value the same token", () => {
+    const ps = makeService();
+    const result = ps.protectText("s", "a=user%40example.com b=user%40example.com");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const tokens = tokensIn(result.text);
+    expect(tokens).toHaveLength(2);
+    expect(tokens[0]).toBe(tokens[1]);
+    expect(tokens[0]).toMatch(/^\[SGP2:ENCODED-/);
+  });
+
+  it("still refuses an encoded run hidden by zero-width characters", () => {
+    const ps = makeService();
+    const encoded = Buffer.from(`api key ${KEY1}`).toString("base64");
+    const split = `${encoded.slice(0, 12)}​${encoded.slice(12)}`;
+    expect(ps.protectText("s", `data: ${split}`)).toEqual({ ok: false, reason: "encoded_content" });
+  });
+
+  it("still refuses an encoded run hidden by a look-alike letter", () => {
+    const ps = makeService();
+    const encoded = Buffer.from(`api key ${KEY1}`).toString("base64");
+    const index = encoded.indexOf("a", 12);
+    const disguised = `${encoded.slice(0, index)}а${encoded.slice(index + 1)}`;
+    expect(ps.protectText("s", `api key: ${disguised}`)).toEqual({ ok: false, reason: "encoded_content" });
+  });
+
+  it("still refuses structural identifiers that carry an encoded secret", () => {
+    const ps = makeService();
+    const base64 = Buffer.from(KEY1).toString("base64");
+    // Structural positions are never masked, so they are judged strictly.
+    for (const value of ["user%40example.com", `k=${base64}`]) {
+      expect(ps.isTextSafe(value)).toBe(false);
+      expect(ps.isStructuralIdentifierSafe("s", value)).toBe(false);
+    }
+    expect(ps.isTextSafe("hello%20world")).toBe(true);
+    // The same text as a JSON key is protected content and gets masked.
+    const keyed = ps.protectJson("s", { "user%40example.com": "v" });
+    expect(keyed.ok).toBe(true);
+    if (keyed.ok) expect(Object.keys(keyed.value as object)[0]).toMatch(/^\[SGP2:ENCODED-/);
+  });
+
+  it("commits no mapping when a transaction that masked an encoded run is refused", () => {
+    const created = createPseudonymizer(baseConfig, { maxSessions: 1 });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const encoded = Buffer.from(`api key ${KEY1}`).toString("base64");
+    const split = `${encoded.slice(0, 12)}​${encoded.slice(12)}`;
+    const refused = created.protectText("a", `user%40example.com ${split}`);
+    expect(refused.ok).toBe(false);
+    // maxSessions 1: a committed session "a" would refuse "b" with session_limit.
+    expect(created.protectText("b", "user%40example.com").ok).toBe(true);
   });
 });

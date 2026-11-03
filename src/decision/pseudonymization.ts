@@ -42,7 +42,7 @@
 
 import { randomBytes } from "node:crypto";
 import { types } from "node:util";
-import { scanTextWithDecoding } from "../scanner/encoding.js";
+import { locateEncodedRuns, scanTextWithDecoding } from "../scanner/encoding.js";
 import { scanTextInternal, type ScanOptions } from "../scanner/engine.js";
 import type { Finding, FindingType, GuardConfig, ScanResult } from "../types.js";
 import { FINDING_TYPES } from "../types.js";
@@ -431,7 +431,11 @@ function rawScan(text: string, config: GuardConfig): RawScanOutcome {
  * Any truncated scanned representation or any decoded sensitive finding
  * fails closed with a static reason.
  */
-function segmentDecodingHazard(segment: string, config: GuardConfig): PseudonymFailure | null {
+function segmentDecodingHazard(
+  segment: string,
+  config: GuardConfig,
+  encodedMaskable: boolean,
+): PseudonymFailure | null {
   if (segment.length === 0) return null;
   try {
     const scan = scanTextWithDecoding(segment, config, MODEL_BOUNDARY_SCAN);
@@ -440,8 +444,11 @@ function segmentDecodingHazard(segment: string, config: GuardConfig): PseudonymF
       if (decoded.was_truncated) return fail("truncated_content");
     }
     // `decoded` results only exist when a decoded representation was unsafe,
-    // i.e. encoded sensitive content was detected in this segment.
-    if (scan.decoded.length > 0) return fail("encoded_content");
+    // i.e. encoded sensitive content was detected in this segment. The input
+    // scan of protectStringTx tolerates it (encodedMaskable): the encoded
+    // runs are masked there and the strict output rescan refuses whatever
+    // stayed unmasked.
+    if (scan.decoded.length > 0 && !encodedMaskable) return fail("encoded_content");
     return null;
   } catch {
     return fail("scanner_failure");
@@ -480,8 +487,10 @@ const URL_CONTEXT_UNITS = 50;
  *   wholly inside a fragment are that token's own interior and are exempt
  *   BEFORE any overlap consideration, exactly like the full-text seam.
  *   Every other finding — crossing matches and suspicious-Unicode
- *   synthetics included — fails encoded_content; malformed ordinary spans
- *   fail statically. Decoded offsets are never mapped back to the source.
+ *   synthetics included — fails encoded_content (unless the scan is
+ *   encodedMaskable, see scanForModelBoundary); malformed ordinary spans
+ *   fail statically. This function never maps decoded offsets back to the
+ *   source; that mapping lives only in locateEncodedRuns.
  * - URIError in any piece skips the whole candidate, matching the existing
  *   decoder's null return; unexpected exceptions fail scanner_failure.
  *
@@ -495,6 +504,7 @@ function urlContextHazard(
   text: string,
   config: GuardConfig,
   tokenSpans: readonly Span[],
+  encodedMaskable: boolean,
 ): PseudonymFailure | null {
   if (tokenSpans.length === 0) return null;
   URL_PERCENT_RUN.lastIndex = 0;
@@ -576,7 +586,10 @@ function urlContextHazard(
       // Token interior in the changed representation: exempt before overlap.
       if (containedInAnySpan({ start, end }, ownedRanges)) continue;
       // Everything else, including matches crossing a retained fragment,
-      // is decoded sensitive content.
+      // is decoded sensitive content. A maskable (input) scan leaves it to
+      // the strict output rescan: a crossing run is never located, so it is
+      // never masked and the rescan refuses it.
+      if (encodedMaskable) continue;
       return fail("encoded_content");
     }
   }
@@ -597,29 +610,37 @@ function urlContextHazard(
  * behavior. `tokenSpans` must come from scanOwnedTokenSpans (ascending,
  * disjoint) and must already be strictly validated BEFORE this scan runs.
  * Input scan and output verification rescan share this seam.
+ *
+ * `encodedMaskable` (default false, strict) lets a decoding hazard whose
+ * reason is encoded_content (from urlContextHazard or segmentDecodingHazard)
+ * pass; every other reason still fails. Only the INPUT scan of
+ * protectStringTx sets it, because that caller then masks the located
+ * encoded runs and re-verifies the substituted text with the strict default,
+ * which is what refuses any encoded finding left unmasked.
  */
 function scanForModelBoundary(
   text: string,
   config: GuardConfig,
   tokenSpans: readonly Span[],
+  encodedMaskable = false,
 ): RawScanOutcome {
   const direct = rawScan(text, config);
   if (!direct.ok) return direct;
   // Full-text truncation is checked on the whole string, independent of any
   // per-segment accounting.
   if (direct.original.was_truncated) return fail("truncated_content");
-  const urlHazard = urlContextHazard(text, config, tokenSpans);
+  const urlHazard = urlContextHazard(text, config, tokenSpans, encodedMaskable);
   if (urlHazard !== null) return urlHazard;
   let cursor = 0;
   for (const span of tokenSpans) {
     if (span.start > cursor) {
-      const hazard = segmentDecodingHazard(text.slice(cursor, span.start), config);
+      const hazard = segmentDecodingHazard(text.slice(cursor, span.start), config, encodedMaskable);
       if (hazard !== null) return hazard;
     }
     cursor = span.end;
   }
   if (cursor < text.length) {
-    const hazard = segmentDecodingHazard(text.slice(cursor), config);
+    const hazard = segmentDecodingHazard(text.slice(cursor), config, encodedMaskable);
     if (hazard !== null) return hazard;
   }
   return direct;
@@ -778,11 +799,37 @@ function protectStringTx(
   // segment, so issued-token epochs are never decoded as user content,
   // while URL-context windows crossing tokens are checked with the token
   // fragments retained verbatim (see scanForModelBoundary).
-  const scanned = scanForModelBoundary(text, config, owned.spans);
+  // This INPUT scan tolerates encoded_content (#48): encoded runs whose source
+  // span is exactly attributable are masked below. Everything else stays
+  // refused, because the strict output rescan below still reports
+  // encoded_content for any encoded finding left unmasked.
+  const scanned = scanForModelBoundary(text, config, owned.spans, true);
   if (!scanned.ok) return scanned;
 
   const collected = validateFindingSpans(text, scanned.original.findings);
   if (!collected.ok) return collected;
+
+  // Locate encoded runs per non-token segment (the same segmentation as
+  // scanForModelBoundary) and offset them back into the full text.
+  const encodedSpans: FindingSpan[] = [];
+  try {
+    let segmentStart = 0;
+    const locateIn = (from: number, to: number): void => {
+      if (to <= from) return;
+      for (const run of locateEncodedRuns(text.slice(from, to), config, MODEL_BOUNDARY_SCAN)) {
+        const start = from + run.start;
+        const end = from + run.end;
+        encodedSpans.push({ start, end, value: text.slice(start, end), type: "ENCODED", severity: run.severity });
+      }
+    };
+    for (const tokenSpan of owned.spans) {
+      locateIn(segmentStart, tokenSpan.start);
+      segmentStart = tokenSpan.end;
+    }
+    locateIn(segmentStart, text.length);
+  } catch {
+    return fail("scanner_failure");
+  }
 
   // P1 (2026-10-06b): parse uncertainty degrades to best-effort masking.
   // (1) Findings wholly inside a validated owned token are that token's own
@@ -801,6 +848,10 @@ function protectStringTx(
     if (containedInAnySpan(span, owned.spans)) continue;
     candidates.push(span);
   }
+  // Located encoded runs join the direct findings and take the same extend,
+  // sort and union-merge path (overlap with a direct finding is resolved by
+  // the existing severity rule).
+  candidates.push(...encodedSpans);
   const extended: FindingSpan[] = [];
   for (const span of candidates) {
     let bounds: FindingSpan = span;

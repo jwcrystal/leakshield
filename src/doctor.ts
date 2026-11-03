@@ -23,6 +23,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config/loader.js";
 import { defaultKeyfilePath, defaultStorePath } from "./decision/mapping-key.js";
 import { InMemoryMappingKeyProvider, openMappingStore } from "./decision/mapping-store.js";
@@ -176,23 +177,39 @@ interface RegistrationMatch {
   isLocalDistPath: boolean;
 }
 
-function matchesLeakshield(entry: string): boolean {
-  const ref = entry.replace(/^file:\/\//, "");
-  if (ref === "leakshield" || ref.startsWith("leakshield@")) return true;
-  return /\/leakshield(\/dist(\/opencode\.js)?)?$/.test(ref);
+/** A reference the host resolves on disk, rather than an npm package name. */
+const LOCAL_REF = /^(\.{1,2}(\/|$)|\/|file:|[A-Za-z]:[\\/])/;
+
+/** An npm name without its version or tag, so `leakshield@1.2.0` and `leakshield` agree. */
+function packageName(ref: string): string {
+  const at = ref.indexOf("@", 1); // keep a leading @scope
+  return at === -1 ? ref : ref.slice(0, at);
+}
+
+function isLocalRef(ref: string): boolean {
+  return LOCAL_REF.test(ref);
+}
+
+/** Absolute path for a reference the host resolves on disk, or null for a package. */
+function localPathOf(ref: string, baseDir: string): string | null {
+  if (!isLocalRef(ref)) return null;
+  if (ref.startsWith("file:")) return fileURLToPath(ref);
+  return path.resolve(baseDir, ref);
 }
 
 /**
  * The ID a plugin entry registers under, which is what `-id` and `-prefix.*`
- * removals match. LeakShield always resolves to `leakshield` (the id its entry
- * declares in src/opencode.ts), whatever form the entry was written in: the
- * package name, a pinned name, a relative or absolute dist path, a `file://`
- * URL, or a directory. Other entries lose only their `@version`.
+ * removals match. LeakShield resolves to `leakshield` (the id its entry declares
+ * in src/opencode.ts) whatever form the entry was written in — package name,
+ * pinned name, `.`, a relative or absolute dist path, or a `file://` URL — and
+ * every other entry keeps its package name without the `@version`.
  */
-function pluginIdOf(ref: string): string {
-  if (matchesLeakshield(ref)) return "leakshield";
-  const at = ref.indexOf("@", 1); // keep a leading @scope
-  return at === -1 ? ref : ref.slice(0, at);
+function pluginIdOf(ref: string, baseDir: string): string {
+  const local = localPathOf(ref, baseDir);
+  if (local !== null) {
+    return /\/leakshield(\/dist(\/opencode\.js)?)?$/.test(local) ? "leakshield" : path.basename(local);
+  }
+  return packageName(ref);
 }
 
 function registrationSnippet(distDir: string): string {
@@ -349,17 +366,29 @@ function applyPluginLists(sourcesLowToHigh: ConfigSource[]): {
           continue;
         }
         if (entry === "*") {
-          for (const knownEntry of known.values()) enable({ ...knownEntry, source: source.path });
+          // Restores what earlier files configured, keeping each entry's own
+          // directory as its base: only the enabled state changes.
+          for (const knownEntry of known.values()) enable({ ...knownEntry });
           continue;
         }
-        enable({ id: pluginIdOf(entry), ref: entry, options: {}, source: source.path });
+        enable({
+          id: pluginIdOf(entry, path.dirname(source.path)),
+          ref: entry,
+          options: {},
+          source: source.path,
+        });
         continue;
       }
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
       const ref = (entry as Record<string, unknown>).package;
       if (typeof ref !== "string") continue;
       const options = (entry as Record<string, unknown>).options ?? {};
-      enable({ id: pluginIdOf(ref), ref, options, source: source.path });
+      enable({
+        id: pluginIdOf(ref, path.dirname(source.path)),
+        ref,
+        options,
+        source: source.path,
+      });
     }
   }
 
@@ -497,7 +526,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     ? {
         packageRef: appliedEntry.ref,
         options: appliedEntry.options,
-        isLocalDistPath: appliedEntry.ref.includes("/"),
+        isLocalDistPath: isLocalRef(appliedEntry.ref),
       }
     : null;
   const distDir = path.resolve(deps.cwd, "dist");
@@ -532,20 +561,24 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   // whose entry point cannot be resolved, which looks like "no protection"
   // with no visible failure).
   if (registration.isLocalDistPath && registration.packageRef) {
-    // A relative path resolves from the config file that declared it
-    // (https://opencode.ai/v2/docs/plugins/#configure), not from the cwd.
+    // A relative path resolves from the config file that declared it, and a
+    // `file://` URL is decoded rather than used literally
+    // (https://opencode.ai/v2/docs/plugins/#configure).
     const base = appliedEntry ? path.dirname(appliedEntry.source) : deps.cwd;
-    const resolved = path.resolve(base, registration.packageRef.replace(/^file:\/\//, ""));
-    // A directory registration resolves to index.js through the host; an
-    // entry ending in .js points directly at the compiled file.
-    const entryOk = registration.packageRef.endsWith(".js")
-      ? deps.existsFile(resolved)
-      : deps.existsDir(resolved) && deps.existsFile(path.join(resolved, "index.js"));
+    const ref = registration.packageRef;
+    const resolved = ref.startsWith("file:") ? fileURLToPath(ref) : path.resolve(base, ref);
+    // Configured local paths must be directories; the host skips a path that
+    // points at a single file.
+    const isSingleFile = deps.existsFile(resolved);
+    const entryOk =
+      !isSingleFile && deps.existsDir(resolved) && deps.existsFile(path.join(resolved, "index.js"));
     if (!entryOk) {
       checks.push({
         id: "dist",
         state: "fail",
-        detail: `${resolved} is missing or not a loadable entry point — OpenCode will silently log-and-skip this plugin, leaving sessions unprotected.`,
+        detail: isSingleFile
+          ? `${resolved} is a single file; the host skips configured file paths and loads only plugin directories.`
+          : `${resolved} is missing or not a loadable entry point — OpenCode will silently log-and-skip this plugin, leaving sessions unprotected.`,
         fix: "Run `npm run build` in the project root (the snippet expects <project>/dist), or point the entry at the built directory.",
       });
       return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { runDoctor, parseJsonc, formatDoctorReport, type DoctorDeps } from "../src/doctor.js";
 import { buildDynamicRules } from "../src/rules/dynamic.js";
 import type { GuardConfig } from "../src/types.js";
@@ -406,7 +407,7 @@ describe("runDoctor", () => {
     const { deps, tmp } = makeFixture({
       distFiles: true,
       config: (fixtureTmp) => ({
-        plugins: [{ package: distRef(fixtureTmp), options: { mode: "bogus" } }],
+        plugins: ["leakshield", { package: distRef(fixtureTmp), options: { mode: "bogus" } }],
       }),
     });
     writeGlobalConfig(tmp, {
@@ -415,6 +416,56 @@ describe("runDoctor", () => {
     const report = await runDoctor(deps);
     expect(report.status).toBe("BROKEN");
     expect(report.checks.find((c) => c.id === "options")?.state).toBe("fail");
+  });
+
+  it("resolves a restored entry from the file that declared it, not the wildcard's file (#65)", async () => {
+    // distFiles creates <cwd>/leakshield/dist, which the wildcard must not use.
+    const { deps, tmp } = makeFixture({ distFiles: true, config: () => ({ plugins: ["*"] }) });
+    writeGlobalConfig(tmp, { plugins: ["./leakshield/dist"] });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("BROKEN");
+    expect(report.checks.find((c) => c.id === "dist")?.detail).toContain(
+      path.join(tmp, ".config", "opencode", "leakshield", "dist"),
+    );
+  });
+
+  it("keeps a scoped package that merely ends in leakshield separate (#65)", async () => {
+    const { deps } = makeFixture({
+      distFiles: true,
+      config: () => ({ plugins: ["@scope/leakshield"] }),
+    });
+    expect((await runDoctor(deps)).status).toBe("NOT_REGISTERED");
+  });
+
+  it('recognises a plugin directory given as "." (#65)', async () => {
+    const { deps, tmp } = makeFixture({});
+    const root = path.join(tmp, "leakshield");
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(path.join(root, "index.js"), "export {};");
+    fs.writeFileSync(path.join(root, "opencode.json"), JSON.stringify({ plugins: ["."] }));
+    expect((await runDoctor({ ...deps, cwd: root })).status).toBe("PROTECTED");
+  });
+
+  it("fails a configured file path, which the host skips (#65)", async () => {
+    const { deps } = makeFixture({
+      distFiles: true,
+      config: (fixtureTmp) => ({ plugins: [`${distRef(fixtureTmp)}/opencode.js`] }),
+    });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("BROKEN");
+    expect(report.checks.find((c) => c.id === "dist")?.detail).toContain("single file");
+  });
+
+  it("decodes a file:// reference instead of using it literally (#65)", async () => {
+    const { deps, tmp } = makeFixture({});
+    const dir = path.join(tmp, "user name", "leakshield", "dist");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "index.js"), "export {};");
+    fs.writeFileSync(
+      path.join(tmp, "opencode.json"),
+      JSON.stringify({ plugins: [pathToFileURL(dir).href] }),
+    );
+    expect((await runDoctor(deps)).status).toBe("PROTECTED");
   });
 
   it("resolves a relative plugin path from the config file that declared it (#65)", async () => {

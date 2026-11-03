@@ -76,6 +76,7 @@ export const FINDING_TYPES = [
   "PII_IBAN",
   "PII_IP",
   "PII_URL",
+  "ENCODED",
 ] as const;
 
 export type FindingType = (typeof FINDING_TYPES)[number];

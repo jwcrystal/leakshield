@@ -821,8 +821,11 @@ function buildConfig(caseDef, port) {
     };
   }
   // Phase 3 (C19): an OpenAI Responses-native provider pointed at the same
-  // capture server. Explicit transport config has higher precedence than
-  // plugin provider transforms; test that refusal separately from HTTP.
+  // capture server. Explicit transport config wins over plugin provider
+  // transforms, so a case can force `transport: "websocket"`; this capture
+  // server has no WS endpoint, so the host logs its fallback and retries over
+  // HTTP. C19-ws-http-fallback asserts that fallback; real WS frame coverage
+  // is in run-responses-ws.mjs.
   if (caseDef.responsesProvider) {
     providers[caseDef.responsesProviderID ?? "capture-responses"] = {
       name: "Capture Responses",

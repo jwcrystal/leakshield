@@ -7,6 +7,14 @@ on:
 
 permissions:
   contents: write
+  # Trusted publishing: npm authenticates this run with a GitHub OIDC token
+  # instead of a stored NPM_TOKEN. The publisher must be configured once on
+  # npmjs.com (package settings -> Trusted Publisher) with repository
+  # jwcrystal/leakshield and workflow filename "release.yml" — npm pins that
+  # filename, so renaming this file requires updating the setting too.
+  # Provenance is not generated: the repository is private, and npm skips
+  # attestations for private source repositories even with OIDC.
+  id-token: write
 
 jobs:
   release:
@@ -50,6 +58,18 @@ jobs:
           ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
           if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
             echo "See CHANGELOG.md for the full list of changes." > "$RUNNER_TEMP/notes.md"
+          fi
+
+      # Publish the same commit that the release points at, before the release
+      # is created: a failed publish then leaves nothing half-published, and a
+      # rerun of this workflow skips the versions that already shipped.
+      - name: Publish to npm (skip if the version is already there)
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if npm view "leakshield@$VERSION" version >/dev/null 2>&1; then
+            echo "leakshield@$VERSION is already on npm, skipping"
+          else
+            npm publish
           fi
 
       - name: Create or update the release

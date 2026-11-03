@@ -44,7 +44,7 @@ npx tsc --noEmit               # 型別檢查
 ## 2) 60 秒接上 OpenCode Plugin（主力）
 
 1. 先 `npm run build`。
-2. 在 `opencode.json` 的 plugin 設定加入 build 後的 `dist` 目錄（OpenCode v2）或 `dist/opencode.js`（v1）。建議的 hook-first 設定範本：[`config/opencode.hook-first.example.json`](../config/opencode.hook-first.example.json)。
+2. 在 `opencode.json` 的 plugin 設定加入 build 後的 `dist` 目錄（僅支援 OpenCode v2）。建議的 hook-first 設定範本：[`config/opencode.hook-first.example.json`](../config/opencode.hook-first.example.json)。
 3. 跑安裝檢查：
 
 ```bash
@@ -52,7 +52,7 @@ npm run scan -- --doctor
 ```
 
 - `PROTECTED`：完整保護（v2）。
-- `PARTIAL`：僅部分保護（v1 只有 session hooks；hook-first 設定也會顯示 `PARTIAL`）。
+- `PARTIAL`：僅部分保護（hook-first 設定會顯示 `PARTIAL`）。
 - 其他狀態：會印出失敗的檢查項與修正方式。
 
 > `--doctor` 只檢查安裝，看不到執行中的 session。要確認真的有擋，請照 README 的 smoke test，用 `sk-` 加 20 個英數字的**合成 key** 測，不要用真實憑證。

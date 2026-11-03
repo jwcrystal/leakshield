@@ -2,6 +2,19 @@
 
 All notable changes are listed here.
 
+## Unreleased
+
+**Breaking:** OpenCode v1 is no longer supported. LeakShield supports OpenCode v2 only. Run `leakshield --doctor` after upgrading.
+
+### Removed
+
+- OpenCode v1 support. A v1 host that loads the package now gets hooks that fail closed and abort every model request with a message that says to upgrade to OpenCode v2; it no longer runs `block` mode with the legacy hooks, and the v1 env query tools are gone. `leakshield --doctor` reports `BROKEN` for a v1 host, with the fix "upgrade to OpenCode v2". Upgrade to OpenCode v2.
+- `@opencode-ai/plugin` is no longer installed with the package. It moved to `devDependencies` (type-only imports, erased at build), which removes 28 transitive packages from every install, including `effect` and its `toml` dependency with 4 high advisories, `zod@4.1.8` and `msgpackr-extract` with an install script.
+
+### Changed
+
+- The default `mode` is always `transparent`; there is no longer a per-host default. `block` stays available with `"mode": "block"`.
+
 ## 0.1.3 — 2026-11-03
 
 Mostly fewer false refusals in transparent mode. Three changes narrow detection on purpose and can affect an existing setup: `generic-secret` skips code expressions, `credit-card` skips repeated digits and digits inside a UUID, and `url-userinfo` and `db-connection` skip placeholder passwords. Cyrillic or Greek look-alikes are now reported only when folding them to Latin reveals a finding. The `custom_rules` options below were listed under 0.1.2 by mistake; they ship in this release. Run `leakshield --doctor` after upgrading.

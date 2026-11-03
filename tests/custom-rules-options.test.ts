@@ -243,19 +243,17 @@ describe("allowlist fingerprint", () => {
 
 function makeDoctorFixture(
   guardConfig: GuardConfig,
-  options: { smokeScan?: DoctorDeps["smokeScan"]; probeScan?: DoctorDeps["probeScan"]; v1?: boolean } = {},
+  options: { smokeScan?: DoctorDeps["smokeScan"]; probeScan?: DoctorDeps["probeScan"] } = {},
 ) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sg-doctor-allow-"));
   const dist = path.join(tmp, "leakshield", "dist");
   fs.mkdirSync(dist, { recursive: true });
   fs.writeFileSync(path.join(dist, "index.js"), "export {};");
   fs.writeFileSync(path.join(dist, "opencode.js"), "export {};");
-  const config = options.v1
-    ? { plugin: [path.join(dist, "opencode.js")] }
-    : { plugins: [{ package: dist }] };
+  const config = { plugins: [{ package: dist }] };
   fs.writeFileSync(path.join(tmp, "opencode.json"), JSON.stringify(config, null, 2));
   const deps: DoctorDeps = {
-    opencodeVersion: () => (options.v1 ? "opencode 1.18.29" : "opencode v2.0.23"),
+    opencodeVersion: () => "opencode v2.0.23",
     readIfExists(p) {
       try {
         return fs.readFileSync(p, "utf8");
@@ -366,13 +364,6 @@ describe("doctor allowlist reporting", () => {
     const report = await runDoctor(deps);
     const check = report.checks.find((entry) => entry.id === "allowlist");
     expect(check?.state).toBe("fail");
-    expect(report.status).toBe("BROKEN");
-  });
-
-  it("reports BROKEN on a v1 host too", async () => {
-    const config = parse({ settings: { allowlist: ["user@example.com"] } });
-    const deps = makeDoctorFixture(config, { probeScan: () => ({ findings: 1, exact: [{ description: "x", unicodeWarning: false }] }), v1: true });
-    const report = await runDoctor(deps);
     expect(report.status).toBe("BROKEN");
   });
 

@@ -536,6 +536,27 @@ describe("runDoctor", () => {
     expect((await runDoctor(deps)).status).toBe("PROTECTED");
   });
 
+  it("does not crash on an unrelated plugin with an invalid file:// URL (#65)", async () => {
+    const { deps } = makeFixture({
+      distFiles: true,
+      config: (fixtureTmp) => ({
+        plugins: ["file:///tmp/other%2Fplugin", { package: distRef(fixtureTmp), options: { mode: "transparent" } }],
+      }),
+    });
+    expect((await runDoctor(deps)).status).toBe("PROTECTED");
+  });
+
+  it("reports a LeakShield entry with an invalid file:// URL as unloadable (#65)", async () => {
+    const { deps } = makeFixture({
+      config: () => ({ plugins: ["file://remote-host/opt/leakshield/dist"] }),
+    });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("BROKEN");
+    const dist = report.checks.find((c) => c.id === "dist");
+    expect(dist?.state).toBe("fail");
+    expect(dist?.detail).toContain("not a file URL");
+  });
+
   it("resolves a relative plugin path from the config file that declared it (#65)", async () => {
     const { deps, tmp } = makeFixture({});
     const dir = path.join(tmp, ".opencode", "leakshield", "dist");

@@ -190,11 +190,27 @@ function isLocalRef(ref: string): boolean {
   return path.sep === "\\" && (/^[A-Za-z]:[\\/]/.test(ref) || ref.startsWith("\\\\"));
 }
 
-/** Absolute path for a reference the host resolves on disk, or null for a package. */
-function localPathOf(ref: string, baseDir: string): string | null {
+/**
+ * The path a `file://` reference names, or null when the URL cannot become a
+ * path on this platform (an encoded separator, a remote host). The host cannot
+ * load such an entry either, so doctor reports it instead of crashing on it.
+ */
+function filePathOf(ref: string): string | null {
+  try {
+    return fileURLToPath(ref);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Absolute path for a reference the host resolves on disk, or null for a
+ * package. An invalid `file://` URL is local but its `path` is null.
+ */
+function localPathOf(ref: string, baseDir: string): { path: string | null } | null {
   if (!isLocalRef(ref)) return null;
-  if (ref.startsWith("file://")) return fileURLToPath(ref);
-  return path.resolve(baseDir, ref);
+  if (ref.startsWith("file://")) return { path: filePathOf(ref) };
+  return { path: path.resolve(baseDir, ref) };
 }
 
 /**
@@ -203,7 +219,26 @@ function localPathOf(ref: string, baseDir: string): string | null {
  * as a separator would identify an unrelated plugin directory as LeakShield.
  */
 function isLeakshieldPath(resolved: string): boolean {
-  const parts = resolved.replace(/[\\/]+$/, "").split(path.sep).filter(Boolean);
+  return isLeakshieldParts(resolved.replace(/[\\/]+$/, "").split(path.sep).filter(Boolean));
+}
+
+/**
+ * Best-effort id for a `file://` URL that has no path on this platform, read
+ * from its URL path segments, so an unloadable LeakShield entry is reported as
+ * LeakShield's rather than as some other plugin.
+ */
+function invalidFileUrlId(ref: string): string {
+  let parts: string[];
+  try {
+    parts = new URL(ref).pathname.split("/").filter(Boolean).map((part) => decodeURIComponent(part));
+  } catch {
+    return ref;
+  }
+  if (isLeakshieldParts(parts)) return "leakshield";
+  return parts[parts.length - 1] ?? ref;
+}
+
+function isLeakshieldParts(parts: string[]): boolean {
   const tail = parts[parts.length - 1];
   const parent = parts[parts.length - 2];
   const grand = parts[parts.length - 3];
@@ -222,7 +257,8 @@ function isLeakshieldPath(resolved: string): boolean {
 function pluginIdOf(ref: string, baseDir: string): string {
   const local = localPathOf(ref, baseDir);
   if (local !== null) {
-    return isLeakshieldPath(local) ? "leakshield" : path.basename(local);
+    if (local.path === null) return invalidFileUrlId(ref);
+    return isLeakshieldPath(local.path) ? "leakshield" : path.basename(local.path);
   }
   return packageName(ref);
 }
@@ -603,15 +639,17 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       // A relative path resolves from the config file that declared it, and a
       // `file://` URL is decoded rather than used literally
       // (https://opencode.ai/v2/docs/plugins/#configure).
-      const resolved = entry.ref.startsWith("file:")
-        ? fileURLToPath(entry.ref)
-        : path.resolve(path.dirname(entry.source), entry.ref);
+      const local = localPathOf(entry.ref, path.dirname(entry.source));
+      if (local?.path == null) {
+        return { entry, resolved: entry.ref, isSingleFile: false, invalidUrl: true, ok: false };
+      }
+      const resolved = local.path;
       // Configured local paths must be directories; the host skips a path that
       // points at a single file.
       const isSingleFile = deps.existsFile(resolved);
       const ok =
         !isSingleFile && deps.existsDir(resolved) && deps.existsFile(path.join(resolved, "index.js"));
-      return { entry, resolved, isSingleFile, ok };
+      return { entry, resolved, isSingleFile, invalidUrl: false, ok };
     });
   if (localEntries.length > 0) {
     const broken = localEntries.find((local) => !local.ok);
@@ -619,10 +657,14 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       checks.push({
         id: "dist",
         state: "fail",
-        detail: broken.isSingleFile
+        detail: broken.invalidUrl
+          ? `"${broken.entry.ref}" (${broken.entry.source}) is not a file URL this platform can turn into a path, so the host cannot load it and sessions are left unprotected.`
+          : broken.isSingleFile
           ? `${broken.resolved} (from "${broken.entry.ref}") is a single file; the host skips configured file paths and loads only plugin directories.`
           : `${broken.resolved} (from "${broken.entry.ref}") is missing or not a loadable entry point — OpenCode will silently log-and-skip this plugin, leaving sessions unprotected.`,
-        fix: "Run `npm run build` in the project root (the snippet expects <project>/dist), or point the entry at the built directory.",
+        fix: broken.invalidUrl
+          ? "Write the entry as a plain absolute path or a local file:// URL without encoded separators."
+          : "Run `npm run build` in the project root (the snippet expects <project>/dist), or point the entry at the built directory.",
       });
       return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
     }

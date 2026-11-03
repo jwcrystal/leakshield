@@ -18,7 +18,8 @@ function makeFixture(overrides: {
   if (overrides.distFiles) {
     fs.mkdirSync(path.join(pluginRoot, "dist"), { recursive: true });
     fs.writeFileSync(path.join(pluginRoot, "dist", "index.js"), "export {};");
-    // A registration may point at the compiled opencode.js file directly
+    // The host records this file for the legacy registration shape; v2 configs
+    // point at the directory.
     fs.writeFileSync(path.join(pluginRoot, "dist", "opencode.js"), "export {};");
   }
   const config = overrides.config?.(tmp);
@@ -437,13 +438,40 @@ describe("runDoctor", () => {
     expect((await runDoctor(deps)).status).toBe("NOT_REGISTERED");
   });
 
-  it('recognises a plugin directory given as "." (#65)', async () => {
+  it('recognises a plugin directory given as "./" (#65)', async () => {
+    const { deps, tmp } = makeFixture({});
+    const root = path.join(tmp, "leakshield");
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(path.join(root, "index.js"), "export {};");
+    fs.writeFileSync(path.join(root, "opencode.json"), JSON.stringify({ plugins: ["./"] }));
+    expect((await runDoctor({ ...deps, cwd: root })).status).toBe("PROTECTED");
+  });
+
+  it('does not rebase a bare "." that the host resolves as a package (#65)', async () => {
     const { deps, tmp } = makeFixture({});
     const root = path.join(tmp, "leakshield");
     fs.mkdirSync(root, { recursive: true });
     fs.writeFileSync(path.join(root, "index.js"), "export {};");
     fs.writeFileSync(path.join(root, "opencode.json"), JSON.stringify({ plugins: ["."] }));
-    expect((await runDoctor({ ...deps, cwd: root })).status).toBe("PROTECTED");
+    expect((await runDoctor({ ...deps, cwd: root })).status).toBe("NOT_REGISTERED");
+  });
+
+  it("keeps a prefix removal off the prefix's own id (#65)", async () => {
+    const { deps } = makeFixture({ config: () => ({ plugins: ["leakshield", "-leakshield.*"] }) });
+    expect((await runDoctor(deps)).status).toBe("PROTECTED");
+  });
+
+  it("keeps the options an earlier config set when a later ID re-enables it (#65)", async () => {
+    const { deps, tmp } = makeFixture({
+      distFiles: true,
+      config: () => ({ plugins: ["leakshield"] }),
+    });
+    writeGlobalConfig(tmp, {
+      plugins: [{ package: distRef(tmp), options: { mode: "transparent", wireProtection: false } }],
+    });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("PARTIAL");
+    expect(report.checks.find((c) => c.id === "options")?.detail).toContain("wireProtection=false");
   });
 
   it("fails a configured file path, which the host skips (#65)", async () => {

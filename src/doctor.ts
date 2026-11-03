@@ -177,37 +177,53 @@ interface RegistrationMatch {
   isLocalDistPath: boolean;
 }
 
-/** A reference the host resolves on disk, rather than an npm package name. */
-const LOCAL_REF = /^(\.{1,2}(\/|$)|\/|file:|[A-Za-z]:[\\/])/;
-
 /** An npm name without its version or tag, so `leakshield@1.2.0` and `leakshield` agree. */
 function packageName(ref: string): string {
   const at = ref.indexOf("@", 1); // keep a leading @scope
   return at === -1 ? ref : ref.slice(0, at);
 }
 
+/**
+ * A reference the host resolves on disk rather than through npm. The host only
+ * rebases `./` and `../`; a bare `.` or `..` goes to package resolution, and
+ * only `file://` is converted as a URL.
+ */
 function isLocalRef(ref: string): boolean {
-  return LOCAL_REF.test(ref);
+  return (
+    ref.startsWith("./") ||
+    ref.startsWith("../") ||
+    ref.startsWith(".\\") ||
+    ref.startsWith("..\\") ||
+    ref.startsWith("file://") ||
+    path.isAbsolute(ref) ||
+    /^[A-Za-z]:[\\/]/.test(ref) ||
+    ref.startsWith("\\\\")
+  );
 }
 
 /** Absolute path for a reference the host resolves on disk, or null for a package. */
 function localPathOf(ref: string, baseDir: string): string | null {
   if (!isLocalRef(ref)) return null;
-  if (ref.startsWith("file:")) return fileURLToPath(ref);
+  if (ref.startsWith("file://")) return fileURLToPath(ref);
   return path.resolve(baseDir, ref);
+}
+
+/** LeakShield's directory entrypoint, compared with either path separator. */
+function isLeakshieldPath(resolved: string): boolean {
+  return /[\\/]leakshield([\\/]dist([\\/]opencode\.js)?)?$/.test(resolved.replace(/[\\/]+$/, ""));
 }
 
 /**
  * The ID a plugin entry registers under, which is what `-id` and `-prefix.*`
  * removals match. LeakShield resolves to `leakshield` (the id its entry declares
  * in src/opencode.ts) whatever form the entry was written in — package name,
- * pinned name, `.`, a relative or absolute dist path, or a `file://` URL — and
- * every other entry keeps its package name without the `@version`.
+ * pinned name, `./dir`, an absolute dist path, or a `file://` URL — and every
+ * other entry keeps its package name without the `@version`.
  */
 function pluginIdOf(ref: string, baseDir: string): string {
   const local = localPathOf(ref, baseDir);
   if (local !== null) {
-    return /\/leakshield(\/dist(\/opencode\.js)?)?$/.test(local) ? "leakshield" : path.basename(local);
+    return isLeakshieldPath(local) ? "leakshield" : path.basename(local);
   }
   return packageName(ref);
 }
@@ -360,7 +376,7 @@ function applyPluginLists(sourcesLowToHigh: ConfigSource[]): {
             pattern === "*"
               ? true
               : prefix !== null
-                ? id === prefix || id.startsWith(`${prefix}.`)
+                ? id.startsWith(`${prefix}.`)
                 : id === pattern,
           );
           continue;
@@ -371,12 +387,14 @@ function applyPluginLists(sourcesLowToHigh: ConfigSource[]): {
           for (const knownEntry of known.values()) enable({ ...knownEntry });
           continue;
         }
-        enable({
-          id: pluginIdOf(entry, path.dirname(source.path)),
-          ref: entry,
-          options: {},
-          source: source.path,
-        });
+        {
+          // A later ID re-enables the plugin: the host keeps the entry it
+          // already has (reference, options and base directory), so a plain
+          // name must not reset options an earlier config set.
+          const id = pluginIdOf(entry, path.dirname(source.path));
+          const knownEntry = known.get(id);
+          enable(knownEntry ? { ...knownEntry } : { id, ref: entry, options: {}, source: source.path });
+        }
         continue;
       }
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;

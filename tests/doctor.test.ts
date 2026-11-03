@@ -568,6 +568,14 @@ describe("runDoctor", () => {
     expect((await runDoctor(deps)).status).toBe("BROKEN");
   });
 
+  it("keeps the LeakShield id when the URL itself is unparsable (#65)", async () => {
+    // `new URL` throws on the host, so the id comes from the raw suffix.
+    const { deps } = makeFixture({
+      config: () => ({ plugins: ["leakshield", "file://[bad]/leakshield/dist"] }),
+    });
+    expect((await runDoctor(deps)).status).toBe("BROKEN");
+  });
+
   it("resolves a relative plugin path from the config file that declared it (#65)", async () => {
     const { deps, tmp } = makeFixture({});
     const dir = path.join(tmp, ".opencode", "leakshield", "dist");

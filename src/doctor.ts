@@ -232,7 +232,9 @@ function invalidFileUrlId(ref: string): string {
   try {
     pathname = new URL(ref).pathname;
   } catch {
-    return ref;
+    // The URL is not parseable at all (a bad host, say), but its text can still
+    // end in LeakShield's path: read the segments from the raw reference.
+    pathname = ref.replace(/^file:\/\//, "").split(/[?#]/)[0] ?? "";
   }
   const parts = pathname
     .split("/")

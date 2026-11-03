@@ -323,6 +323,29 @@ describe("runDoctor", () => {
     expect(detail).toContain("replaces the whole list");
   });
 
+  it("treats an explicit empty project list as replacing the global one (#65)", async () => {
+    const { deps, tmp } = makeFixture({ config: () => ({ plugins: [] }) });
+    const globalPath = writeGlobalConfig(tmp, { plugins: ["leakshield"] });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("NOT_REGISTERED");
+    expect(report.checks.find((c) => c.id === "registration")?.detail).toContain(globalPath);
+  });
+
+  it("takes options from the config file that wins the list (#65)", async () => {
+    // If the global entry won, wireProtection=false would make this PARTIAL.
+    const { deps, tmp } = makeFixture({ config: () => ({ plugins: [{ package: "leakshield" }] }) });
+    const globalPath = writeGlobalConfig(tmp, {
+      plugins: [{ package: "leakshield", options: { mode: "transparent", wireProtection: false } }],
+    });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("PROTECTED");
+    expect(report.checks.find((c) => c.id === "options")?.detail).toContain("wireProtection=true");
+    expect(report.checks.find((c) => c.id === "registration")?.detail).toContain(
+      `(from ${path.join(tmp, "opencode.json")})`,
+    );
+    expect(report.checks.find((c) => c.id === "registration")?.detail).not.toContain(globalPath);
+  });
+
   it("reports BROKEN for an unparsable file anywhere in the chain (#65)", async () => {
     const { deps, tmp } = makeFixture({
       config: () => ({ $schema: "https://opencode.ai/config.json" }),

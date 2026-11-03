@@ -429,3 +429,33 @@ describe("scanText() — zero-width characters cannot hide encoded secrets", () 
     expect(scanText(`\u{1F468}\u200D\u{1F4BB} ${harmless}`, encodingConfig).safe).toBe(true);
   });
 });
+
+describe("行號與欄位 — CRLF / 混合換行", () => {
+  const email = "bob.canary@example-test.invalid";
+
+  it("scanText 在 CRLF 與混合換行文字中回報正確的 line / column", () => {
+    const text = `first\r\nsecond\nthird\r\nkey ${email}\rtail`;
+    const result = scanText(text, defaultConfig);
+    const finding = result.findings.find((f) => f.type === "PII_EMAIL");
+    expect(finding).toBeDefined();
+    expect(finding?.line).toBe(4);
+    expect(finding?.column).toBe(5);
+  });
+
+  it("scanText：CRLF 行上的 sg-ignore 只抑制該行", () => {
+    const text = `${email} // sg-ignore\r\nline2\r\n${email}\r\n`;
+    const result = scanText(text, defaultConfig);
+    const emails = result.findings.filter((f) => f.type === "PII_EMAIL");
+    expect(emails).toHaveLength(1);
+    expect(emails[0].line).toBe(3);
+    expect(emails[0].column).toBe(1);
+  });
+
+  it("redactText：CRLF 行上的 sg-ignore 只抑制該行", () => {
+    const text = `${email} // sg-ignore\r\nline2\r\n${email}\r\n`;
+    const redacted = redactText(text, defaultConfig).redacted;
+    const lines = redacted.split("\r\n");
+    expect(lines[0]).toContain(email);
+    expect(lines[2]).not.toContain(email);
+  });
+});

@@ -8,8 +8,31 @@ export function redact(_value: string, _previewLen: number): string {
 
 export function getLineCol(text: string, index: number): { line: number; col: number } {
   const before = text.slice(0, index);
-  const lines = before.split(/\r?\n/);
-  return { line: lines.length, col: lines[lines.length - 1].length + 1 };
+  return lineColAt(createLineIndex(before), before.length);
+}
+
+/** Start offset of every line in a text; a line break is `\r?\n`, so only `\n` ends a line. */
+export function createLineIndex(text: string): number[] {
+  const starts = [0];
+  let from = 0;
+  for (;;) {
+    const nl = text.indexOf("\n", from);
+    if (nl === -1) return starts;
+    from = nl + 1;
+    starts.push(from);
+  }
+}
+
+/** Line (1-based) and column (1-based) of `index`, given the starts from createLineIndex of the same text. */
+export function lineColAt(lineStarts: readonly number[], index: number): { line: number; col: number } {
+  let lo = 0;
+  let hi = lineStarts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (lineStarts[mid] <= index) lo = mid;
+    else hi = mid - 1;
+  }
+  return { line: lo + 1, col: index - lineStarts[lo] + 1 };
 }
 
 /**

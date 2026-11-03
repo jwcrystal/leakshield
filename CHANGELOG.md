@@ -20,6 +20,10 @@ All notable changes are listed here.
 - The default `mode` is always `transparent`; there is no longer a per-host default. `block` stays available with `"mode": "block"`.
 - Config and option validation errors are worded by zod 4 and no longer echo rejected enum values.
 
+### Fixed
+
+- A transparent-mode request refused because a string, before or after masking, exceeded `settings.max_chars` now says so. The refusal carried only `reason=truncated_content`; it now names the configured bound and asks to raise it or split the content. Nothing is sent unscanned either way, and the limit's documentation no longer says "truncate", which is what the standalone scanner does, not transparent mode. ([#47](https://github.com/jwcrystal/leakshield/issues/47))
+
 ## 0.1.3 — 2026-11-03
 
 Mostly fewer false refusals in transparent mode. Three changes narrow detection on purpose and can affect an existing setup: `generic-secret` skips code expressions, `credit-card` skips repeated digits and digits inside a UUID, and `url-userinfo` and `db-connection` skip placeholder passwords. Cyrillic or Greek look-alikes are now reported only when folding them to Latin reveals a finding. The `custom_rules` options below were listed under 0.1.2 by mistake; they ship in this release. Run `leakshield --doctor` after upgrading.

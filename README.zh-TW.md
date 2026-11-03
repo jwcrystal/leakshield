@@ -508,7 +508,7 @@ private_domains:
   # - "dev.yourcompany.io"
 
 settings:
-  max_chars: 200000      # 超過截斷，避免掃太久
+  max_chars: 200000      # 掃描上限；透明模式超過即拒絕，不會截斷後送出
   show_line_numbers: true
   preview_length: 60
   encoding_detection: false  # 編碼檢測（Base64/URL/Hex），預設關閉

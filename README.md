@@ -472,7 +472,7 @@ private_domains:
   # - "dev.yourcompany.io"
 
 settings:
-  max_chars: 200000      # Truncate if exceeded to avoid long scans
+  max_chars: 200000      # scan bound; transparent mode refuses past it instead of truncating
   show_line_numbers: true
   preview_length: 60
 ```

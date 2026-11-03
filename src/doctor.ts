@@ -171,12 +171,6 @@ function parseHostVersion(raw: string | null): { generation: "v1" | "v2"; versio
   return { generation: "v1", version: raw };
 }
 
-interface RegistrationMatch {
-  packageRef: string | null;
-  options: unknown;
-  isLocalDistPath: boolean;
-}
-
 /** An npm name without its version or tag, so `leakshield@1.2.0` and `leakshield` agree. */
 function packageName(ref: string): string {
   const at = ref.indexOf("@", 1); // keep a leading @scope
@@ -337,31 +331,38 @@ interface AppliedPlugin {
  * another, `-id` / `-prefix.*` / `-*` remove an entry, `*` restores every entry
  * seen so far, and a later entry re-enables it
  * (https://opencode.ai/v2/docs/plugins/#configure, #control).
+ *
+ * Two lists come back, because doctor does not try to predict which of several
+ * references to one id the host keeps loaded (#67). `registrations` is what is
+ * enabled now, which decides whether the plugin loads; `considered` is every
+ * reference configured for the id, which drives the option and path checks so a
+ * weaker entry can never be hidden by a stronger one.
  */
 function applyPluginLists(sourcesLowToHigh: ConfigSource[]): {
-  registered: AppliedPlugin | null;
+  registrations: AppliedPlugin[];
+  considered: AppliedPlugin[];
   disabled: { source: string; entry: string } | null;
 } {
-  const known = new Map<string, AppliedPlugin>();
+  const known = new Map<string, AppliedPlugin>(); // key: reference as written
   const enabled = new Map<string, AppliedPlugin>();
-  let registered: AppliedPlugin | null = null;
+  let anyEnabled = false;
   let disabled: { source: string; entry: string } | null = null;
 
   const enable = (applied: AppliedPlugin): void => {
-    known.set(applied.id, applied);
-    enabled.set(applied.id, applied);
+    known.set(applied.ref, applied);
+    enabled.set(applied.ref, applied);
     if (applied.id === "leakshield") {
-      registered = applied;
+      anyEnabled = true;
       disabled = null;
     }
   };
 
   const removeWhere = (source: string, entry: string, matches: (id: string) => boolean): void => {
-    for (const id of [...enabled.keys()]) {
-      if (!matches(id)) continue;
-      enabled.delete(id);
-      if (id === "leakshield") {
-        registered = null;
+    for (const [ref, applied] of [...enabled.entries()]) {
+      if (!matches(applied.id)) continue;
+      enabled.delete(ref);
+      if (applied.id === "leakshield") {
+        anyEnabled = false;
         disabled = { source, entry };
       }
     }
@@ -373,16 +374,8 @@ function applyPluginLists(sourcesLowToHigh: ConfigSource[]): {
    * reference, options and base directory. A local path is a new reference, so
    * it replaces what was there and has to stand on its own.
    */
-  const applyEntry = (
-    source: ConfigSource,
-    ref: string,
-    options: unknown,
-    hasOptions: boolean,
-  ): void => {
-    const id = pluginIdOf(ref, path.dirname(source.path));
-    const knownEntry = known.get(id);
-    const selector = !isLocalRef(ref) && !hasOptions;
-    enable(selector && knownEntry ? { ...knownEntry } : { id, ref, options, source: source.path });
+  const applyEntry = (source: ConfigSource, ref: string, options: unknown): void => {
+    enable({ id: pluginIdOf(ref, path.dirname(source.path)), ref, options, source: source.path });
   };
 
   for (const source of sourcesLowToHigh) {
@@ -410,19 +403,24 @@ function applyPluginLists(sourcesLowToHigh: ConfigSource[]): {
           for (const knownEntry of known.values()) enable({ ...knownEntry });
           continue;
         }
-        applyEntry(source, entry, {}, false);
+        applyEntry(source, entry, {});
         continue;
       }
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
       const record = entry as Record<string, unknown>;
       const ref = record.package;
       if (typeof ref !== "string") continue;
-      const hasOptions = Object.prototype.hasOwnProperty.call(record, "options");
-      applyEntry(source, ref, record.options ?? {}, hasOptions);
+      applyEntry(source, ref, record.options ?? {});
     }
   }
 
-  return { registered, disabled: registered ? null : disabled };
+  const forId = (list: Map<string, AppliedPlugin>) =>
+    [...list.values()].filter((applied) => applied.id === "leakshield");
+  return {
+    registrations: forId(enabled),
+    considered: forId(known),
+    disabled: anyEnabled ? null : disabled,
+  };
 }
 
 
@@ -551,17 +549,10 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   }
 
   const applied = applyPluginLists([...sources].reverse());
-  const appliedEntry = applied.registered;
-  const registration: RegistrationMatch | null = appliedEntry
-    ? {
-        packageRef: appliedEntry.ref,
-        options: appliedEntry.options,
-        isLocalDistPath: isLocalRef(appliedEntry.ref),
-      }
-    : null;
+  const configured = applied.considered;
   const distDir = path.resolve(deps.cwd, "dist");
 
-  if (!registration) {
+  if (applied.registrations.length === 0) {
     checks.push({
       id: "registration",
       state: "fail",
@@ -579,41 +570,56 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       snippet: registrationSnippet(distDir),
     };
   }
-  const fromSource =
-    appliedEntry && sources.length > 1 ? ` (from ${appliedEntry.source})` : "";
+  const registrationRefs = applied.registrations.map((entry) => `"${entry.ref}"`).join(", ");
+  const registrationSources = [...new Set(applied.registrations.map((entry) => entry.source))];
+  const registrationHasOptions = applied.registrations.some(
+    (entry) => entry.options && Object.keys(entry.options as object).length > 0,
+  );
+  const fromSource = sources.length > 1 ? ` (from ${registrationSources.join(", ")})` : "";
   checks.push({
     id: "registration",
     state: "ok",
-    detail: `Registered as "${registration.packageRef}"${registration.options && Object.keys(registration.options as object).length > 0 ? " with options" : ""}${fromSource}.`,
+    detail: `Registered as ${registrationRefs}${registrationHasOptions ? " with options" : ""}${fromSource}.`,
   });
 
   // Local dist presence (silent-skip guard: the host logs and skips a plugin
   // whose entry point cannot be resolved, which looks like "no protection"
-  // with no visible failure).
-  if (registration.isLocalDistPath && registration.packageRef) {
-    // A relative path resolves from the config file that declared it, and a
-    // `file://` URL is decoded rather than used literally
-    // (https://opencode.ai/v2/docs/plugins/#configure).
-    const base = appliedEntry ? path.dirname(appliedEntry.source) : deps.cwd;
-    const ref = registration.packageRef;
-    const resolved = ref.startsWith("file:") ? fileURLToPath(ref) : path.resolve(base, ref);
-    // Configured local paths must be directories; the host skips a path that
-    // points at a single file.
-    const isSingleFile = deps.existsFile(resolved);
-    const entryOk =
-      !isSingleFile && deps.existsDir(resolved) && deps.existsFile(path.join(resolved, "index.js"));
-    if (!entryOk) {
+  // with no visible failure). Every configured reference is checked, not only
+  // the one doctor would pick as the winner (#67).
+  const localEntries = configured
+    .filter((entry) => isLocalRef(entry.ref))
+    .map((entry) => {
+      // A relative path resolves from the config file that declared it, and a
+      // `file://` URL is decoded rather than used literally
+      // (https://opencode.ai/v2/docs/plugins/#configure).
+      const resolved = entry.ref.startsWith("file:")
+        ? fileURLToPath(entry.ref)
+        : path.resolve(path.dirname(entry.source), entry.ref);
+      // Configured local paths must be directories; the host skips a path that
+      // points at a single file.
+      const isSingleFile = deps.existsFile(resolved);
+      const ok =
+        !isSingleFile && deps.existsDir(resolved) && deps.existsFile(path.join(resolved, "index.js"));
+      return { entry, resolved, isSingleFile, ok };
+    });
+  if (localEntries.length > 0) {
+    const broken = localEntries.find((local) => !local.ok);
+    if (broken) {
       checks.push({
         id: "dist",
         state: "fail",
-        detail: isSingleFile
-          ? `${resolved} is a single file; the host skips configured file paths and loads only plugin directories.`
-          : `${resolved} is missing or not a loadable entry point — OpenCode will silently log-and-skip this plugin, leaving sessions unprotected.`,
+        detail: broken.isSingleFile
+          ? `${broken.resolved} (from "${broken.entry.ref}") is a single file; the host skips configured file paths and loads only plugin directories.`
+          : `${broken.resolved} (from "${broken.entry.ref}") is missing or not a loadable entry point — OpenCode will silently log-and-skip this plugin, leaving sessions unprotected.`,
         fix: "Run `npm run build` in the project root (the snippet expects <project>/dist), or point the entry at the built directory.",
       });
       return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
     }
-    checks.push({ id: "dist", state: "ok", detail: `${resolved} exists.` });
+    checks.push({
+      id: "dist",
+      state: "ok",
+      detail: `${localEntries.map((local) => local.resolved).join(", ")} ${localEntries.length === 1 ? "exists" : "exist"}.`,
+    });
   } else {
     checks.push({
       id: "dist",
@@ -622,22 +628,33 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     });
   }
 
-  // Options validation (same schema the plugin entry enforces at runtime)
-  const optionsValidation = validatePluginOptions(registration.options ?? {});
-  if (!optionsValidation.ok) {
-    checks.push({
-      id: "options",
-      state: "fail",
-      detail: `Plugin options are invalid — every protected request would fail closed at runtime: ${optionsValidation.error}`,
-      fix: "Correct the options in opencode.json (see README for valid combinations).",
-    });
-    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
+  // Options validation (same schema the plugin entry enforces at runtime). Every
+  // configured entry is validated and the weakest decides the verdict: a
+  // stronger entry must not hide a weaker one when both reach the host (#67).
+  const validated: { entry: AppliedPlugin; options: PluginOptions }[] = [];
+  for (const entry of configured) {
+    const validation = validatePluginOptions(entry.options ?? {});
+    if (!validation.ok) {
+      checks.push({
+        id: "options",
+        state: "fail",
+        detail: `Plugin options are invalid for "${entry.ref}" (${entry.source}) — every protected request would fail closed at runtime: ${validation.error}`,
+        fix: "Correct the options in opencode.json (see README for valid combinations).",
+      });
+      return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
+    }
+    validated.push({ entry, options: validation.options });
   }
-  const options = optionsValidation.options;
+  const weakness = (candidate: PluginOptions): number =>
+    candidate.mode === "transparent" ? (candidate.wireProtection === false ? 0 : 1) : 2;
+  const weakest = [...validated].sort((a, b) => weakness(a.options) - weakness(b.options))[0]!;
+  const options = weakest.options;
+  const across =
+    configured.length > 1 ? ` (weakest of ${configured.length} configured entries)` : "";
   checks.push({
     id: "options",
     state: "ok",
-    detail: `mode=${options.mode}${(registration.options as { mode?: unknown } | undefined)?.mode === undefined ? " (default)" : ""}${options.mode === "transparent" ? ` wireProtection=${options.wireProtection ?? true}` : ""}${options.attachments === "allow" ? " attachments=allow" : ""}${options.deidentify ? " +deidentify" : ""}${options.envQueries ? " +envQueries" : ""}${options.configPath ? ` configPath=${options.configPath}` : ""}`,
+    detail: `mode=${options.mode}${(weakest.entry.options as { mode?: unknown } | undefined)?.mode === undefined ? " (default)" : ""}${options.mode === "transparent" ? ` wireProtection=${options.wireProtection ?? true}` : ""}${options.attachments === "allow" ? " attachments=allow" : ""}${options.deidentify ? " +deidentify" : ""}${options.envQueries ? " +envQueries" : ""}${options.configPath ? ` configPath=${options.configPath}` : ""}${across}`,
   });
   checks.push(persistenceCheck(options, deps));
 

@@ -554,6 +554,32 @@ describe("runDoctor", () => {
     expect((await runDoctor(deps)).status).toBe("PROTECTED");
   });
 
+  it("keeps the weakest options when a selector re-adds the plugin (#67)", async () => {
+    const { deps, tmp } = makeFixture({
+      distFiles: true,
+      config: () => ({ plugins: [{ package: "leakshield", options: {} }] }),
+    });
+    writeGlobalConfig(tmp, {
+      plugins: [{ package: distRef(tmp), options: { mode: "transparent", wireProtection: false } }],
+    });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("PARTIAL");
+    expect(report.checks.find((c) => c.id === "options")?.detail).toContain("weakest of 2");
+  });
+
+  it("keeps the weakest options when a second reference re-adds the plugin (#67)", async () => {
+    const { deps, tmp } = makeFixture({
+      distFiles: true,
+      config: () => ({ plugins: ["-leakshield", "./leakshield/dist"] }),
+    });
+    writeGlobalConfig(tmp, {
+      plugins: [{ package: "leakshield", options: { mode: "transparent", wireProtection: false } }],
+    });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("PARTIAL");
+    expect(report.checks.find((c) => c.id === "dist")?.state).toBe("ok");
+  });
+
   it("reports BROKEN for an unparsable file anywhere in the chain (#65)", async () => {
     const { deps, tmp } = makeFixture({
       config: () => ({ $schema: "https://opencode.ai/config.json" }),

@@ -345,12 +345,15 @@ function applyPluginLists(sourcesLowToHigh: ConfigSource[]): {
 } {
   const known = new Map<string, AppliedPlugin>(); // key: reference as written
   const enabled = new Map<string, AppliedPlugin>();
+  /** Every entry as the config wrote it, including a reference applied twice. */
+  const occurrences: AppliedPlugin[] = [];
   let anyEnabled = false;
   let disabled: { source: string; entry: string } | null = null;
 
   const enable = (applied: AppliedPlugin): void => {
     known.set(applied.ref, applied);
     enabled.set(applied.ref, applied);
+    occurrences.push(applied);
     if (applied.id === "leakshield") {
       anyEnabled = true;
       disabled = null;
@@ -368,12 +371,8 @@ function applyPluginLists(sourcesLowToHigh: ConfigSource[]): {
     }
   };
 
-  /**
-   * Apply one entry. A plain package name (or an object without `options`) is
-   * an ID selector: it re-enables the entry the config already has, keeping its
-   * reference, options and base directory. A local path is a new reference, so
-   * it replaces what was there and has to stand on its own.
-   */
+  /** Apply one entry as written. Re-applying a reference replaces its enabled
+   * state but keeps the earlier occurrence for the conservative checks. */
   const applyEntry = (source: ConfigSource, ref: string, options: unknown): void => {
     enable({ id: pluginIdOf(ref, path.dirname(source.path)), ref, options, source: source.path });
   };
@@ -398,9 +397,15 @@ function applyPluginLists(sourcesLowToHigh: ConfigSource[]): {
           continue;
         }
         if (entry === "*") {
-          // Restores what earlier files configured, keeping each entry's own
-          // directory as its base: only the enabled state changes.
-          for (const knownEntry of known.values()) enable({ ...knownEntry });
+          // Restores what earlier files configured: only the enabled state
+          // changes, so this records no new occurrence.
+          for (const knownEntry of known.values()) {
+            enabled.set(knownEntry.ref, knownEntry);
+            if (knownEntry.id === "leakshield") {
+              anyEnabled = true;
+              disabled = null;
+            }
+          }
           continue;
         }
         applyEntry(source, entry, {});
@@ -414,11 +419,17 @@ function applyPluginLists(sourcesLowToHigh: ConfigSource[]): {
     }
   }
 
-  const forId = (list: Map<string, AppliedPlugin>) =>
-    [...list.values()].filter((applied) => applied.id === "leakshield");
+  const seen = new Set<string>();
+  const considered = occurrences.filter((applied) => {
+    if (applied.id !== "leakshield") return false;
+    const key = `${applied.ref}\u0000${applied.source}\u0000${JSON.stringify(applied.options)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   return {
-    registrations: forId(enabled),
-    considered: forId(known),
+    registrations: [...enabled.values()].filter((applied) => applied.id === "leakshield"),
+    considered,
     disabled: anyEnabled ? null : disabled,
   };
 }
@@ -658,24 +669,43 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   });
   checks.push(persistenceCheck(options, deps));
 
-  // Guard config load
-  let guardConfig: GuardConfig;
-  try {
-    guardConfig = deps.loadGuardConfig(options.configPath, deps.cwd);
-    checks.push({
-      id: "guard-config",
-      state: "ok",
-      detail: options.configPath ? `Loaded ${options.configPath}.` : "Default guard config resolved.",
-    });
-  } catch (error) {
+  // Guard config load. Every configured entry's guard config must load: the
+  // weakest entry supplies the summary, but a broken configPath in another
+  // entry still breaks the install it would run under (#67).
+  let guardConfig: GuardConfig | undefined;
+  const guardPaths = [...new Set(validated.map((candidate) => candidate.options.configPath))];
+  for (const guardPath of guardPaths) {
+    try {
+      const loaded = deps.loadGuardConfig(guardPath, deps.cwd);
+      if (guardPath === options.configPath) guardConfig = loaded;
+    } catch (error) {
+      checks.push({
+        id: "guard-config",
+        state: "fail",
+        detail: `Guard config failed to load${guardPath ? ` for ${guardPath}` : ""}: ${(error as Error).message}`,
+        fix: "Fix the config file, or remove configPath to use defaults.",
+      });
+      return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
+    }
+  }
+  if (!guardConfig) {
     checks.push({
       id: "guard-config",
       state: "fail",
-      detail: `Guard config failed to load: ${(error as Error).message}`,
-      fix: "Fix the config file, or remove configPath to use defaults.",
+      detail: "Guard config did not load for the entry that decides the verdict.",
+      fix: "Rerun the doctor; if it repeats, report the configuration.",
     });
     return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
   }
+  checks.push({
+    id: "guard-config",
+    state: "ok",
+    detail: options.configPath
+      ? `Loaded ${options.configPath}.`
+      : guardPaths.length > 1
+        ? `Default guard config resolved for ${guardPaths.length} entries.`
+        : "Default guard config resolved.",
+  });
 
   // Custom rules the scanner skips (the ReDoS timing heuristic; uncompileable
   // patterns already failed the load above). Descriptions only, never patterns.

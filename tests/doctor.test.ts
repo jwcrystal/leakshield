@@ -580,6 +580,33 @@ describe("runDoctor", () => {
     expect(report.checks.find((c) => c.id === "dist")?.state).toBe("ok");
   });
 
+  it("keeps the weakest options when the same reference is applied again (#67)", async () => {
+    const { deps, tmp } = makeFixture({ config: () => ({ plugins: ["leakshield"] }) });
+    writeGlobalConfig(tmp, {
+      plugins: [{ package: "leakshield", options: { mode: "transparent", wireProtection: false } }],
+    });
+    expect((await runDoctor(deps)).status).toBe("PARTIAL");
+  });
+
+  it("loads the guard config of every configured entry (#67)", async () => {
+    const { deps, tmp } = makeFixture({
+      distFiles: true,
+      config: () => ({
+        plugins: [{ package: "leakshield", options: { mode: "block", configPath: "/missing-guard.yml" } }],
+      }),
+      options: {
+        loadGuardConfig: (overridePath) => {
+          if (overridePath === "/missing-guard.yml") throw new Error("no such file");
+          return {} as GuardConfig;
+        },
+      },
+    });
+    writeGlobalConfig(tmp, { plugins: [{ package: "leakshield", options: { mode: "block" } }] });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("BROKEN");
+    expect(report.checks.find((c) => c.id === "guard-config")?.detail).toContain("/missing-guard.yml");
+  });
+
   it("reports BROKEN for an unparsable file anywhere in the chain (#65)", async () => {
     const { deps, tmp } = makeFixture({
       config: () => ({ $schema: "https://opencode.ai/config.json" }),

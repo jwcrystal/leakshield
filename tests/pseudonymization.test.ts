@@ -1559,4 +1559,76 @@ describe("encoded runs are masked when their source span is attributable (#48)",
     // maxSessions 1: a committed session "a" would refuse "b" with session_limit.
     expect(created.protectText("b", "user%40example.com").ok).toBe(true);
   });
+
+  describe("partial masking must not erase the evidence the rescan needs", () => {
+    const ZW = "​";
+    const hiddenKey = `%73k-Abcdefghijklmnopqrst%4${ZW}1UVWXYZ`;
+
+    it.each([
+      ["a plain email beside an encoded email", `${EMAIL1} and bob%40example.com`],
+      ["a plain email near a harmless percent run", `${EMAIL1} a%20b`],
+      ["a plain key near a harmless percent run", `${KEY1} hello%20world`],
+    ])("still masks %s", (_name, input) => {
+      const ps = makeService();
+      const result = ps.protectText("s", input);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.text).not.toContain(input.split(" ")[0]);
+      expect(ps.restoreText("s", result.text)).toEqual({ ok: true, text: input });
+    });
+
+    it("refuses a key whose suffix is hidden by a zero-width character", () => {
+      const ps = makeService();
+      expect(ps.protectText("s", hiddenKey)).toEqual({ ok: false, reason: "encoded_content" });
+    });
+
+    it("refuses the hidden suffix even with an intact copy of the key earlier", () => {
+      const ps = makeService();
+      const input = `%73k%2DAbcdefghijklmnopqrstAUVWXYZ ${hiddenKey}`;
+      expect(ps.protectText("s", input)).toEqual({ ok: false, reason: "encoded_content" });
+    });
+
+    it("refuses an encoded run that crosses an owned token with custom rules", () => {
+      const rules = [
+        { description: "q-through-z", pattern: "Q.*Z", severity: "HIGH" as const },
+        { description: "q-abc", pattern: "Qabc", severity: "HIGH" as const },
+      ];
+      const created = createPseudonymizer(configWith({}, rules));
+      expect(created.ok).toBe(true);
+      if (!created.ok) return;
+      const issued = created.protectText("s", KEY1);
+      expect(issued.ok).toBe(true);
+      if (!issued.ok) return;
+      const tok = tokensIn(issued.text)[0];
+      expect(created.protectText("s", `%51abc${tok}Z`)).toEqual({ ok: false, reason: "encoded_content" });
+      expect(created.restoreText("s", issued.text)).toEqual({ ok: true, text: KEY1 });
+    });
+
+    it.each([
+      ["a zero-width character", `${ZW}note `],
+      ["a Cyrillic look-alike", "nоte "],
+    ])("refuses an encoded email when %s sits elsewhere in the segment", (_name, prefix) => {
+      const ps = makeService();
+      expect(ps.protectText("s", `${prefix}user%40example.com`)).toEqual({ ok: false, reason: "encoded_content" });
+    });
+
+    it("keeps masking harmless zero-width text with no encoded finding", () => {
+      const ps = makeService();
+      const input = `note${ZW} ${KEY1} and hello world`;
+      const result = ps.protectText("s", input);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.text).not.toContain(KEY1);
+      expect(result.text).toContain("hello world");
+      expect(ps.restoreText("s", result.text)).toEqual({ ok: true, text: input });
+    });
+
+    it("commits no mapping when these cases are refused", () => {
+      const created = createPseudonymizer(baseConfig, { maxSessions: 1 });
+      expect(created.ok).toBe(true);
+      if (!created.ok) return;
+      expect(created.protectText("a", `${EMAIL1} ${hiddenKey}`).ok).toBe(false);
+      expect(created.protectText("b", "user%40example.com").ok).toBe(true);
+    });
+  });
 });

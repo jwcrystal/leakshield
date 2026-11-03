@@ -365,6 +365,49 @@ export interface EncodedRun {
   start: number;
   end: number;
   severity: Finding["severity"];
+  /** match_text of the decoded findings behind this run. */
+  decodedMatches: string[];
+}
+
+/**
+ * True when masking the runs located in `text` accounts for EVERY decoded
+ * finding in `decodedMatches` (the match_text values the whole-segment
+ * decoding scan reported). Two checks:
+ * - Normalization: any zero-width or look-alike character in `text` returns
+ *   false, wherever it sits. The generic decoder also decodes the stripped and
+ *   folded sources, whose runs the locator cannot map back, so partial
+ *   masking of the raw source could erase the evidence that a hidden part
+ *   remains.
+ * - Coverage: each decoded match must equal, or be a substring of, a decoded
+ *   match of a located run or a direct match (substring because the generic
+ *   decoder's +/-50 windows can clip a value the locator sees in full). Direct
+ *   matches count because those windows also re-report plain findings near any
+ *   percent run, and the direct findings are masked anyway.
+ */
+export function decodedFindingsAttributable(
+  text: string,
+  config: GuardConfig,
+  opts: ScanOptions | undefined,
+  decodedMatches: readonly string[],
+  directMatches: readonly string[],
+): boolean {
+  if (foldConfusables(text.replace(ZERO_WIDTH_CHARS, "")) !== text) return false;
+  const located = new Set<string>(directMatches);
+  for (const run of locateEncodedRuns(text, config, opts)) {
+    for (const match of run.decodedMatches) located.add(match);
+  }
+  for (const wanted of new Set(decodedMatches)) {
+    if (located.has(wanted)) continue;
+    let covered = false;
+    for (const match of located) {
+      if (match.includes(wanted)) {
+        covered = true;
+        break;
+      }
+    }
+    if (!covered) return false;
+  }
+  return true;
 }
 
 const SEVERITY_ORDER: Record<Finding["severity"], number> = { HIGH: 3, MEDIUM: 2, LOW: 1 };
@@ -410,6 +453,7 @@ export function locateEncodedRuns(text: string, config: GuardConfig, opts?: Scan
           start: candidate.index,
           end: candidate.index + candidate.text.length,
           severity: highestSeverity(result.findings),
+          decodedMatches: result.findings.flatMap((f) => (typeof f.match_text === "string" ? [f.match_text] : [])),
         });
       }
     }
@@ -489,7 +533,7 @@ function locateUrlRuns(text: string, config: GuardConfig, plusAsSpace: boolean, 
     let hot = false;
     for (let i = start; i < end && !hot; i += 1) hot = unitHot[i];
     if (!hot) continue;
-    runs.push({ start: unitStart[start], end: unitEnd[end - 1], severity: finding.severity });
+    runs.push({ start: unitStart[start], end: unitEnd[end - 1], severity: finding.severity, decodedMatches: [matched] });
   }
   return runs;
 }

@@ -42,7 +42,7 @@
 
 import { randomBytes } from "node:crypto";
 import { types } from "node:util";
-import { locateEncodedRuns, scanTextWithDecoding } from "../scanner/encoding.js";
+import { decodedFindingsAttributable, locateEncodedRuns, scanTextWithDecoding } from "../scanner/encoding.js";
 import { scanTextInternal, type ScanOptions } from "../scanner/engine.js";
 import type { Finding, FindingType, GuardConfig, ScanResult } from "../types.js";
 import { FINDING_TYPES } from "../types.js";
@@ -445,10 +445,25 @@ function segmentDecodingHazard(
     }
     // `decoded` results only exist when a decoded representation was unsafe,
     // i.e. encoded sensitive content was detected in this segment. The input
-    // scan of protectStringTx tolerates it (encodedMaskable): the encoded
-    // runs are masked there and the strict output rescan refuses whatever
-    // stayed unmasked.
-    if (scan.decoded.length > 0 && !encodedMaskable) return fail("encoded_content");
+    // scan of protectStringTx tolerates it (encodedMaskable) only when every
+    // decoded finding is known to be covered by a located run (see
+    // decodedFindingsAttributable); partial masking could otherwise erase the
+    // evidence the strict output rescan needs.
+    if (scan.decoded.length > 0) {
+      if (!encodedMaskable) return fail("encoded_content");
+      const decodedMatches = scan.decoded.flatMap((result) =>
+        result.findings.flatMap((f) => (typeof f.match_text === "string" ? [f.match_text] : [])),
+      );
+      const hasUnreadable = scan.decoded.some((result) =>
+        result.findings.some((f) => typeof f.match_text !== "string"),
+      );
+      const directMatches = scan.original.findings.flatMap((f) =>
+        typeof f.match_text === "string" ? [f.match_text] : [],
+      );
+      if (hasUnreadable || !decodedFindingsAttributable(segment, config, MODEL_BOUNDARY_SCAN, decodedMatches, directMatches)) {
+        return fail("encoded_content");
+      }
+    }
     return null;
   } catch {
     return fail("scanner_failure");
@@ -585,11 +600,12 @@ function urlContextHazard(
       }
       // Token interior in the changed representation: exempt before overlap.
       if (containedInAnySpan({ start, end }, ownedRanges)) continue;
-      // Everything else, including matches crossing a retained fragment,
-      // is decoded sensitive content. A maskable (input) scan leaves it to
-      // the strict output rescan: a crossing run is never located, so it is
-      // never masked and the rescan refuses it.
-      if (encodedMaskable) continue;
+      // Everything else is decoded sensitive content. A maskable (input)
+      // scan tolerates only findings that touch no retained token fragment
+      // (the locator masks those whole); a match overlapping a fragment
+      // crosses a token and can never be masked, so it refuses here
+      // regardless of encodedMaskable.
+      if (encodedMaskable && !ownedRanges.some((range) => spansOverlap({ start, end }, range))) continue;
       return fail("encoded_content");
     }
   }
@@ -611,12 +627,14 @@ function urlContextHazard(
  * disjoint) and must already be strictly validated BEFORE this scan runs.
  * Input scan and output verification rescan share this seam.
  *
- * `encodedMaskable` (default false, strict) lets a decoding hazard whose
- * reason is encoded_content (from urlContextHazard or segmentDecodingHazard)
- * pass; every other reason still fails. Only the INPUT scan of
- * protectStringTx sets it, because that caller then masks the located
- * encoded runs and re-verifies the substituted text with the strict default,
- * which is what refuses any encoded finding left unmasked.
+ * `encodedMaskable` (default false, strict) narrowly relaxes encoded_content:
+ * urlContextHazard tolerates only findings touching no retained token
+ * fragment, and segmentDecodingHazard tolerates a segment only when
+ * decodedFindingsAttributable says every decoded finding is covered by a
+ * located run and the segment holds no zero-width or look-alike character.
+ * Every other reason still fails. Only the INPUT scan of protectStringTx
+ * sets it; that caller masks the located runs and re-verifies the substituted
+ * text with the strict default as a second line of defense.
  */
 function scanForModelBoundary(
   text: string,
@@ -799,10 +817,11 @@ function protectStringTx(
   // segment, so issued-token epochs are never decoded as user content,
   // while URL-context windows crossing tokens are checked with the token
   // fragments retained verbatim (see scanForModelBoundary).
-  // This INPUT scan tolerates encoded_content (#48): encoded runs whose source
-  // span is exactly attributable are masked below. Everything else stays
-  // refused, because the strict output rescan below still reports
-  // encoded_content for any encoded finding left unmasked.
+  // This INPUT scan tolerates encoded_content (#48) only where every decoded
+  // finding is known to be covered by a located run (no token crossing, no
+  // zero-width or look-alike character in the segment); those runs are masked
+  // below. Anything else is refused here, since partial masking could erase
+  // the evidence the strict output rescan relies on.
   const scanned = scanForModelBoundary(text, config, owned.spans, true);
   if (!scanned.ok) return scanned;
 

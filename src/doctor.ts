@@ -185,20 +185,15 @@ function packageName(ref: string): string {
 
 /**
  * A reference the host resolves on disk rather than through npm. The host only
- * rebases `./` and `../`; a bare `.` or `..` goes to package resolution, and
- * only `file://` is converted as a URL.
+ * rebases `./` and `../`; a bare `.`, `..` or a backslash-relative string goes
+ * to package resolution, and only `file://` is converted as a URL. Windows
+ * drive and UNC forms are local only on Windows, where they are separators.
  */
 function isLocalRef(ref: string): boolean {
-  return (
-    ref.startsWith("./") ||
-    ref.startsWith("../") ||
-    ref.startsWith(".\\") ||
-    ref.startsWith("..\\") ||
-    ref.startsWith("file://") ||
-    path.isAbsolute(ref) ||
-    /^[A-Za-z]:[\\/]/.test(ref) ||
-    ref.startsWith("\\\\")
-  );
+  if (ref.startsWith("./") || ref.startsWith("../")) return true;
+  if (ref.startsWith("file://")) return true;
+  if (path.isAbsolute(ref)) return true;
+  return path.sep === "\\" && (/^[A-Za-z]:[\\/]/.test(ref) || ref.startsWith("\\\\"));
 }
 
 /** Absolute path for a reference the host resolves on disk, or null for a package. */
@@ -208,9 +203,19 @@ function localPathOf(ref: string, baseDir: string): string | null {
   return path.resolve(baseDir, ref);
 }
 
-/** LeakShield's directory entrypoint, compared with either path separator. */
+/**
+ * LeakShield's own package or dist directory. Split on the platform separator
+ * only: on POSIX a backslash is an ordinary filename character, so treating it
+ * as a separator would identify an unrelated plugin directory as LeakShield.
+ */
 function isLeakshieldPath(resolved: string): boolean {
-  return /[\\/]leakshield([\\/]dist([\\/]opencode\.js)?)?$/.test(resolved.replace(/[\\/]+$/, ""));
+  const parts = resolved.replace(/[\\/]+$/, "").split(path.sep).filter(Boolean);
+  const tail = parts[parts.length - 1];
+  const parent = parts[parts.length - 2];
+  const grand = parts[parts.length - 3];
+  if (tail === "leakshield") return true;
+  if (tail === "dist" && parent === "leakshield") return true;
+  return tail === "opencode.js" && parent === "dist" && grand === "leakshield";
 }
 
 /**
@@ -362,6 +367,24 @@ function applyPluginLists(sourcesLowToHigh: ConfigSource[]): {
     }
   };
 
+  /**
+   * Apply one entry. A plain package name (or an object without `options`) is
+   * an ID selector: it re-enables the entry the config already has, keeping its
+   * reference, options and base directory. A local path is a new reference, so
+   * it replaces what was there and has to stand on its own.
+   */
+  const applyEntry = (
+    source: ConfigSource,
+    ref: string,
+    options: unknown,
+    hasOptions: boolean,
+  ): void => {
+    const id = pluginIdOf(ref, path.dirname(source.path));
+    const knownEntry = known.get(id);
+    const selector = !isLocalRef(ref) && !hasOptions;
+    enable(selector && knownEntry ? { ...knownEntry } : { id, ref, options, source: source.path });
+  };
+
   for (const source of sourcesLowToHigh) {
     const config = source.config;
     if (!config || typeof config !== "object") continue;
@@ -387,26 +410,15 @@ function applyPluginLists(sourcesLowToHigh: ConfigSource[]): {
           for (const knownEntry of known.values()) enable({ ...knownEntry });
           continue;
         }
-        {
-          // A later ID re-enables the plugin: the host keeps the entry it
-          // already has (reference, options and base directory), so a plain
-          // name must not reset options an earlier config set.
-          const id = pluginIdOf(entry, path.dirname(source.path));
-          const knownEntry = known.get(id);
-          enable(knownEntry ? { ...knownEntry } : { id, ref: entry, options: {}, source: source.path });
-        }
+        applyEntry(source, entry, {}, false);
         continue;
       }
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
-      const ref = (entry as Record<string, unknown>).package;
+      const record = entry as Record<string, unknown>;
+      const ref = record.package;
       if (typeof ref !== "string") continue;
-      const options = (entry as Record<string, unknown>).options ?? {};
-      enable({
-        id: pluginIdOf(ref, path.dirname(source.path)),
-        ref,
-        options,
-        source: source.path,
-      });
+      const hasOptions = Object.prototype.hasOwnProperty.call(record, "options");
+      applyEntry(source, ref, record.options ?? {}, hasOptions);
     }
   }
 

@@ -474,6 +474,46 @@ describe("runDoctor", () => {
     expect(report.checks.find((c) => c.id === "options")?.detail).toContain("wireProtection=false");
   });
 
+  it("keeps the options an earlier config set when an object selects the same ID (#65)", async () => {
+    const { deps, tmp } = makeFixture({
+      distFiles: true,
+      config: () => ({ plugins: [{ package: "leakshield" }] }),
+    });
+    writeGlobalConfig(tmp, {
+      plugins: [{ package: distRef(tmp), options: { mode: "transparent", wireProtection: false } }],
+    });
+    expect((await runDoctor(deps)).status).toBe("PARTIAL");
+  });
+
+  it("validates a new reference instead of reusing the entry it replaced (#65)", async () => {
+    const { deps, tmp } = makeFixture({
+      config: () => ({ plugins: ["-leakshield", "./leakshield/dist"] }),
+    });
+    writeGlobalConfig(tmp, { plugins: ["leakshield"] });
+    // ./leakshield/dist does not exist under the project directory.
+    expect((await runDoctor(deps)).status).toBe("BROKEN");
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "does not rebase a backslash-relative reference on POSIX (#65)",
+    async () => {
+      const { deps } = makeFixture({ config: () => ({ plugins: [".\\leakshield\\dist"] }) });
+      expect((await runDoctor(deps)).status).toBe("NOT_REGISTERED");
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "does not read backslashes as separators in a POSIX path (#65)",
+    async () => {
+      const { deps, tmp } = makeFixture({});
+      const dir = path.join(tmp, "fixture", "unrelated\\leakshield\\dist");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "index.js"), "export {};");
+      fs.writeFileSync(path.join(tmp, "opencode.json"), JSON.stringify({ plugins: [dir] }));
+      expect((await runDoctor(deps)).status).toBe("NOT_REGISTERED");
+    },
+  );
+
   it("fails a configured file path, which the host skips (#65)", async () => {
     const { deps } = makeFixture({
       distFiles: true,
@@ -512,21 +552,6 @@ describe("runDoctor", () => {
     writeGlobalConfig(tmp, { plugins: ["leakshield"] });
     writeRepoConfig(tmp, { plugins: ["leakshield"] });
     expect((await runDoctor(deps)).status).toBe("PROTECTED");
-  });
-
-  it("validates the options of the entry that applied last (#65)", async () => {
-    // The project entry re-applies the plugin without options, so the validated
-    // options are the defaults; the global wireProtection=false no longer wins.
-    const { deps, tmp } = makeFixture({ config: () => ({ plugins: [{ package: "leakshield" }] }) });
-    writeGlobalConfig(tmp, {
-      plugins: [{ package: "leakshield", options: { mode: "transparent", wireProtection: false } }],
-    });
-    const report = await runDoctor(deps);
-    expect(report.status).toBe("PROTECTED");
-    expect(report.checks.find((c) => c.id === "options")?.detail).toContain("wireProtection=true");
-    expect(report.checks.find((c) => c.id === "registration")?.detail).toContain(
-      `(from ${path.join(tmp, "opencode.json")})`,
-    );
   });
 
   it("reports BROKEN for an unparsable file anywhere in the chain (#65)", async () => {

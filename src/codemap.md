@@ -13,7 +13,7 @@ Application layer for the scanner: configuration, rule engine, decision model, p
   - `transports/` — `cli.ts` (non-interactive CLI output and exit codes) and `web.ts` / `web-ui.ts` (Web UI and REST).
   - `i18n/` — `en` and `zh-TW` messages, selected by `LEAKSHIELD_LANG`.
   - `utils/` — file collection, path security, Windows console encoding.
-- Plugin modules: `opencode.ts` (v1), `opencode-v2.ts` (v2), `opencode-transparent*.ts` (transparent pseudonymization over HTTP/SSE, WebSocket, AI SDK), `opencode-hooks.ts`, `opencode-env-tools.ts` / `env-queries.ts` (opt-in read-only env queries), `plugin-options.ts`, `doctor.ts`, `forget.ts`.
+- Plugin modules: `opencode.ts` (plugin entry; `server` is a fail-closed stub for unsupported v1 hosts), `opencode-v2.ts` (v2), `opencode-transparent*.ts` (transparent pseudonymization over HTTP/SSE, WebSocket, AI SDK), `opencode-hooks.ts`, `opencode-env-tools.ts` / `env-queries.ts` (opt-in read-only env queries), `plugin-options.ts`, `doctor.ts`, `forget.ts`.
 - MCP server mode no longer exists.
 
 ## Flow
@@ -23,6 +23,6 @@ Application layer for the scanner: configuration, rule engine, decision model, p
 4. In the plugin, block mode refuses; transparent mode replaces values with stable placeholders and restores them in tool inputs and replies.
 
 ## Integration
-- Depends on `zod`, `js-yaml`, `chalk`, and `@opencode-ai/plugin`; transparent persistence uses Node's built-in `node:sqlite` (Node 22.13+).
+- Depends on `zod`, `js-yaml`, and `chalk`; transparent persistence uses Node's built-in `node:sqlite` (Node 22.13+).
 - Consumes `config/guard.config.yaml`.
 - Exposes the plugin entry, the `leakshield` CLI, and the local Web UI / REST endpoint.

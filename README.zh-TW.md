@@ -18,7 +18,7 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 
 | 模式 | 啟動方式 | 適用情境 |
 |------|----------|----------|
-| OpenCode Plugin | 在 `opencode.json` 加入 `leakshield` 套件或 `dist` 目錄（v2），或 `dist/opencode.js`（v1） | 自動且 fail-closed 地保護 OpenCode 模型輸入與工具輸出 |
+| OpenCode Plugin | 在 `opencode.json` 加入 `leakshield` 套件或 `dist` 目錄（OpenCode v2） | 自動且 fail-closed 地保護 OpenCode 模型輸入與工具輸出 |
 | CLI | `npm run scan -- --file ./path`（全域安裝或 `npm link` 後可用 `leakshield --file ./path`） | 明確的本機或 CI 掃描；不會把內容送到模型 |
 | Web UI | `npm run web` | 在 `http://localhost:3000` 手動以瀏覽器掃描 |
 
@@ -374,7 +374,7 @@ curl -s -X POST http://localhost:3001/scan \
 
 OpenCode plugin 成功載入後會成為強制性整合：它會在 OpenCode 儲存或送出使用者文字給模型前掃描並攔截，清理 system prompt 與 tool definition，並在下一輪模型讀取前清理工具輸出及歷史訊息。它會固定啟用編碼內容偵測。transparent 模式下，Base64、hex 或 URL 編碼片段解碼後若有命中，且能精確定位來源範圍，會整段遮罩為 `[SGP2:ENCODED-…]`；無法定位時則拒絕該次請求。plugin 選項或掃描設定無效時，所有受保護 hook 都會 fail closed 並中止模型請求。受限的 SHA-256 決策快取會避免重複掃描未變動歷史，同時不保留原文或脫敏後內容。transparent 模式下，tool input schema 內的注解文字（`description`/`title` 的值）若命中掃描規則，會與一般內容一樣遮罩為化名 token；識別碼位置（tool 名稱、property key、enum/const 值、regex pattern）仍會拒絕整個請求而不會被改名。
 
-同一份編譯產物同時支援兩個 OpenCode 大版本：v2 載入套件的 `id` + `setup(ctx)` 定義，v1（1.18.29+）呼叫舊版 `server()` factory。
+LeakShield 只支援 OpenCode v2：v2 載入套件的 `id` + `setup(ctx)` 定義。OpenCode v1 已不再支援：v1 host 載入此套件時會得到 fail-closed 的 hooks，中止每一個模型請求，`leakshield --doctor` 也會回報 `BROKEN`。請升級到 OpenCode v2。
 
 **OpenCode v2** — 將 `plugins` 指向已發佈的套件，或本機 build 的 `dist` 目錄：
 
@@ -393,20 +393,7 @@ OpenCode plugin 成功載入後會成為強制性整合：它會在 OpenCode 儲
 
 注意 v2 只接受 plugin「目錄」（會解析 `dist/index.js`）或套件名稱；指向單一 `.js` 檔的 `file://` URL 會被拒絕，並出現 `configured plugin path must be a directory`。
 
-**OpenCode v1（1.18.29+）** — 使用舊版 `plugin` 陣列指向編譯後的 plugin 檔案：
-
-```json
-{
-  "plugin": [
-    [
-      "file:///絕對路徑/leakshield/dist/opencode.js",
-      { "mode": "block" }
-    ]
-  ]
-}
-```
-
-`mode` 的預設值依 host 版本而定：**OpenCode v2 是 `transparent`**（見下方），**v1 是 `block`**，因為 transparent 只支援 v2。`block` 會用不含機敏值的攔截訊息替換危險內容；在 v2 想沿用這個行為，請設定 `"mode": "block"`。只有在你明確希望已辨識的直接命中改為 `[REDACTED_TYPE]` 佔位符時，才設定 `mode: "redact"`。`--doctor` 會顯示實際生效的 mode，沒有設定時會標示 `(default)`。
+`mode` 的預設值是 **`transparent`**（見下方）。`block` 會用不含機敏值的攔截訊息替換危險內容；想使用這個行為，請設定 `"mode": "block"`。只有在你明確希望已辨識的直接命中改為 `[REDACTED_TYPE]` 佔位符時，才設定 `mode: "redact"`。`--doctor` 會顯示實際生效的 mode，沒有設定時會標示 `(default)`。
 
 **僅限 OpenCode v2 — 透明假名化（transparent，v2 預設）：** 不設定 `mode` 或設定 `"mode": "transparent"` 時，偵測到的敏感值會在模型請求快照中替換為穩定的不透明佔位符——帶類別的 `[SGP2:<TYPE>-xxxx-xxxx-xxxx]`（仍辨識舊 `[SGP1:…]` 映射）。反查映射預設僅在行程記憶體、以 OpenCode session 為界；持久化 opt-in。已知佔位符在工具執行前及支援的助理顯示文字中還原。HTTP adapters 支援按路徑形狀判別的 Chat Completions、Anthropic Messages、Responses（含串流），另支援 native Responses-family WS；不依 provider 品牌設 allowlist。Hook-only 保護 content 快照，不設出站傳輸守門，也不為未知協定新增 adapter。失效或不安全的工具還原仍拒絕該次操作。本機歷史、日誌與檔案可能含原文——保護的是模型邊界，不是磁碟。transparent 目前在 loopback provider 和一個真實 OpenAI 模型上驗證過；OS keychain 只驗證過 macOS，真實 Anthropic provider、其他 provider 的長歷史重播，以及 Windows／Linux keychain 都還沒驗證（[#26](https://github.com/jwcrystal/leakshield/issues/26)）。無法保護的路線會被拒絕，不會放行。
 
@@ -436,7 +423,7 @@ Wire 模式的 wrapper 把自身拒絕表示為 **本地 HTTP 400 錯誤回覆**
 { "package": "/絕對路徑/leakshield/dist", "options": { "mode": "redact", "deidentify": true } }
 ```
 
-**選擇性開啟的唯讀 env 查詢（兩個版本皆支援）：** `envQueries` 選項（預設 `false`）針對 `settings.env_files` 所列檔案提供三個唯讀工具，讓 agent 能回答設定問題而不看到任何 value。這個選項不支援 transparent 模式，所以在 v2 要明確設定 `mode` 為 `block` 或 `redact`：
+**選擇性開啟的唯讀 env 查詢：** `envQueries` 選項（預設 `false`）針對 `settings.env_files` 所列檔案提供三個唯讀工具，讓 agent 能回答設定問題而不看到任何 value。這個選項不支援 transparent 模式，所以在 v2 要明確設定 `mode` 為 `block` 或 `redact`：
 
 | 工具 | 契約 |
 |---|---|
@@ -450,7 +437,7 @@ Wire 模式的 wrapper 把自身拒絕表示為 **本地 HTTP 400 錯誤回覆**
 
 基本規則：只有 `settings.env_files` 內的檔案可查（最多 16 個、各 1 MiB）。file id 只在列出它的 session 有效。每次呼叫都重新讀檔，比較的兩個運算元取自同一份單次呼叫快照。任何輸出都不會出現原始 value、value 長度、預覽、指紋或反查映射。若 setup 後 guard 設定檔變更，工具會回傳固定的「請重啟」錯誤直到 OpenCode 重啟——絕不悄悄退回新舊任一份授權。
 
-檔案存取採「盡力而為的路徑身分驗證」，不是 sandbox。Workspace root 在 setup 時凍結（解析後的路徑加上 device/inode 身分）；每次查詢都會在開檔前與讀取後重新 lstat root 與每個祖先目錄、拒絕任何路徑元件上的 symlink（包括解析到別處——即使仍在 workspace 內——的祖先目錄 symlink）、要求一般檔案、以 `O_NOFOLLOW` 與 `O_NONBLOCK` 開啟完整解析後的 canonical 路徑，並以讀取前後的 size/mtime 檢查把開啟的 descriptor 綁定到 lstat 過的 inode。限制（據實以告）：同一擁有者的惡意並發檔案系統變動不在本威脅模型內——在兩次檢查之間替換又還原（ABA 競態，發生在 root、祖先目錄或檔案上）無法靠路徑檢查偵測；hardlink 與原始檔案不做區分（不檢查出處）；保留 size 與 mtime 的就地覆寫無法分辨；且 agent 仍可透過其他工具修改 env 檔案——因此結果描述的是檔案當下狀態，而非可信任的基準。key 名稱本身照原樣回傳，並照常通過既有的輸出／歷史保護。OpenCode v1 上這些工具透過標準 v1 tool API（`@opencode-ai/plugin`，由 v1 host 提供）註冊。
+檔案存取採「盡力而為的路徑身分驗證」，不是 sandbox。Workspace root 在 setup 時凍結（解析後的路徑加上 device/inode 身分）；每次查詢都會在開檔前與讀取後重新 lstat root 與每個祖先目錄、拒絕任何路徑元件上的 symlink（包括解析到別處——即使仍在 workspace 內——的祖先目錄 symlink）、要求一般檔案、以 `O_NOFOLLOW` 與 `O_NONBLOCK` 開啟完整解析後的 canonical 路徑，並以讀取前後的 size/mtime 檢查把開啟的 descriptor 綁定到 lstat 過的 inode。限制（據實以告）：同一擁有者的惡意並發檔案系統變動不在本威脅模型內——在兩次檢查之間替換又還原（ABA 競態，發生在 root、祖先目錄或檔案上）無法靠路徑檢查偵測；hardlink 與原始檔案不做區分（不檢查出處）；保留 size 與 mtime 的就地覆寫無法分辨；且 agent 仍可透過其他工具修改 env 檔案——因此結果描述的是檔案當下狀態，而非可信任的基準。key 名稱本身照原樣回傳，並照常通過既有的輸出／歷史保護。
 
 附件：transparent 模式支援 `attachments` 政策（複數；`attachment` 不會被辨識）。**`"block"`（預設）** 會在 content hooks 略過 media／file parts 並以通知文字取代，模型讀不到這些被略過的圖片。Final wire 保護也會拒絕 wire 上殘留的附件 part；hook-first 不檢查後續才加入的附件。**`"allow"`** 會將附件未掃描送出並附加一則可見通知——這是明確的決定，代表你為附件內容作保（`"allow"` 需搭配 `mode: "transparent"`）。block／redact 模式下附件照舊攔截。既有對話可能重播原文，受上述重啟限制影響；開新對話不能取代驗證復原。此 plugin 僅保護 OpenCode 發出的模型請求，不涵蓋其他 AI client 或本機工具。
 
@@ -489,7 +476,7 @@ rm -rf "$SMOKE_DIR"
 leakshield --doctor     # 全域安裝或 npm link 後；在 repo 內可用 npm run scan -- --doctor
 ```
 
-Doctor 不會把任何內容送出去。它會檢查 OpenCode host 版本、尋找 `opencode.json`（先 workspace 再全域）、確認 LeakShield 已用 plugin 本身接受的選項註冊、確認本機 `dist` 進入點真的存在（缺少時 OpenCode 會靜默記錄並跳過 plugin：session 看起來正常但沒有保護）、載入 guard 設定，並在本機跑合成 canary 的 smoke scan。Exit code 0 代表 `PROTECTED`（v2）或 `PARTIAL`（v1：僅 session hooks；v2 且 `wireProtection: false`：不檢查最終出站 HTTP body）；其他狀態會印出失敗的檢查項與具體修正方式，plugin 未註冊時還會附上可直接複製的註冊片段。
+Doctor 不會把任何內容送出去。它會檢查 OpenCode host 版本、尋找 `opencode.json`（先 workspace 再全域）、確認 LeakShield 已用 plugin 本身接受的選項註冊、確認本機 `dist` 進入點真的存在（缺少時 OpenCode 會靜默記錄並跳過 plugin：session 看起來正常但沒有保護）、載入 guard 設定，並在本機跑合成 canary 的 smoke scan。Exit code 0 代表 `PROTECTED` 或 `PARTIAL`（`wireProtection: false`：不檢查最終出站 HTTP body）；v1 host 會回報 `BROKEN`，修正方式是升級到 OpenCode v2；其他狀態會印出失敗的檢查項與具體修正方式，plugin 未註冊時還會附上可直接複製的註冊片段。
 
 Doctor 是在 host 之外執行的安裝層檢查，看不到執行中的 session。執行期的證明來自上面的 smoke test 或 `scripts/e2e/run-boundary.mjs`。
 

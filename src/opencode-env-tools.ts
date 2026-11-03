@@ -1,4 +1,3 @@
-import type { Hooks } from "@opencode-ai/plugin";
 import type { Plugin as PluginNamespace } from "@opencode/plugin";
 import type {
   EnvCompareOutcome,
@@ -10,16 +9,9 @@ import { MAX_FILE_ID_LENGTH, MAX_KEY_NAME_LENGTH } from "./env-queries.js";
 
 /**
  * Agent tool surface for the opt-in readonly env queries (plugin option
- * `envQueries`, default false). Two bindings share this payload layer:
- *
- * - OpenCode v1: `Hooks["tool"]` built with the SDK's `tool()` helper
- *   (`import("@opencode-ai/plugin/tool")`, loaded dynamically so v2 hosts
- *   never depend on the v1 SDK package). Arg schemas use `tool.schema`
- *   (the SDK's zod 4), which satisfies the SDK's `ZodRawShape` constraint
- *   without any unsafe cast from this repo's zod 3.
- * - OpenCode v2: tools registered through `ctx.tool.transform(editor =>
- *   editor.add(...))` with literal JSON Schemas and runtime validation in
- *   `execute` (v2 passes raw unknown input).
+ * `envQueries`, default false). Tools are registered on OpenCode v2 through
+ * `ctx.tool.transform(editor => editor.add(...))` with literal JSON Schemas
+ * and runtime validation in `execute` (v2 passes raw unknown input).
  *
  * Every payload is fixed and sanitized: statuses, coarse shapes, equality,
  * opaque file ids, and key names only. Values, lengths, previews, paths, and
@@ -128,98 +120,6 @@ function readCompareArgs(
   return left_file_id && left_key && right_file_id && right_key
     ? { left_file_id, left_key, right_file_id, right_key }
     : undefined;
-}
-
-// ─── OpenCode v1 ─────────────────────────────────────────────────────────────
-
-/** Builds the v1 tool map for `Hooks["tool"]` when `envQueries` is enabled. */
-export async function createV1EnvTools(service: EnvQueryService): Promise<NonNullable<Hooks["tool"]>> {
-  // Runtime dependency on the v1 SDK's tool helper; loaded dynamically so a
-  // v2 host never needs the v1 SDK package. A v1 host always provides it.
-  const { tool } = await import("@opencode-ai/plugin/tool");
-  const z = tool.schema;
-
-  const guardEnvList = tool({
-    description: LIST_DESCRIPTION,
-    args: {},
-    async execute(_args, context) {
-      return {
-        title: "guard_env_list",
-        output: JSON.stringify(safePayload(() => listPayload(service, context.sessionID))),
-      };
-    },
-  });
-
-  const guardEnvInspect = tool({
-    description: INSPECT_DESCRIPTION,
-    args: {
-      file_id: z
-        .string()
-        .min(1)
-        .max(MAX_FILE_ID_LENGTH)
-        .describe("Session-local file id issued by guard_env_list."),
-      key: z
-        .string()
-        .min(1)
-        .max(MAX_KEY_NAME_LENGTH)
-        .describe("Key name as listed by guard_env_list."),
-    },
-    async execute(args, context) {
-      return {
-        title: "guard_env_inspect",
-        output: JSON.stringify(
-          safePayload(() => inspectPayload(service, context.sessionID, args.file_id, args.key)),
-        ),
-      };
-    },
-  });
-
-  const guardEnvCompare = tool({
-    description: COMPARE_DESCRIPTION,
-    args: {
-      left_file_id: z
-        .string()
-        .min(1)
-        .max(MAX_FILE_ID_LENGTH)
-        .describe("Session-local file id of the left operand."),
-      left_key: z
-        .string()
-        .min(1)
-        .max(MAX_KEY_NAME_LENGTH)
-        .describe("Key name of the left operand."),
-      right_file_id: z
-        .string()
-        .min(1)
-        .max(MAX_FILE_ID_LENGTH)
-        .describe("Session-local file id of the right operand."),
-      right_key: z
-        .string()
-        .min(1)
-        .max(MAX_KEY_NAME_LENGTH)
-        .describe("Key name of the right operand."),
-    },
-    async execute(args, context) {
-      return {
-        title: "guard_env_compare",
-        output: JSON.stringify(
-          safePayload(() =>
-            comparePayload(
-              service,
-              context.sessionID,
-              { fileId: args.left_file_id, key: args.left_key },
-              { fileId: args.right_file_id, key: args.right_key },
-            ),
-          ),
-        ),
-      };
-    },
-  });
-
-  return {
-    guard_env_list: guardEnvList,
-    guard_env_inspect: guardEnvInspect,
-    guard_env_compare: guardEnvCompare,
-  };
 }
 
 // ─── OpenCode v2 ─────────────────────────────────────────────────────────────

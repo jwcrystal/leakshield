@@ -4,8 +4,7 @@ import { findConfigPath, loadConfigWithFingerprint, type LoadedGuardConfig } fro
 import { createSessionKey } from "./decision/deidentify.js";
 import { defaultStorePath } from "./decision/mapping-key.js";
 import { EnvQueryService } from "./env-queries.js";
-import { createFailClosedHooks, createHooks } from "./opencode-hooks.js";
-import { createV1EnvTools } from "./opencode-env-tools.js";
+import { createFailClosedHooks } from "./opencode-hooks.js";
 import { createFailClosedV2Setup, createV2Setup } from "./opencode-v2.js";
 import { createFailClosedTransparentGuard, createTransparentSessionGuard } from "./opencode-transparent.js";
 import { PluginOptionsSchema, withDefaultMode, type PluginOptions } from "./plugin-options.js";
@@ -46,18 +45,10 @@ function createEnvQueryService(
   });
 }
 
-function getWorkspaceRoot(input: unknown): string {
-  if (typeof input !== "object" || input === null) return process.cwd();
-  const context = input as { worktree?: unknown; directory?: unknown };
-  if (typeof context.worktree === "string") return context.worktree;
-  if (typeof context.directory === "string") return context.directory;
-  return process.cwd();
-}
-
 /** Whether the raw v2 plugin options select transparent mode, explicitly or
  * by omitting `mode` (the v2 default), even if the options are invalid. */
 function rawModeIsTransparent(options: unknown): boolean {
-  const resolved = withDefaultMode(options, "v2");
+  const resolved = withDefaultMode(options);
   return (
     typeof resolved === "object" &&
     resolved !== null &&
@@ -67,7 +58,7 @@ function rawModeIsTransparent(options: unknown): boolean {
 
 const v2Setup = async (ctx: V2PluginContext): Promise<PluginNamespace.Cleanup | void> => {
   try {
-    const options: PluginOptions = PluginOptionsSchema.parse(withDefaultMode(ctx.options, "v2"));
+    const options: PluginOptions = PluginOptionsSchema.parse(withDefaultMode(ctx.options));
     const loaded = loadConfigWithFingerprint(options.configPath, ctx.location.directory);
     const config = withEncodingDetection(loaded.config);
     if (options.mode === "transparent") {
@@ -139,48 +130,19 @@ const v2Setup = async (ctx: V2PluginContext): Promise<PluginNamespace.Cleanup | 
   }
 };
 
-const v1Server = async (
-  input: Parameters<NonNullable<PluginModule["server"]>>[0],
-  rawOptions?: unknown,
-) => {
-  try {
-    const options: PluginOptions = PluginOptionsSchema.parse(withDefaultMode(rawOptions, "v1"));
-    if (options.deidentify) {
-      // v1 has no de-identification pipeline; the shared options schema now
-      // includes the flag, so v1 must explicitly reject it. The throw lands in
-      // the catch below → fail-closed hooks.
-      throw new Error("deidentify is only supported on OpenCode v2");
-    }
-    if (options.mode === "transparent") {
-      // v1 has no native transport hooks to remask the final wire or restore
-      // responses, so transparent mode cannot honor its contract there. The
-      // throw lands in the catch below → fail-closed hooks.
-      throw new Error("transparent mode is only supported on OpenCode v2");
-    }
-    const workspaceRoot = getWorkspaceRoot(input);
-    const loaded = loadConfigWithFingerprint(options.configPath, workspaceRoot);
-    const config = withEncodingDetection(loaded.config);
-    const hooks = createHooks(config, options.mode);
-    const envQueries = createEnvQueryService(options, workspaceRoot, loaded);
-    if (!envQueries) return hooks;
-    try {
-      return { ...hooks, tool: await createV1EnvTools(envQueries) };
-    } catch {
-      // The opt-in env query tools failed to load on their own (e.g. a
-      // missing v1 SDK module on an incomplete install). Only the feature
-      // fails: the full protection hooks above stay exactly as armed as
-      // they would be with envQueries off — no fail-closed downgrade, no
-      // protection gap, no env tools.
-      return hooks;
-    }
-  } catch {
-    return createFailClosedHooks();
-  }
-};
+const V1_UNSUPPORTED =
+  "LeakShield no longer supports OpenCode v1, so the request was blocked before anything was sent. Upgrade to OpenCode v2.";
 
 /**
- * Dual-version OpenCode plugin entry. OpenCode v2 reads `id` and `setup(ctx)`;
- * OpenCode v1 (1.18.29+) calls `server(input, options)` and uses the returned hooks.
+ * OpenCode v1 is not supported. This stub exists only so a v1 host that still
+ * loads the package aborts every model request instead of running unprotected.
+ * It must not throw: a host could swallow the error and carry on with no guard.
+ */
+const v1Server = async () => createFailClosedHooks(V1_UNSUPPORTED);
+
+/**
+ * OpenCode plugin entry. OpenCode v2 reads `id` and `setup(ctx)`. `server` is
+ * the fail-closed stub for v1 hosts (1.18.29+), which call `server(input, options)`.
  */
 const leakshieldPlugin = {
   id: "leakshield",

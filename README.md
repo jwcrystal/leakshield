@@ -18,7 +18,7 @@ MCP server mode has been removed. It depended on the model voluntarily calling a
 
 | Mode | Start it with | Use it for |
 |------|---------------|------------|
-| OpenCode Plugin | Add the `leakshield` package or the `dist` directory (v2), or `dist/opencode.js` (v1), to `opencode.json` | Automatic, fail-closed protection for OpenCode model inputs and tool outputs |
+| OpenCode Plugin | Add the `leakshield` package or the `dist` directory to `opencode.json` (OpenCode v2) | Automatic, fail-closed protection for OpenCode model inputs and tool outputs |
 | CLI | `npm run scan -- --file ./path` (or `leakshield --file ./path` after a global install / `npm link`) | Explicit local or CI scans; it never sends content to a model |
 | Web UI | `npm run web` | Manual browser scans at `http://localhost:3000` |
 
@@ -321,7 +321,7 @@ curl -s -X POST http://localhost:3001/scan \
 
 When loaded successfully, the OpenCode plugin is the enforced integration. It scans and blocks user text before OpenCode persists or sends it to a model, sanitizes system prompts and tool definitions, protects tool output before the next model turn, and re-scans history before replay. It always enables encoded-content detection. In transparent mode, a Base64, hex or URL-encoded run that decodes to a finding is masked whole as `[SGP2:ENCODED-…]` when its source span can be located exactly; otherwise the request is refused. Invalid plugin options or scanner configuration make every protected hook fail closed and abort the model request. A bounded SHA-256 decision cache avoids repeatedly scanning unchanged history without retaining original or redacted content. In transparent mode, schema annotation prose (a `description`/`title` value inside a tool input schema) that trips a scanner rule is masked to a pseudonym token like any other content; identifier positions (tool names, property keys, enum/const values, regex patterns) still refuse the whole request rather than being renamed.
 
-The same compiled plugin supports both OpenCode major versions: v2 hosts load the package `id` + `setup(ctx)` definition, while v1 hosts (1.18.29+) call the legacy `server()` factory.
+LeakShield supports OpenCode v2 only. v2 hosts load the package `id` + `setup(ctx)` definition. OpenCode v1 is no longer supported: a v1 host that loads the package gets hooks that fail closed and abort every model request, and `leakshield --doctor` reports `BROKEN`. Upgrade to OpenCode v2.
 
 **OpenCode v2** — point `plugins` at the published package, or at the `dist` directory of a local build:
 
@@ -340,20 +340,7 @@ The same compiled plugin supports both OpenCode major versions: v2 hosts load th
 
 Note that v2 only accepts plugin *directories* (it resolves `dist/index.js`) or package names; a `file://` URL to a single `.js` file is rejected with `configured plugin path must be a directory`.
 
-**OpenCode v1 (1.18.29+)** — use the legacy `plugin` array with the compiled plugin file:
-
-```json
-{
-  "plugin": [
-    [
-      "file:///absolute/path/to/leakshield/dist/opencode.js",
-      { "mode": "block" }
-    ]
-  ]
-}
-```
-
-The default `mode` depends on the host: **`transparent` on OpenCode v2** (described below) and **`block` on v1**, since transparent is v2-only. `block` replaces unsafe content with a disclosure-free notice; set `"mode": "block"` on v2 to keep that behavior. Set `mode` to `redact` only when you explicitly want recognized direct matches replaced with `[REDACTED_TYPE]` placeholders. `--doctor` shows the mode in effect and marks it `(default)` when the options omit it.
+The default `mode` is **`transparent`** (described below). `block` replaces unsafe content with a disclosure-free notice; set `"mode": "block"` to use it. Set `mode` to `redact` only when you explicitly want recognized direct matches replaced with `[REDACTED_TYPE]` placeholders. `--doctor` shows the mode in effect and marks it `(default)` when the options omit it.
 
 **OpenCode v2 only — transparent pseudonymization (the v2 default):** omit `mode` or set `"mode": "transparent"` to replace detected sensitive values in model-request snapshots with stable opaque placeholders — category-labelled `[SGP2:<TYPE>-xxxx-xxxx-xxxx]` (the legacy `[SGP1:…]` shape stays recognized for restoring pre-upgrade in-session mappings). Reverse mappings are scoped to the OpenCode session and stay in process memory by default; encrypted persistence is opt-in below. Known placeholders are restored in tool inputs before execution and in supported assistant response text. Supported HTTP protocols are selected by URL path shape: Chat Completions, Anthropic Messages, and Responses, including streaming. Native Responses-family WebSocket is also supported as described below. Wire-mode SDKs honoring injected fetch use the same request-scoped HTTP hooks. Hook-only protects content snapshots without transport admission; it does not add adapters for unknown protocols. Transparent mode has been verified against loopback providers and one real OpenAI model; OS-keychain custody is verified on macOS only, and a real Anthropic provider, long-history replay on other providers and Windows/Linux keychains are not verified yet ([#26](https://github.com/jwcrystal/leakshield/issues/26)). Routes it cannot protect are refused, not forwarded.
 
@@ -387,7 +374,7 @@ In wire mode, the wrapper represents its route/content refusals as a **local HTT
 { "package": "/absolute/path/to/leakshield/dist", "options": { "mode": "redact", "deidentify": true } }
 ```
 
-**Opt-in readonly env queries (both versions):** the `envQueries` option (default `false`) exposes three read-only tools over the files listed in `settings.env_files`, so an agent can answer configuration questions without ever seeing values. It does not work with transparent mode, so on v2 set `mode` to `block` or `redact` explicitly:
+**Opt-in readonly env queries:** the `envQueries` option (default `false`) exposes three read-only tools over the files listed in `settings.env_files`, so an agent can answer configuration questions without ever seeing values. It does not work with transparent mode, so on v2 set `mode` to `block` or `redact` explicitly:
 
 | Tool | Contract |
 |---|---|
@@ -401,7 +388,7 @@ In wire mode, the wrapper represents its route/content refusals as a **local HTT
 
 Ground rules: only `settings.env_files` entries are queryable (at most 16 files, 1 MiB each). File ids are only valid in the session that listed them. Files are re-read on every call, and a comparison reads both operands in one per-call snapshot. Raw values, value lengths, previews, fingerprints, and reverse mappings never appear in any output. If the guard configuration file changes after setup, the tools return a fixed restart-required error until OpenCode restarts — they never silently fall back to the old or new authorization.
 
-File access is best-effort pathname identity validation, not a sandbox. The workspace root is frozen at setup (resolved path plus device/inode identity); every query re-stats the root and each ancestor directory before opening and again after reading, rejects symlinks on any path component — including ancestor directories that resolve elsewhere, even inside the workspace — requires regular files, opens the fully resolved canonical path with `O_NOFOLLOW` and `O_NONBLOCK`, and binds the opened descriptor to the statted inode with pre- and post-read size and mtime checks. Limitations, stated honestly: malicious concurrent filesystem mutation by the same owner is outside this threat model — a substitution that is reverted between two checks (an ABA race on the root, an ancestor directory, or the file) is not detectable by pathname checks, hardlinks are not distinguished from the original file (provenance is not checked), in-place rewrites that preserve size and mtime are not distinguishable, and the agent can modify env files through other tools — so results describe the current file state, not a trusted baseline. Key names themselves are returned as-is and pass through the normal output/history protection. On OpenCode v1 the tools are registered through the standard v1 tool API (`@opencode-ai/plugin`), which the v1 host provides.
+File access is best-effort pathname identity validation, not a sandbox. The workspace root is frozen at setup (resolved path plus device/inode identity); every query re-stats the root and each ancestor directory before opening and again after reading, rejects symlinks on any path component — including ancestor directories that resolve elsewhere, even inside the workspace — requires regular files, opens the fully resolved canonical path with `O_NOFOLLOW` and `O_NONBLOCK`, and binds the opened descriptor to the statted inode with pre- and post-read size and mtime checks. Limitations, stated honestly: malicious concurrent filesystem mutation by the same owner is outside this threat model — a substitution that is reverted between two checks (an ABA race on the root, an ancestor directory, or the file) is not detectable by pathname checks, hardlinks are not distinguished from the original file (provenance is not checked), in-place rewrites that preserve size and mtime are not distinguishable, and the agent can modify env files through other tools — so results describe the current file state, not a trusted baseline. Key names themselves are returned as-is and pass through the normal output/history protection.
 
 Attachments: transparent mode supports an `attachments` policy (plural; `attachment` is not recognized). **`"block"` (default)** omits media/file parts at content hooks and replaces them with a notice; the model cannot read those omitted images. Final wire protection also refuses residual wire attachment parts; hook-first does not inspect late-added attachments. **`"allow"`** sends attachments through unscanned and appends a visible notice part — an explicit decision that you vouch for their content (`"allow"` requires `mode: "transparent"`). In block/redact modes attachments are blocked as before. Existing conversations can replay originals, subject to the restart limitations above; starting a new conversation is not a substitute for verifying recovery. The plugin protects OpenCode model requests only, not other AI clients or local tools.
 
@@ -438,7 +425,7 @@ To test the published package, use `"leakshield"` instead of the local `dist` pa
 npm run scan -- --doctor     # or: leakshield --doctor after global install
 ```
 
-The doctor verifies the install without sending anything anywhere: it checks the OpenCode host version, finds `opencode.json` (workspace then global), confirms LeakShield is registered with options that the plugin itself would accept, verifies a local `dist` entry point actually exists (a missing one makes OpenCode silently log-and-skip the plugin — sessions look normal but are unprotected), loads the guard config, and runs the synthetic-canary smoke scan locally. Exit code 0 means `PROTECTED` (v2) or `PARTIAL` (v1: session hooks only; v2 with `wireProtection: false`: final outbound HTTP bodies are not inspected); any other status prints the failing check with a concrete fix, including a copy-paste registration snippet when the plugin is missing.
+The doctor verifies the install without sending anything anywhere: it checks the OpenCode host version, finds `opencode.json` (workspace then global), confirms LeakShield is registered with options that the plugin itself would accept, verifies a local `dist` entry point actually exists (a missing one makes OpenCode silently log-and-skip the plugin — sessions look normal but are unprotected), loads the guard config, and runs the synthetic-canary smoke scan locally. Exit code 0 means `PROTECTED` or `PARTIAL` (`wireProtection: false`: final outbound HTTP bodies are not inspected); a v1 host is reported `BROKEN` with a fix that says to upgrade to OpenCode v2; any other status prints the failing check with a concrete fix, including a copy-paste registration snippet when the plugin is missing.
 
 Doctor is an install-level check that runs outside the host — it cannot see inside a live session. Runtime proof comes from the smoke test above or `scripts/e2e/run-boundary.mjs`.
 

@@ -11,9 +11,10 @@
  *
  * Statuses:
  * - PROTECTED     registered + dist present + options valid + config loads + smoke passes
- * - PARTIAL       v1 host: session hooks only (no transport layer, no transparent/deidentify)
+ * - PARTIAL       transparent hook-only mode (wireProtection=false): no final-body inspection
  * - BROKEN        something is registered but would not work (dist missing / invalid options /
- *                 guard config broken / smoke fails / v2-only mode on v1)
+ *                 guard config broken / smoke fails), or the host is OpenCode v1, which is
+ *                 no longer supported (the package only blocks its model requests)
  * - NOT_REGISTERED host found, config found or absent, but LeakShield is not in it
  * - HOST_MISSING  no usable `opencode` binary on PATH
  */
@@ -47,7 +48,7 @@ export interface DoctorReport {
   hostGeneration: "v1" | "v2" | null;
   configPath: string | null;
   checks: DoctorCheck[];
-  /** Copy-paste registration snippet for the detected host generation. */
+  /** Copy-paste registration snippet for the OpenCode v2 config. */
   snippet?: string;
 }
 
@@ -180,53 +181,35 @@ function matchesLeakshield(entry: string): boolean {
   return /\/leakshield(\/dist(\/opencode\.js)?)?$/.test(entry);
 }
 
-function findRegistration(generation: "v1" | "v2", config: unknown): RegistrationMatch | null {
+function findRegistration(config: unknown): RegistrationMatch | null {
   if (!config || typeof config !== "object") return null;
-  const record = config as Record<string, unknown>;
-
-  if (generation === "v2") {
-    const plugins = record.plugins;
-    if (Array.isArray(plugins)) {
-      for (const entry of plugins) {
-        if (typeof entry === "string" && matchesLeakshield(entry)) {
-          return { packageRef: entry, options: {}, isLocalDistPath: entry.includes("/") };
-        }
-        if (entry && typeof entry === "object" && !Array.isArray(entry)) {
-          const pkg = (entry as Record<string, unknown>).package;
-          if (typeof pkg === "string" && matchesLeakshield(pkg)) {
-            const options = (entry as Record<string, unknown>).options ?? {};
-            return { packageRef: pkg, options, isLocalDistPath: pkg.includes("/") };
-          }
-        }
-      }
-    }
-    return null;
-  }
-
-  // v1: legacy `plugin` array of compiled file paths
-  const legacy = record.plugin;
-  if (Array.isArray(legacy)) {
-    for (const entry of legacy) {
+  const plugins = (config as Record<string, unknown>).plugins;
+  if (Array.isArray(plugins)) {
+    for (const entry of plugins) {
       if (typeof entry === "string" && matchesLeakshield(entry)) {
-        return { packageRef: entry, options: {}, isLocalDistPath: true };
+        return { packageRef: entry, options: {}, isLocalDistPath: entry.includes("/") };
+      }
+      if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+        const pkg = (entry as Record<string, unknown>).package;
+        if (typeof pkg === "string" && matchesLeakshield(pkg)) {
+          const options = (entry as Record<string, unknown>).options ?? {};
+          return { packageRef: pkg, options, isLocalDistPath: pkg.includes("/") };
+        }
       }
     }
   }
   return null;
 }
 
-function registrationSnippet(generation: "v1" | "v2", distDir: string): string {
-  if (generation === "v2") {
-    return [
-      '"plugins": [',
-      "  {",
-      `    "package": "${distDir.replaceAll("\\", "\\\\")}",`,
-      '    "options": { "mode": "block" }',
-      "  }",
-      "]",
-    ].join("\n");
-  }
-  return `"plugin": [\n  "${distDir.replaceAll("\\", "\\\\")}/opencode.js"\n]`;
+function registrationSnippet(distDir: string): string {
+  return [
+    '"plugins": [',
+    "  {",
+    `    "package": "${distDir.replaceAll("\\", "\\\\")}",`,
+    '    "options": { "mode": "block" }',
+    "  }",
+    "]",
+  ].join("\n");
 }
 
 function candidateConfigPaths(deps: DoctorDeps): string[] {
@@ -332,6 +315,15 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     });
     return { status: "HOST_MISSING", hostVersion: null, hostGeneration: null, configPath: null, checks };
   }
+  if (host.generation === "v1") {
+    checks.push({
+      id: "host",
+      state: "fail",
+      detail: `OpenCode ${host.version.trim()} (v1) is no longer supported. LeakShield only blocks model requests on a v1 host.`,
+      fix: "Upgrade to OpenCode v2, then rerun `leakshield --doctor`.",
+    });
+    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath: null, checks };
+  }
   checks.push({ id: "host", state: "ok", detail: `OpenCode ${host.version.trim()} (${host.generation})` });
 
   // Config discovery
@@ -369,7 +361,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     });
   }
 
-  const registration = findRegistration(host.generation, parsedConfig);
+  const registration = findRegistration(parsedConfig);
   const distDir = path.resolve(deps.cwd, "dist");
 
   if (!registration) {
@@ -385,7 +377,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       hostGeneration: host.generation,
       configPath,
       checks,
-      snippet: registrationSnippet(host.generation, distDir),
+      snippet: registrationSnippet(distDir),
     };
   }
   checks.push({
@@ -399,8 +391,8 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   // with no visible failure).
   if (registration.isLocalDistPath && registration.packageRef) {
     const resolved = path.resolve(deps.cwd, registration.packageRef);
-    // v2 registers a directory (host resolves index.js); v1 legacy entries
-    // point directly at the compiled opencode.js file.
+    // A directory registration resolves to index.js through the host; an
+    // entry ending in .js points directly at the compiled file.
     const entryOk = registration.packageRef.endsWith(".js")
       ? deps.existsFile(resolved)
       : deps.existsDir(resolved) && deps.existsFile(path.join(resolved, "index.js"));
@@ -423,7 +415,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   }
 
   // Options validation (same schema the plugin entry enforces at runtime)
-  const optionsValidation = validatePluginOptions(registration.options ?? {}, host.generation);
+  const optionsValidation = validatePluginOptions(registration.options ?? {});
   if (!optionsValidation.ok) {
     checks.push({
       id: "options",
@@ -614,18 +606,8 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
 
   // A failed check must not still read as PARTIAL or PROTECTED: an allowlist
   // failure is a "do not trust this install" signal, like a missing canary.
-  // This runs before the v1 early return so a v1 host cannot mask it either.
   if (checks.some((check) => check.state === "fail")) {
     return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
-  }
-
-  if (host.generation === "v1") {
-    checks.push({
-      id: "coverage",
-      state: "warn",
-      detail: "v1 host: session hooks only — no transport egress layer, no transparent pseudonymization, no deidentify.",
-    });
-    return { status: "PARTIAL", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
   }
 
   if (options.mode === "transparent") {
@@ -635,10 +617,6 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       detail: `${options.wireProtection === false ? "transparent hook-only: content hooks protect their snapshots; no outbound HTTP/WS/SDK admission, transport metadata checks, injected-fetch requirement or provider transport transform. Final bodies/frames are not inspected or remasked. Unknown routes, including /alpha/generate, are not gated. Optional incoming HTTP/WS hooks restore known display protocols after successful scoped host preparation for the same session/kind/model; unsupported or unverified replies remain literal. Tool safety remains. Content added after hooks may be unmasked, including late-added attachments." : "transparent mode protects three HTTP protocols by wire shape (Chat Completions, Anthropic Messages, Responses) and native Responses-family WS frames; unknown outbound dialects and intercepted routes, including /alpha/generate, are refused (fail-closed), not passed. AI SDK providers must honor OpenCode's injected HTTP fetch; missing or unsafe fetch options refuse. Bypass transports are outside coverage, not a proven blocked transport."} Both levels stop rewriting on reply-side SG failures and keep literal originals; provider errors and cancellation still propagate. Content-hook masking failures still refuse the affected model call with a safe reason/stage, never silently send raw content. Attachments policy at content hooks: ${options.attachments === "allow" ? "ALLOW — attachments pass through unscanned with a visible notice (you vouch for their content)" : "block — replaced with an omission notice"}. Complete original-history/restart restoration is not verified.`,
     });
   }
-
-  // A failed check must not still read as PROTECTED: the allowlist failure is a
-  // real "do not trust this install" signal, like a missing smoke canary.
-  // (Handled before the v1 return above.)
 
   checks.push({
     id: "runtime",
@@ -667,9 +645,7 @@ export function formatDoctorReport(report: DoctorReport): string {
     report.status === "PROTECTED"
       ? "PROTECTED — install-level checks pass."
       : report.status === "PARTIAL"
-        ? report.hostGeneration === "v1"
-          ? "PARTIAL — protected within the v1 boundary (session hooks only)."
-          : "PARTIAL — hook-first protection; final outbound HTTP bodies are not inspected."
+        ? "PARTIAL — hook-first protection; final outbound HTTP bodies are not inspected."
         : report.status === "BROKEN"
           ? "BROKEN — registered but would not protect; fix the [FAIL] items above."
           : report.status === "NOT_REGISTERED"

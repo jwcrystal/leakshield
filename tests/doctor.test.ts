@@ -17,7 +17,7 @@ function makeFixture(overrides: {
   if (overrides.distFiles) {
     fs.mkdirSync(path.join(pluginRoot, "dist"), { recursive: true });
     fs.writeFileSync(path.join(pluginRoot, "dist", "index.js"), "export {};");
-    // v1 legacy entries point at the compiled opencode.js file directly
+    // A registration may point at the compiled opencode.js file directly
     fs.writeFileSync(path.join(pluginRoot, "dist", "opencode.js"), "export {};");
   }
   const config = overrides.config?.(tmp);
@@ -112,18 +112,10 @@ describe("runDoctor", () => {
     expect(report.checks.find((c) => c.id === "dist")?.state).toBe("skip");
   });
 
-  it("reports the generation default when options omit mode", async () => {
+  it("reports the default mode when options omit mode", async () => {
     const v2 = makeFixture({ config: () => ({ plugins: ["leakshield"] }) });
     const v2Report = await runDoctor(v2.deps);
     expect(v2Report.checks.find((c) => c.id === "options")?.detail).toContain("mode=transparent (default) wireProtection=true");
-
-    const v1 = makeFixture({
-      version: "opencode 1.18.29",
-      distFiles: true,
-      config: (tmp) => ({ plugin: [`${distRef(tmp)}/opencode.js`] }),
-    });
-    const v1Report = await runDoctor(v1.deps);
-    expect(v1Report.checks.find((c) => c.id === "options")?.detail).toContain("mode=block (default)");
 
     const explicit = makeFixture({ config: () => ({ plugins: [{ package: "leakshield", options: { mode: "block" } }] }) });
     const explicitReport = await runDoctor(explicit.deps);
@@ -244,30 +236,34 @@ describe("runDoctor", () => {
     expect(report.checks.find((c) => c.id === "smoke")?.state).toBe("fail");
   });
 
-  it("reports PARTIAL for a v1 legacy file registration", async () => {
+  it("reports BROKEN for a v1 host with an upgrade fix, whatever the registration", async () => {
+    for (const config of [
+      (tmp: string) => ({ plugin: [`${distRef(tmp)}/opencode.js`] }),
+      (tmp: string) => ({ plugins: [{ package: distRef(tmp), options: { mode: "transparent" } }] }),
+    ]) {
+      const { deps } = makeFixture({ version: "opencode 1.18.29", distFiles: true, config });
+      const report = await runDoctor(deps);
+      expect(report.status).toBe("BROKEN");
+      expect(report.hostGeneration).toBe("v1");
+      expect(report.hostVersion).toBe("opencode 1.18.29");
+      const host = report.checks.find((c) => c.id === "host");
+      expect(host?.state).toBe("fail");
+      expect(host?.detail).toContain("no longer supported");
+      expect(host?.fix).toContain("Upgrade to OpenCode v2");
+      // Returns right after host detection: nothing else is evaluated.
+      expect(report.checks.map((c) => c.id)).toEqual(["host"]);
+      expect(formatDoctorReport(report)).toContain("BROKEN");
+    }
+  });
+
+  it("reports NOT_REGISTERED when a v2 host only has the legacy plugin array", async () => {
     const { deps } = makeFixture({
-      version: "opencode 1.18.29",
       distFiles: true,
       config: (tmp) => ({ plugin: [`${distRef(tmp)}/opencode.js`] }),
     });
     const report = await runDoctor(deps);
-    expect(report.status).toBe("PARTIAL");
-    expect(report.hostGeneration).toBe("v1");
-    expect(report.checks.find((c) => c.id === "coverage")?.detail).toContain("session hooks only");
-  });
-
-  it("reports NOT_REGISTERED when a v1 host is given the v2-style plugins key", async () => {
-    // Truthful outcome: the v1 host never reads `plugins`, so a v2-style
-    // registration silently does nothing there — the doctor must say so
-    // instead of reporting protection.
-    const { deps } = makeFixture({
-      version: "opencode 1.18.29",
-      distFiles: true,
-      config: (tmp) => ({ plugins: [{ package: distRef(tmp), options: { mode: "transparent" } }] }),
-    });
-    const report = await runDoctor(deps);
     expect(report.status).toBe("NOT_REGISTERED");
-    expect(report.snippet).toContain('"plugin"');
+    expect(report.snippet).toContain('"plugins"');
   });
 
   it("reports NOT_REGISTERED with a snippet when config lacks the plugin", async () => {

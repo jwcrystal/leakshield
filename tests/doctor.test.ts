@@ -58,7 +58,7 @@ function makeFixture(overrides: {
 
 const distRef = (tmp: string) => path.join(tmp, "leakshield", "dist");
 
-/** Global config at the path `candidateConfigPaths` probes for `home: tmp`. */
+/** Global config at the primary root `configRootGroups` probes for `home: tmp`. */
 function writeGlobalConfig(
   tmp: string,
   config: unknown,
@@ -310,6 +310,30 @@ describe("runDoctor", () => {
     writeGlobalConfig(tmp, { plugins: [{ package: "leakshield" }] });
     const report = await runDoctor(deps);
     expect(report.status).toBe("PROTECTED");
+  });
+
+  it("ignores the inactive fallback root so a stale file cannot flip the verdict (#65)", async () => {
+    const { deps, tmp } = makeFixture({
+      config: () => ({ $schema: "https://opencode.ai/config.json" }),
+    });
+    writeGlobalConfig(tmp, { plugins: ["leakshield"] });
+    const fallback = path.join(tmp, "Library", "Application Support", "opencode");
+    fs.mkdirSync(fallback, { recursive: true });
+    fs.writeFileSync(path.join(fallback, "opencode.json"), "{ stale !!");
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("PROTECTED");
+    expect(report.checks.find((c) => c.id === "config")?.detail).not.toContain("Library");
+  });
+
+  it("falls back to the secondary global root when ~/.config has no config (#65)", async () => {
+    const { deps, tmp } = makeFixture({});
+    const dir = path.join(tmp, "Library", "Application Support", "opencode");
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, "opencode.json");
+    fs.writeFileSync(file, JSON.stringify({ plugins: ["leakshield"] }));
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("PROTECTED");
+    expect(report.checks.find((c) => c.id === "config")?.detail).toBe(file);
   });
 
   it("reports NOT_REGISTERED when a nearer config replaces the list without LeakShield (#65)", async () => {

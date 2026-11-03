@@ -212,7 +212,16 @@ function registrationSnippet(distDir: string): string {
   ].join("\n");
 }
 
-function candidateConfigPaths(deps: DoctorDeps): string[] {
+/**
+ * Config locations grouped by root. Within a root, `.json` wins over `.jsonc`;
+ * across roots, the workspace is merged with the user config, but the two
+ * global roots are alternatives rather than two merged files: the OpenCode
+ * docs name `~/.config/opencode` as the user config directory and
+ * `/Library/Application Support/opencode` (system-wide) as the managed one, so
+ * `~/Library/Application Support/opencode` is only a fallback for a host that
+ * keeps its user config there (https://opencode.ai/docs/config/#locations).
+ */
+function configRootGroups(deps: DoctorDeps): string[][] {
   const workspace = [
     path.join(deps.cwd, "opencode.json"),
     path.join(deps.cwd, "opencode.jsonc"),
@@ -221,11 +230,13 @@ function candidateConfigPaths(deps: DoctorDeps): string[] {
     deps.xdgConfigHome ?? path.join(deps.home, ".config"),
     path.join(deps.home, "Library", "Application Support"),
   ];
-  const global = configRoots.flatMap((root) => [
-    path.join(root, "opencode", "opencode.json"),
-    path.join(root, "opencode", "opencode.jsonc"),
-  ]);
-  return [...workspace, ...global];
+  return [
+    workspace,
+    ...configRoots.map((root) => [
+      path.join(root, "opencode", "opencode.json"),
+      path.join(root, "opencode", "opencode.jsonc"),
+    ]),
+  ];
 }
 
 interface ConfigSource {
@@ -233,33 +244,46 @@ interface ConfigSource {
   config: unknown;
 }
 
+function readConfigFile(deps: DoctorDeps, candidates: string[]): { path: string; text: string } | null {
+  for (const candidate of candidates) {
+    const text = deps.readIfExists(candidate);
+    if (text !== null) return { path: candidate, text };
+  }
+  return null;
+}
+
 /**
- * Every config file OpenCode would read, in precedence order.
+ * Every config file OpenCode reads, in precedence order.
  *
  * OpenCode merges config files instead of replacing them: "Later configs
  * override earlier ones only for conflicting keys. Non-conflicting settings
  * from all configs are preserved" (https://opencode.ai/docs/config/#locations).
  * Judging registration from the first file that exists makes a project
  * `opencode.json` that only sets `$schema` hide a registration in the global
- * config, so doctor reads the whole chain. Within one directory `.json` wins
- * over `.jsonc`, which is the order `candidateConfigPaths` already returns.
+ * config, so doctor reads the whole chain: the workspace file plus the one
+ * active global root. A stale file in the inactive fallback root is not read,
+ * so it cannot turn a working install into a failure.
  */
 function loadConfigSources(deps: DoctorDeps): {
   sources: ConfigSource[];
   broken: { path: string; error: string } | null;
 } {
+  const [workspaceGroup, ...globalGroups] = configRootGroups(deps);
+  const chosen = [readConfigFile(deps, workspaceGroup)];
+  for (const group of globalGroups) {
+    const file = readConfigFile(deps, group);
+    if (!file) continue;
+    chosen.push(file);
+    break; // the global roots are alternatives, not additional files
+  }
+
   const sources: ConfigSource[] = [];
-  const seenDirs = new Set<string>();
-  for (const candidate of candidateConfigPaths(deps)) {
-    const text = deps.readIfExists(candidate);
-    if (text === null) continue;
-    const dir = path.dirname(candidate);
-    if (seenDirs.has(dir)) continue;
-    seenDirs.add(dir);
+  for (const file of chosen) {
+    if (!file) continue;
     try {
-      sources.push({ path: candidate, config: parseJsonc(text) });
+      sources.push({ path: file.path, config: parseJsonc(file.text) });
     } catch (error) {
-      return { sources, broken: { path: candidate, error: (error as Error).message } };
+      return { sources, broken: { path: file.path, error: (error as Error).message } };
     }
   }
   return { sources, broken: null };

@@ -249,10 +249,13 @@ function invalidFileUrlId(ref: string): string {
         return part;
       }
     });
-  const isLeakshieldSegment = parts.some(
-    (part) => part === "leakshield" || part.split(/[\\/]/).includes("leakshield"),
-  );
-  if (isLeakshieldSegment) return "leakshield";
+  // Case-insensitive here only: this runs for references that cannot become a
+  // path, and a case-insensitive filesystem makes `/LeakShield/dist` the same
+  // directory. Identification of a usable path stays exact.
+  const isLeakshieldSegment = (part: string): boolean =>
+    part.toLowerCase() === "leakshield" ||
+    part.split(/[\\/]/).some((segment) => segment.toLowerCase() === "leakshield");
+  if (parts.some(isLeakshieldSegment)) return "leakshield";
   return parts[parts.length - 1] ?? ref;
 }
 

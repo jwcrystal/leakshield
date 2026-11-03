@@ -601,6 +601,14 @@ describe("runDoctor", () => {
     expect(report.checks.find((c) => c.id === "dist")?.state).toBe("fail");
   });
 
+  it("matches a case-variant LeakShield path in an unloadable URL (#65)", async () => {
+    // On a case-insensitive filesystem this is the same directory.
+    const { deps } = makeFixture({
+      config: () => ({ plugins: ["leakshield", "file://[bad]/Users/x/LeakShield/dist"] }),
+    });
+    expect((await runDoctor(deps)).status).toBe("BROKEN");
+  });
+
   it("resolves a relative plugin path from the config file that declared it (#65)", async () => {
     const { deps, tmp } = makeFixture({});
     const dir = path.join(tmp, ".opencode", "leakshield", "dist");

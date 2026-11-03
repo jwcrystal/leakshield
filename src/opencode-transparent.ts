@@ -108,13 +108,14 @@ function toolRestoreError(reason: PseudonymFailureReason): string {
  * stage plus reason code, never content — because the refused value may be
  * exactly what must not be echoed. `truncated_content` additionally names the
  * scanner bound and the two ways out, so the bound is visible instead of a
- * dead end (issue #47).
+ * dead end (issue #47). Masked text is rescanned and tokens can be longer than
+ * what they replace, so a string under the bound can still exceed it.
  */
 function prepareMaskError(reason: PseudonymFailureReason, config: GuardConfig): string {
   const marker = `${PROTECT_FAILED_ERROR} [stage=prepare.mask reason=${reason}]`;
   if (reason !== "truncated_content") return marker;
   const maxChars = config.settings.max_chars;
-  return `${marker} A string exceeded settings.max_chars (${maxChars}). Raise settings.max_chars or split the content.`;
+  return `${marker} A string, before or after masking, exceeded settings.max_chars (${maxChars}). Raise settings.max_chars or split the content.`;
 }
 
 /** Shell syntax excluded from unquoted literal words. Known tokens are

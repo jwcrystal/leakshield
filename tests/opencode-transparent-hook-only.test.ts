@@ -182,6 +182,15 @@ describe("pure hook-only transparent mode", () => {
     try { await prepare(EMAIL); } catch (error) { expect(String(error)).not.toContain(EMAIL); }
   });
 
+  it("explains the bound when only the masked text exceeds max_chars", async () => {
+    const atBound = { ...config, settings: { ...config.settings, max_chars: EMAIL.length } };
+    const { prepare } = await arm(false, [], atBound);
+    // The input fits; its token does not (issue #47).
+    await expect(prepare(EMAIL)).rejects.toThrow(
+      `[stage=prepare.mask reason=truncated_content] A string, before or after masking, exceeded settings.max_chars (${EMAIL.length}).`,
+    );
+  });
+
   it("reports aggregate operation exhaustion without partially publishing a large history", async () => {
     const { hooks, route } = await arm();
     const event = { ...route, system: [], options: {}, messages: Array.from({ length: 512 }, () => ({

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { request, type Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { createWebServer } from "../src/transports/web.js";
+import type { GuardConfig } from "../src/types.js";
 
 const servers: Server[] = [];
 
@@ -15,8 +16,8 @@ function parseCsp(value: string): Map<string, string> {
   );
 }
 
-async function startServer(): Promise<string> {
-  const server = createWebServer();
+async function startServer(config?: GuardConfig): Promise<string> {
+  const server = createWebServer(config);
   servers.push(server);
 
   await new Promise<void>((resolve, reject) => {
@@ -50,6 +51,21 @@ async function postWithHost(baseUrl: string, host: string): Promise<number> {
     req.once("error", reject);
     req.end(body);
   });
+}
+
+function testConfig(settings: Partial<GuardConfig["settings"]>): GuardConfig {
+  return {
+    nda_keywords: [],
+    private_domains: [],
+    custom_rules: [],
+    settings: {
+      max_chars: 200000,
+      show_line_numbers: true,
+      preview_length: 60,
+      encoding_detection: false,
+      ...settings,
+    },
+  };
 }
 
 afterEach(async () => {
@@ -138,6 +154,47 @@ describe("local Web UI", () => {
     expect(serialized).not.toContain("originalContent");
     expect(serialized).not.toContain("match_text");
     expect(body).not.toHaveProperty("safePreview");
+  });
+
+  it("omits redactedContent when an encoded secret fails verification", async () => {
+    const baseUrl = await startServer(testConfig({ encoding_detection: true }));
+    const secret = "sk-proj-test1234567890abcdef";
+    const run = Buffer.from(secret).toString("base64");
+    const response = await fetch(`${baseUrl}/scan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: `token = ${run}\n` }),
+    });
+    const body = await response.json() as Record<string, unknown>;
+    const serialized = JSON.stringify(body);
+
+    expect(response.status).toBe(200);
+    expect(body.decision).toBe("CONFIRM");
+    expect(body.redactionVerified).toBe(false);
+    expect(body.residualFindings).toBeGreaterThan(0);
+    expect(body).not.toHaveProperty("redactedContent");
+    expect(serialized).not.toContain(run);
+    expect(serialized).not.toContain(secret);
+  });
+
+  it("omits redactedContent when truncation leaves content unscanned", async () => {
+    const baseUrl = await startServer(testConfig({ max_chars: 64 }));
+    const firstSecret = `sk-${"a".repeat(24)}`;
+    const unscanned = `sk-${"b".repeat(24)}`;
+    const response = await fetch(`${baseUrl}/scan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: `${firstSecret}\n${"x ".repeat(40)}\n${unscanned}\n` }),
+    });
+    const body = await response.json() as Record<string, unknown>;
+    const serialized = JSON.stringify(body);
+
+    expect(response.status).toBe(200);
+    expect(body.redactionVerified).toBe(false);
+    expect(body.wasTruncated).toBe(true);
+    expect(body).not.toHaveProperty("redactedContent");
+    expect(serialized).not.toContain(firstSecret);
+    expect(serialized).not.toContain(unscanned);
   });
 
   it("rejects malformed or empty scan requests", async () => {

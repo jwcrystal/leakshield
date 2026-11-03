@@ -310,6 +310,8 @@ curl -s -X POST http://localhost:3001/scan \
 }
 ```
 
+`redactedContent` is omitted when `redactionVerified` is `false`.
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/` | GET | Web UI HTML |

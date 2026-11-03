@@ -363,6 +363,8 @@ curl -s -X POST http://localhost:3001/scan \
 }
 ```
 
+`redactionVerified` 為 `false` 時不會回傳 `redactedContent`。
+
 | 端點 | 方法 | 說明 |
 |------|------|------|
 | `/` | GET | Web UI HTML |

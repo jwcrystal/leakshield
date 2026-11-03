@@ -6,6 +6,7 @@ import { toDecisionResult } from "../decision/model.js";
 import { t } from "../i18n/index.js";
 import { scanText } from "../scanner/engine.js";
 import { redactAndVerify } from "../scanner/redaction-verifier.js";
+import type { GuardConfig } from "../types.js";
 import { WEB_UI_HTML } from "./web-ui.js";
 
 const MAX_BODY_BYTES = 512 * 1024;
@@ -111,7 +112,7 @@ function writeError(res: http.ServerResponse, status: number, message: string): 
 function handleScanRequest(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  config: ReturnType<typeof loadConfig>,
+  config: GuardConfig,
 ): void {
   const ip = req.socket.remoteAddress ?? "unknown";
   if (isRateLimited(ip)) {
@@ -181,7 +182,8 @@ function handleScanRequest(
 
       writeJson(res, 200, {
         ...decision,
-        redactedContent: redaction?.redacted,
+        // Replaces the decision's copy too: only text the verifier passed is returned.
+        redactedContent: redaction?.verified ? redaction.redacted : undefined,
         redactionVerified: redaction?.verified,
         residualFindings: redaction?.residualFindings,
         wasTruncated: redaction?.wasTruncated ?? scan.was_truncated ?? false,
@@ -198,9 +200,7 @@ function handleScanRequest(
   });
 }
 
-export function createWebServer(): http.Server {
-  const config = loadConfig();
-
+export function createWebServer(config: GuardConfig = loadConfig()): http.Server {
   return http.createServer((req, res) => {
     if (!isAllowedHost(req.headers.host)) {
       writeError(res, 403, "不允許的 Host");

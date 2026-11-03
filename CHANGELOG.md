@@ -8,6 +8,7 @@ All notable changes are listed here.
 
 ### Security
 
+- The Web UI `POST /scan` response no longer includes `redactedContent` when `redactionVerified` is `false`. With `encoding_detection` on, an encoded secret used to come back whole in that field. This now matches `--redact`, which suppresses output: the Web UI shows no safe version, only its verification notice. A truncated scan is treated the same way.
 - zod is upgraded to ^4.6.7, which fixes GHSA-mrhx-c7xc-m3w5 (high: memory exhaustion when validating oversized constrained collections). `nda_keywords` and `private_domains` are now capped at 4096 entries and `custom_rules` at 1024, and a config over a cap fails the load. A YAML value that is not a mapping where a mapping is expected (a timestamp or `!!binary` for `settings`, or a non-mapping root) fails the load, as it did before the upgrade.
 
 ### Removed

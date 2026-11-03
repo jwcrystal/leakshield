@@ -591,8 +591,10 @@ describe("runDoctor", () => {
   it("loads the guard config of every configured entry (#67)", async () => {
     const { deps, tmp } = makeFixture({
       distFiles: true,
-      config: () => ({
-        plugins: [{ package: "leakshield", options: { mode: "block", configPath: "/missing-guard.yml" } }],
+      config: (fixtureTmp) => ({
+        plugins: [
+          { package: distRef(fixtureTmp), options: { mode: "block", configPath: "/missing-guard.yml" } },
+        ],
       }),
       options: {
         loadGuardConfig: (overridePath) => {
@@ -605,6 +607,37 @@ describe("runDoctor", () => {
     const report = await runDoctor(deps);
     expect(report.status).toBe("BROKEN");
     expect(report.checks.find((c) => c.id === "guard-config")?.detail).toContain("/missing-guard.yml");
+  });
+
+  it("requires the canary under every configured guard config (#67)", async () => {
+    const { deps, tmp } = makeFixture({
+      distFiles: true,
+      config: (fixtureTmp) => ({
+        plugins: [
+          { package: distRef(fixtureTmp), options: { mode: "transparent", configPath: "/disabled.yml" } },
+        ],
+      }),
+      options: {
+        loadGuardConfig: (overridePath) =>
+          (overridePath === "/disabled.yml" ? { disabled: true } : {}) as GuardConfig,
+        smokeScan: (_text, config) => ({
+          findings: (config as unknown as { disabled?: boolean }).disabled ? 0 : 1,
+        }),
+      },
+    });
+    writeGlobalConfig(tmp, { plugins: [{ package: "leakshield", options: { mode: "transparent" } }] });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("BROKEN");
+    expect(report.checks.find((c) => c.id === "smoke")?.detail).toContain("/disabled.yml");
+  });
+
+  it("reports allow when any transparent entry allows attachments (#67)", async () => {
+    const { deps, tmp } = makeFixture({ config: () => ({ plugins: ["leakshield"] }) });
+    writeGlobalConfig(tmp, {
+      plugins: [{ package: "leakshield", options: { mode: "transparent", attachments: "allow" } }],
+    });
+    const report = await runDoctor(deps);
+    expect(report.checks.find((c) => c.id === "coverage")?.detail).toContain("ALLOW");
   });
 
   it("reports BROKEN for an unparsable file anywhere in the chain (#65)", async () => {

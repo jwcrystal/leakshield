@@ -660,6 +660,16 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     candidate.mode === "transparent" ? (candidate.wireProtection === false ? 0 : 1) : 2;
   const weakest = [...validated].sort((a, b) => weakness(a.options) - weakness(b.options))[0]!;
   const options = weakest.options;
+  // Attachments are reported conservatively too: any transparent entry that
+  // lets them through unscanned outranks a stricter tied entry (#67).
+  if (
+    options.mode === "transparent" &&
+    validated.some(
+      (candidate) => candidate.options.mode === "transparent" && candidate.options.attachments === "allow",
+    )
+  ) {
+    options.attachments = "allow";
+  }
   const across =
     configured.length > 1 ? ` (weakest of ${configured.length} configured entries)` : "";
   checks.push({
@@ -673,10 +683,12 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   // weakest entry supplies the summary, but a broken configPath in another
   // entry still breaks the install it would run under (#67).
   let guardConfig: GuardConfig | undefined;
+  const loadedConfigs: { path: string | undefined; config: GuardConfig }[] = [];
   const guardPaths = [...new Set(validated.map((candidate) => candidate.options.configPath))];
   for (const guardPath of guardPaths) {
     try {
       const loaded = deps.loadGuardConfig(guardPath, deps.cwd);
+      loadedConfigs.push({ path: guardPath, config: loaded });
       if (guardPath === options.configPath) guardConfig = loaded;
     } catch (error) {
       checks.push({
@@ -702,8 +714,8 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     state: "ok",
     detail: options.configPath
       ? `Loaded ${options.configPath}.`
-      : guardPaths.length > 1
-        ? `Default guard config resolved for ${guardPaths.length} entries.`
+      : validated.length > 1
+        ? `Default guard config resolved for ${validated.length} entries.`
         : "Default guard config resolved.",
   });
 
@@ -845,15 +857,18 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     });
   }
 
-  // Smoke: the local scanner must flag a synthetic credential
-  const smoke = deps.smokeScan(SMOKE_CANARY, guardConfig);
-  if (smoke.findings > 0) {
+  // Smoke: the local scanner must flag a synthetic credential under every
+  // configured guard config, not only the one that decides the summary (#67).
+  const smokeFailures = loadedConfigs.filter(
+    (candidate) => deps.smokeScan(SMOKE_CANARY, candidate.config).findings === 0,
+  );
+  if (smokeFailures.length === 0) {
     checks.push({ id: "smoke", state: "ok", detail: "Synthetic sk- canary detected by the installed scanner." });
   } else {
     checks.push({
       id: "smoke",
       state: "fail",
-      detail: "Synthetic sk- canary NOT detected — the guard config disables the rules this install relies on.",
+      detail: `Synthetic sk- canary NOT detected${smokeFailures[0]!.path ? ` under ${smokeFailures[0]!.path}` : ""} — that guard config disables the rules this install relies on.`,
       fix: "Restore credential rules in the guard config, or remove configPath to use defaults.",
     });
     return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };

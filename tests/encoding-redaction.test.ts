@@ -147,3 +147,41 @@ describe("filterBySeverity keeps the scan warnings", () => {
     expect(filtered.summary).not.toContain("[WARNING:");
   });
 });
+
+describe("several findings in one encoded run", () => {
+  const rule = (pattern: string, severity: "LOW" | "HIGH", description: string) => ({
+    pattern,
+    severity,
+    description,
+  });
+  const severities = (text: string, cfg: GuardConfig) => scanText(text, cfg).findings.map((f) => f.severity).sort();
+  const mixed: GuardConfig = {
+    ...config,
+    custom_rules: [rule("alpha", "LOW", "low rule"), rule("bravo", "HIGH", "high rule")],
+  };
+  const run = b64("alpha bravo charlie");
+
+  it("keeps a HIGH finding that follows a LOW one of the same type", () => {
+    expect(severities(run, mixed)).toEqual(["HIGH", "LOW"]);
+    const result = decide(run, mixed);
+    expect(result.decision).toBe("CONFIRM");
+    expect(result.redactedContent).toBe("[REDACTED_CUSTOM]");
+  });
+
+  it("still reports the run with --min-severity high", () => {
+    const filtered = filterBySeverity(scanText(run, mixed), "high");
+    expect(filtered.safe).toBe(false);
+    expect(filtered.total_findings).toBe(1);
+  });
+
+  it("keeps both severities on the fail-closed path", () => {
+    const hidden = `${run.slice(0, 12)}\u200b${run.slice(12)}`;
+    expect(severities(hidden, mixed)).toEqual(["HIGH", "LOW"]);
+    expect(decide(hidden, mixed).redactedContent).toBeUndefined();
+  });
+
+  it("reports one finding when the decoded text repeats under one rule", () => {
+    const repeated = b64("bravo one, bravo two, then zulu");
+    expect(severities(repeated, mixed)).toEqual(["HIGH"]);
+  });
+});

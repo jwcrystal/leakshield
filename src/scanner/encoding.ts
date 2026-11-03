@@ -421,6 +421,11 @@ export function decodedFindingsAttributable(
   return true;
 }
 
+/** What makes two findings distinct: dropping one must never lose a severity. */
+function findingIdentity(finding: Finding): string {
+  return JSON.stringify([finding.type, finding.severity, finding.description, finding.match_text]);
+}
+
 /**
  * Re-expresses the encoded findings of a decoding scan as spans of `text`.
  * scanTextWithDecoding reports decoded findings at offsets of the DECODED
@@ -463,7 +468,7 @@ export function anchorDecodedFindings(
     const seen = new Set<string>();
     const stripped: Finding[] = [];
     for (const finding of decodedFindings) {
-      const key = `${finding.type}:${finding.match_text}`;
+      const key = findingIdentity(finding);
       if (seen.has(key)) continue;
       seen.add(key);
       const { match_start: _start, match_end: _end, ...rest } = finding;
@@ -474,24 +479,30 @@ export function anchorDecodedFindings(
 
   const anchored: Finding[] = [];
   const seen = new Set<string>();
-  const add = (finding: Finding): void => {
-    const key = `${finding.type}:${finding.match_start}:${finding.match_end}`;
+  // Every finding of a run shares the run's span, so the span alone cannot
+  // tell them apart: identity comes from the decoded match, taken before
+  // match_text is rewritten to the source slice.
+  const add = (finding: Finding, identity: string): void => {
+    const key = `${finding.match_start}:${finding.match_end}:${identity}`;
     if (seen.has(key)) return;
     seen.add(key);
     anchored.push(finding);
   };
-  scan.original.findings.forEach(add);
+  for (const finding of scan.original.findings) add(finding, findingIdentity(finding));
   for (const run of locateEncodedRuns(text, config, opts)) {
     const { line, col } = getLineCol(text, run.start);
     for (const finding of run.findings) {
-      add({
-        ...finding,
-        line,
-        column: col,
-        match_start: run.start,
-        match_end: run.end,
-        match_text: text.slice(run.start, run.end),
-      });
+      add(
+        {
+          ...finding,
+          line,
+          column: col,
+          match_start: run.start,
+          match_end: run.end,
+          match_text: text.slice(run.start, run.end),
+        },
+        findingIdentity(finding),
+      );
     }
   }
   return anchored;

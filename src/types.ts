@@ -111,6 +111,8 @@ export interface ScanResult {
   recommendation: string;
   /** Indica se o conteúdo foi truncado durante a verificação */
   was_truncated?: boolean;
+  /** Warnings appended to `summary` as ` [WARNING: a, b]`; kept so a rebuilt summary can restore them */
+  warnings?: string[];
   /** Metadados sobre sanitização Unicode */
   unicode_sanitized?: {
     hadZeroWidth: boolean;

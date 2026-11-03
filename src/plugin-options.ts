@@ -6,17 +6,17 @@
 
 import { z } from "zod";
 
-// deidentify is v2-only and valid only in redact mode; an invalid combination
+// deidentify is valid only in redact mode; an invalid combination
 // makes the parse throw, and every entry path already fails closed on that.
-// transparent is the v2-only reversible pseudonymization mode (issue #22):
+// transparent is the reversible pseudonymization mode (issue #22):
 // it owns its own bounded session service and transport hooks, so combining
-// it with the second (deidentify) protection pipeline or the v1/v2 env query
+// it with the second (deidentify) protection pipeline or the env query
 // tools is rejected here — every entry path fails closed on the parse error.
 export const PluginOptionsSchema = z
   .object({
-    // No schema default: the default depends on the host generation, so
-    // callers fill it in with withDefaultMode() before parsing. A caller
-    // that forgets fails the parse, and every entry path fails closed.
+    // No schema default: callers fill it in with withDefaultMode() before
+    // parsing. A caller that forgets fails the parse, and every entry path
+    // fails closed.
     mode: z.enum(["block", "redact", "transparent"]),
     configPath: z.string().min(1).optional(),
     deidentify: z.boolean().default(false),
@@ -78,21 +78,13 @@ export const PluginOptionsSchema = z
 
 export type PluginOptions = z.infer<typeof PluginOptionsSchema>;
 
-export type HostGeneration = "v1" | "v2";
-
-/** Mode used when the options omit `mode`: transparent on v2, block on v1
- * (transparent is v2-only). */
-export function defaultMode(generation: HostGeneration): "block" | "transparent" {
-  return generation === "v2" ? "transparent" : "block";
-}
-
-/** Fills in the generation's default mode when the options omit it. Any
+/** Fills in the default mode (transparent) when the options omit `mode`. Any
  * other non-object input is returned unchanged so the schema rejects it. */
-export function withDefaultMode(input: unknown, generation: HostGeneration): unknown {
-  if (input === undefined || input === null) return { mode: defaultMode(generation) };
+export function withDefaultMode(input: unknown): unknown {
+  if (input === undefined || input === null) return { mode: "transparent" };
   if (typeof input !== "object" || Array.isArray(input)) return input;
   if ((input as { mode?: unknown }).mode !== undefined) return input;
-  return { ...input, mode: defaultMode(generation) };
+  return { ...input, mode: "transparent" };
 }
 
 /** Validated plugin options for external consumers (doctor, tests). Never
@@ -101,8 +93,8 @@ export type PluginOptionsValidation =
   | { ok: true; options: PluginOptions }
   | { ok: false; error: string };
 
-export function validatePluginOptions(input: unknown, generation: HostGeneration): PluginOptionsValidation {
-  const parsed = PluginOptionsSchema.safeParse(withDefaultMode(input, generation));
+export function validatePluginOptions(input: unknown): PluginOptionsValidation {
+  const parsed = PluginOptionsSchema.safeParse(withDefaultMode(input));
   if (parsed.success) return { ok: true, options: parsed.data };
   return {
     ok: false,

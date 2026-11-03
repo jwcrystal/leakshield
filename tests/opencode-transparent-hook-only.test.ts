@@ -176,6 +176,9 @@ describe("pure hook-only transparent mode", () => {
     const small = { ...config, settings: { ...config.settings, max_chars: 8 } };
     const { prepare } = await arm(false, [], small);
     await expect(prepare(EMAIL)).rejects.toThrow("[stage=prepare.mask reason=truncated_content]");
+    // Issue #47: the bound is named, and the message says how to get past it.
+    await expect(prepare(EMAIL)).rejects.toThrow("settings.max_chars (8)");
+    await expect(prepare(EMAIL)).rejects.toThrow("Raise settings.max_chars or split the content.");
     try { await prepare(EMAIL); } catch (error) { expect(String(error)).not.toContain(EMAIL); }
   });
 
@@ -185,8 +188,14 @@ describe("pure hook-only transparent mode", () => {
       role: "user", content: [{ type: "text", text: "ordinary prose. ".repeat(640) }],
     })) };
     const before = JSON.stringify(event);
-    await expect(Promise.resolve().then(() => hooks.get("session:context")!(event)))
-      .rejects.toThrow("[stage=prepare.mask reason=operation_limit]");
+    const failure = await Promise.resolve()
+      .then(() => hooks.get("session:context")!(event))
+      .then(() => null, (error: unknown) => (error as Error).message);
+    // Only truncated_content explains the scanner bound; every other reason
+    // keeps the bare marker it had before (issue #47).
+    expect(failure).toBe(
+      "LeakShield blocked a model request because it could not be masked safely. [stage=prepare.mask reason=operation_limit]",
+    );
     expect(JSON.stringify(event)).toBe(before);
   });
 

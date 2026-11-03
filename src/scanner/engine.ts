@@ -132,7 +132,14 @@ function honorDirectives(opts?: ScanOptions): boolean {
 /** Invisible format characters that can splice a value so the rules miss it. */
 export const ZERO_WIDTH_CHARS = /[\u200B-\u200D\uFEFF\u2060\u180E]/g;
 
-/** Rule and exact-value findings for one text, in rule order. */
+const SEVERITY_RANK: Record<Finding["severity"], number> = { HIGH: 3, MEDIUM: 2, LOW: 1 };
+
+/**
+ * Rule and exact-value findings for one text, in rule order. Rules of one type
+ * matching at one offset report one finding: the highest severity, over the
+ * longest span. Rule order must not decide either, or a LOW rule listed first
+ * would downgrade the decision and leave the tail of a longer match unmasked.
+ */
 function collectRuleFindings(
   text: string,
   rules: ReturnType<typeof getRules>,
@@ -141,7 +148,7 @@ function collectRuleFindings(
 ): Finding[] {
   const lineStarts = createLineIndex(text);
   const findings: Finding[] = [];
-  const seen = new Set<string>();
+  const findingAtOffset = new Map<string, Finding>();
   const globalAllow = allowSet(config.settings.allowlist);
   for (const rule of rules) {
     // Start from the beginning. matchAll advances after empty matches (by a
@@ -155,8 +162,7 @@ function collectRuleFindings(
       const matchedText = match[0].slice(offset);
       const start = match.index + offset;
       if (rule.validate !== undefined && !rule.validate(matchedText, { text, index: start })) continue;
-      const key = `${rule.type}:${start}`;
-      if (seen.has(key)) continue;
+      const end = match.index + match[0].length;
 
       const { line, col } = lineColAt(lineStarts, start);
       if (ignoredLines.has(line)) continue;
@@ -166,11 +172,25 @@ function collectRuleFindings(
         // at the same offset, and suppressing the short one must not hide it.
         continue;
       }
-      seen.add(key);
 
       const preview = redact(matchedText, config.settings.preview_length);
 
-      findings.push({
+      const key = `${rule.type}:${start}`;
+      const earlier = findingAtOffset.get(key);
+      if (earlier) {
+        if (SEVERITY_RANK[rule.severity] > SEVERITY_RANK[earlier.severity]) {
+          earlier.severity = rule.severity;
+          earlier.description = rule.description;
+        }
+        if (end > (earlier.match_end ?? 0)) {
+          earlier.preview = preview;
+          earlier.match_end = end;
+          earlier.match_text = matchedText;
+        }
+        continue;
+      }
+
+      const finding: Finding = {
         type: rule.type,
         severity: rule.severity,
         line: config.settings.show_line_numbers ? line : undefined,
@@ -178,9 +198,11 @@ function collectRuleFindings(
         preview,
         description: rule.description,
         match_start: start,
-        match_end: match.index + match[0].length,
+        match_end: end,
         match_text: matchedText,
-      });
+      };
+      findingAtOffset.set(key, finding);
+      findings.push(finding);
     }
   }
 

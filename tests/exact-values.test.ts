@@ -157,6 +157,28 @@ describe("exact values on the same range as a rule finding", () => {
     expect(result.text).toMatch(/^\[SGP2:ENV_SECRET-[a-z-]+\]$/);
   });
 
+  it("reports ENV_SECRET when weaker rules at one offset merge into the exact value's range", () => {
+    const config = loadProjectConfig(
+      [
+        "settings:",
+        "  env_files:",
+        "    - .env",
+        "custom_rules:",
+        '  - { description: "synthetic-short", pattern: "alpha", severity: LOW }',
+        '  - { description: "synthetic-long", pattern: "alpha-[0-9]+", severity: LOW }',
+        "",
+      ].join("\n"),
+      "TOKEN=alpha-123\n",
+    );
+    const text = "key alpha-123 end";
+    const scan = scanText(text, config);
+    expect(scan.findings.map((f) => [f.type, f.severity, f.match_start, f.match_end])).toEqual([
+      ["CUSTOM", "LOW", 4, 13],
+      ["ENV_SECRET", "HIGH", 4, 13],
+    ]);
+    expect(toDecisionResult(scan, text).decision).toBe("CONFIRM");
+  });
+
   it("still de-identifies an email that is also an exact value", () => {
     const email = "synthetic@example.com";
     const config = { ...configWith("LOW"), exact_value_detector: new ExactValueDetector([email]) };

@@ -596,6 +596,87 @@ describe("fail-closed content hazards", () => {
     expect(ps.restoreJson("s", result.value)).toEqual({ ok: true, value: input });
   });
 
+  describe("strings large enough for the one-pass value search", () => {
+    // 64 values over 150k units is past the point where the search leaves
+    // indexOf; tests/value-search.test.ts pins that both strategies agree.
+    const FILLER = "ordinary prose without anything sensitive in it. ".repeat(40);
+    const sharedPrefixEmails = Array.from({ length: 64 }, (_, i) => `user1${"0".repeat(i % 8)}${i}@corp.example`);
+    const padded = (parts: string[]) => parts.map((part) => `${FILLER}${part} `).join("");
+
+    it("masks shared-prefix values whole and restores them exactly", () => {
+      const ps = makeService();
+      const text = padded(sharedPrefixEmails);
+      expect(text.length).toBeGreaterThan(100_000);
+      const result = ps.protectText("s", text);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.text).not.toContain("@corp.example");
+      expect(new Set(tokensIn(result.text)).size).toBe(sharedPrefixEmails.length);
+      expect(ps.restoreText("s", result.text)).toEqual({ ok: true, text });
+    });
+
+    it("masks an undetected repeat in a large string with the same token (#52)", () => {
+      const ps = makeService();
+      const value = "username@hostname.com";
+      const text = padded([...sharedPrefixEmails, `// ${value}:user/repo`, `// proto://${value}:user/repo`]);
+      const result = ps.protectText("s", text);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.text).not.toContain(value);
+      expect(new Set(tokensIn(result.text)).size).toBe(sharedPrefixEmails.length + 1);
+      expect(ps.restoreText("s", result.text)).toEqual({ ok: true, text });
+    });
+
+    it("retries across large JSON strings when the undetected repeat comes first (#52)", () => {
+      const ps = makeService();
+      const value = "213.174.246.205";
+      const input = {
+        messages: [
+          padded([`ipv4.parse("1${value}")`]),
+          padded([...sharedPrefixEmails, `ipv6.parse("${value}")`]),
+        ],
+      };
+      const result = ps.protectJsonForModel("s", input);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(JSON.stringify(result.value)).not.toContain(value);
+      expect(ps.restoreJson("s", result.value)).toEqual({ ok: true, value: input });
+    });
+
+    it("still refuses a repeat it cannot mask, because it overlaps a preserved marker", () => {
+      // The rule only fires after `KEY=`, so the same characters at the end of
+      // the marker are an undetected repeat that masking must leave alone.
+      const tail = `${FOREIGN_TOKEN.slice(-9)}xy`;
+      const created = createPseudonymizer(
+        configWith({}, [{ description: "after-key", pattern: `(?<=KEY=)\\d{8}\\]xy`, severity: "HIGH" }]),
+      );
+      expect(created.ok).toBe(true);
+      if (!created.ok) return;
+      const text = padded([...sharedPrefixEmails, `KEY=${tail}`, `${FOREIGN_TOKEN}xy`]);
+      expect(created.protectTextForModel("s", text)).toEqual({
+        ok: false,
+        reason: "residual_sensitive_content",
+      });
+      // Without the overlapping repeat the same string is masked, so the
+      // refusal above is about that repeat and not about the string's size.
+      const withoutRepeat = padded([...sharedPrefixEmails, `KEY=${tail}`]);
+      expect(created.protectTextForModel("s", withoutRepeat).ok).toBe(true);
+    });
+
+    it("keeps preserved markers of either token version between masked values", () => {
+      const ps = makeService();
+      const v2Marker = `[SGP2:EMAIL-abcd-efgh-ijkl]`;
+      const text = padded([...sharedPrefixEmails.slice(0, 32), v2Marker, FOREIGN_TOKEN, ...sharedPrefixEmails.slice(32), v2Marker]);
+      const result = ps.protectTextForModel("s", text);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.text.split(v2Marker)).toHaveLength(3);
+      expect(result.text.split(FOREIGN_TOKEN)).toHaveLength(2);
+      expect(result.text).not.toContain("@corp.example");
+      expect(ps.restoreTextForDisplay("s", result.text)).toEqual({ ok: true, text });
+    });
+  });
+
   it("refuses an encoded secret split by zero-width characters", () => {
     const ps = makeService();
     const encoded = Buffer.from(`api key ${KEY1}`).toString("base64");

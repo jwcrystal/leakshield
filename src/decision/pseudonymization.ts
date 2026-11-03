@@ -46,6 +46,7 @@ import { scanTextWithDecoding } from "../scanner/encoding.js";
 import { scanTextInternal, type ScanOptions } from "../scanner/engine.js";
 import type { Finding, FindingType, GuardConfig, ScanResult } from "../types.js";
 import { FINDING_TYPES } from "../types.js";
+import { createValueSearch, type ValueSearch } from "./value-search.js";
 
 // ─── Public result types ─────────────────────────────────────────────────────
 
@@ -345,6 +346,9 @@ interface Transaction {
    * A JSON retry seeds it from the failed first pass to cover earlier strings.
    */
   detectedValues: Map<string, { type: FindingType; severity: Finding["severity"] }>;
+  /** Searches over the two sets above; rebuilt when a set has grown. */
+  valuesSearch?: ValueSearch;
+  originalsSearch?: ValueSearch;
   outputStrings: string[];
 }
 
@@ -358,16 +362,25 @@ interface Transaction {
  * touches its payload.
  */
 /** Earliest reserved-token prefix (either version) at/after `from`. */
-function findTokenPrefix(
+function tokenPrefixFinder(
   text: string,
-  from: number,
-): { at: number; prefix: string } | undefined {
-  let best: { at: number; prefix: string } | undefined;
-  for (const prefix of PSEUDONYM_TOKEN_PREFIXES) {
-    const at = text.indexOf(prefix, from);
-    if (at !== -1 && (best === undefined || at < best.at)) best = { at, prefix };
-  }
-  return best;
+): (from: number) => { at: number; prefix: string } | undefined {
+  // Each prefix remembers its last hit, so a prefix that is absent or far ahead
+  // is not searched again for every token before it.
+  const known = PSEUDONYM_TOKEN_PREFIXES.map((prefix) => ({ prefix, searchedFrom: 0, at: text.indexOf(prefix) }));
+  return (from) => {
+    let best: { at: number; prefix: string } | undefined;
+    for (const entry of known) {
+      if (from < entry.searchedFrom || (entry.at !== -1 && entry.at < from)) {
+        entry.searchedFrom = from;
+        entry.at = text.indexOf(entry.prefix, from);
+      }
+      if (entry.at !== -1 && (best === undefined || entry.at < best.at)) {
+        best = { at: entry.at, prefix: entry.prefix };
+      }
+    }
+    return best;
+  };
 }
 
 /** Strictly matches the versioned token shape at `at`; undefined otherwise. */
@@ -385,28 +398,29 @@ function scanOwnedTokenSpans(
 ): { ok: true; spans: Span[]; preserved: Span[] } | PseudonymFailure {
   const spans: Span[] = [];
   const preserved: Span[] = [];
-  let cursor = findTokenPrefix(text, 0);
+  const findTokenPrefix = tokenPrefixFinder(text);
+  let cursor = findTokenPrefix(0);
   while (cursor !== undefined) {
     const { at, prefix } = cursor;
     const token = matchTokenShape(text, at, prefix);
     if (token === undefined) {
       if (!preserveUnknown) return fail("malformed_token");
-      const next = findTokenPrefix(text, at + prefix.length);
+      const next = findTokenPrefix(at + prefix.length);
       const close = text.indexOf("]", at + prefix.length);
       cursor = next !== undefined && (close === -1 || next.at < close)
         ? next
-        : findTokenPrefix(text, close === -1 ? text.length : close + 1);
+        : findTokenPrefix(close === -1 ? text.length : close + 1);
       continue;
     }
     const end = at + token.length;
     if (!isOwned(token)) {
       if (!preserveUnknown) return fail("unknown_token");
       preserved.push({ start: at, end });
-      cursor = findTokenPrefix(text, end);
+      cursor = findTokenPrefix(end);
       continue;
     }
     spans.push({ start: at, end });
-    cursor = findTokenPrefix(text, end);
+    cursor = findTokenPrefix(end);
   }
   return { ok: true, spans, preserved };
 }
@@ -692,12 +706,12 @@ function validateFindingSpans(
  */
 function repeatOccurrences(
   text: string,
-  sources: readonly FindingSpan[],
+  categories: Transaction["detectedValues"],
+  search: ValueSearch,
   blocked: readonly Span[],
 ): FindingSpan[] {
   // One flag per UTF-16 unit: overlap checks cost the span's length, not the
-  // number of spans already taken. Searching each distinct value once costs
-  // the same as the absence check that follows.
+  // number of spans already taken.
   const taken = new Uint8Array(text.length);
   const mark = (span: Span): void => {
     taken.fill(1, span.start, span.end);
@@ -708,38 +722,28 @@ function repeatOccurrences(
   };
   for (const span of blocked) mark(span);
   const repeats: FindingSpan[] = [];
-  const seen = new Set<string>();
   // Longest value first, so a shorter value never splits a longer repeat.
-  const ordered = [...sources].sort((a, b) => b.value.length - a.value.length);
-  for (const source of ordered) {
-    if (source.value.length === 0 || seen.has(source.value)) continue;
-    seen.add(source.value);
-    let from = 0;
-    for (;;) {
-      const at = text.indexOf(source.value, from);
-      if (at === -1) break;
-      const span: Span = { start: at, end: at + source.value.length };
-      if (!free(span)) {
-        from = at + 1;
-        continue;
-      }
-      repeats.push({ ...span, value: source.value, type: source.type, severity: source.severity });
-      mark(span);
-      from = span.end;
-    }
-  }
+  search.visitOccurrences(text, (start, end, value) => {
+    const span: Span = { start, end };
+    const category = categories.get(value);
+    if (category === undefined || !free(span)) return false;
+    repeats.push({ ...span, value, ...category });
+    mark(span);
+    return true;
+  });
   return repeats;
 }
 
-/** Every occurrence of `original` must sit inside a validated token span. */
-function absenceHolds(text: string, original: string, tokenSpans: Span[]): boolean {
-  let from = 0;
-  for (;;) {
-    const at = text.indexOf(original, from);
-    if (at === -1) return true;
-    if (!containedInAnySpan({ start: at, end: at + original.length }, tokenSpans)) return false;
-    from = at + 1;
-  }
+/**
+ * The search for a set that only ever grows, reusing `current` while the set
+ * has not changed: a request's later strings usually add no new value.
+ */
+function searchOver(
+  current: ValueSearch | undefined,
+  values: Iterable<string>,
+  size: number,
+): ValueSearch {
+  return current?.sourceSize === size ? current : createValueSearch(values, size);
 }
 
 // ─── Protect pipeline (per string, inside a transaction) ─────────────────────
@@ -862,9 +866,8 @@ function protectStringTx(
       tx.detectedValues.set(span.value, { type: span.type, severity: span.severity });
     }
   }
-  const known: FindingSpan[] = [];
-  for (const [value, category] of tx.detectedValues) known.push({ start: 0, end: 0, value, ...category });
-  const repeats = repeatOccurrences(text, known, [
+  tx.valuesSearch = searchOver(tx.valuesSearch, tx.detectedValues.keys(), tx.detectedValues.size);
+  const repeats = repeatOccurrences(text, tx.detectedValues, tx.valuesSearch, [
     ...actionable,
     ...owned.spans,
     ...owned.preserved,
@@ -932,10 +935,9 @@ function protectStringTx(
 
   // Independent absence check of every detected original outside validated
   // owned tokens (covers key/value strings for JSON operations too).
-  for (const original of tx.detectedOriginals) {
-    if (!absenceHolds(substituted, original, outTokens.spans)) {
-      return fail("residual_sensitive_content");
-    }
+  tx.originalsSearch = searchOver(tx.originalsSearch, tx.detectedOriginals, tx.detectedOriginals.size);
+  if (!tx.originalsSearch.everyOccurrenceCovered(substituted, outTokens.spans)) {
+    return fail("residual_sensitive_content");
   }
 
   return { ok: true, text: substituted };
@@ -1089,14 +1091,15 @@ function restoreStringTx(
   };
 
   let from = 0;
-  let cursor = findTokenPrefix(text, 0);
+  const findTokenPrefix = tokenPrefixFinder(text);
+  let cursor = findTokenPrefix(0);
   while (cursor !== undefined) {
     const { at, prefix } = cursor;
     const token = matchTokenShape(text, at, prefix);
     const original = token === undefined ? undefined : live?.reverse.get(token);
     if (token === undefined || original === undefined) {
       if (!preserveUnknownMarkers) return fail(token === undefined ? "malformed_token" : "unknown_token");
-      const next = findTokenPrefix(text, at + prefix.length);
+      const next = findTokenPrefix(at + prefix.length);
       const close = text.indexOf("]", at + prefix.length);
       const end = token !== undefined
         ? at + token.length
@@ -1108,7 +1111,7 @@ function restoreStringTx(
       const literalFailed = appendPiece(text.slice(from, end));
       if (literalFailed !== null) return literalFailed;
       from = end;
-      cursor = findTokenPrefix(text, from);
+      cursor = findTokenPrefix(from);
       continue;
     }
     const literalFailed = appendPiece(text.slice(from, at));
@@ -1116,7 +1119,7 @@ function restoreStringTx(
     const replacementFailed = appendPiece(original);
     if (replacementFailed !== null) return replacementFailed;
     from = at + token.length;
-    cursor = findTokenPrefix(text, from);
+    cursor = findTokenPrefix(from);
   }
   const tailFailed = appendPiece(text.slice(from));
   if (tailFailed !== null) return tailFailed;
@@ -1391,13 +1394,11 @@ function buildService(config: GuardConfig, limits: PseudonymLimits): Pseudonymiz
             preserveUnknownMarkers,
           );
           if (!tokenSpans.ok) return tokenSpans;
-          for (const original of tx.detectedOriginals) {
-            if (!absenceHolds(outputString, original, tokenSpans.spans)) {
-              residual = true;
-              break;
-            }
+          tx.originalsSearch = searchOver(tx.originalsSearch, tx.detectedOriginals, tx.detectedOriginals.size);
+          if (!tx.originalsSearch.everyOccurrenceCovered(outputString, tokenSpans.spans)) {
+            residual = true;
+            break;
           }
-          if (residual) break;
         }
         if (residual) {
           seed = tx.detectedValues;

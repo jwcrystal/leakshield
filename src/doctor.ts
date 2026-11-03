@@ -223,15 +223,22 @@ function isLeakshieldPath(resolved: string): boolean {
 }
 
 /**
- * Best-effort id for a `file://` URL that has no path on this platform. The URL
- * cannot become a path, so it is read as text: a `leakshield` path segment
- * anywhere means the entry is LeakShield's and must be reported as unloadable
- * rather than skipped. Reading the text (instead of URL segments) also covers
- * the forms that do not parse or do not normalise — a bad host, a malformed
- * escape, `.` or `..` segments, encoded separators.
+ * Best-effort id for a `file://` URL that has no path on this platform. A
+ * `leakshield` path segment anywhere means the entry is LeakShield's and must be
+ * reported as unloadable rather than skipped — a heuristic, since the reference
+ * cannot be resolved. Literal tab/CR/LF are removed first, as URL parsing does,
+ * so a broken escape elsewhere does not hide the rest of the path; the parsed
+ * pathname is preferred because it also normalises dot segments.
  */
 function invalidFileUrlId(ref: string): string {
-  const text = ref.replace(/^file:\/\//, "").split(/[?#]/)[0] ?? "";
+  const cleaned = ref.replace(/[\t\n\r]/g, "");
+  let pathname: string | null = null;
+  try {
+    pathname = new URL(cleaned).pathname;
+  } catch {
+    pathname = null;
+  }
+  const text = pathname ?? cleaned.replace(/^file:\/\//, "").split(/[?#]/)[0] ?? "";
   const parts = text
     .split("/")
     .filter(Boolean)
@@ -246,7 +253,6 @@ function invalidFileUrlId(ref: string): string {
     (part) => part === "leakshield" || part.split(/[\\/]/).includes("leakshield"),
   );
   if (isLeakshieldSegment) return "leakshield";
-  if (isLeakshieldParts(parts)) return "leakshield";
   return parts[parts.length - 1] ?? ref;
 }
 

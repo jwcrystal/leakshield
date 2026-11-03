@@ -580,11 +580,25 @@ describe("runDoctor", () => {
     expect((await runDoctor(deps)).status).toBe("BROKEN");
   });
 
-  it("normalises dot segments in an unloadable file URL (#65)", async () => {
+  it("recognises LeakShield across dot segments in an unloadable URL (#65)", async () => {
     const { deps } = makeFixture({
       config: () => ({ plugins: ["leakshield", "file://[bad]/leakshield/./dist"] }),
     });
-    expect((await runDoctor(deps)).status).toBe("BROKEN");
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("BROKEN");
+    const dist = report.checks.find((c) => c.id === "dist");
+    expect(dist?.state).toBe("fail");
+    expect(dist?.detail).toContain("file://[bad]/leakshield/./dist");
+  });
+
+  it("strips literal control characters before identifying an unloadable URL (#65)", async () => {
+    // URL parsing removes tab/CR/LF, so the path reads as /leakshield/dist.
+    const { deps } = makeFixture({
+      config: () => ({ plugins: ["leakshield", "file:///bad%/leakshie\tld/dist"] }),
+    });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("BROKEN");
+    expect(report.checks.find((c) => c.id === "dist")?.state).toBe("fail");
   });
 
   it("resolves a relative plugin path from the config file that declared it (#65)", async () => {

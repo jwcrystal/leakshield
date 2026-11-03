@@ -454,8 +454,13 @@ function segmentDecodingHazard(
       const decodedMatches = scan.decoded.flatMap((result) =>
         result.findings.flatMap((f) => (typeof f.match_text === "string" ? [f.match_text] : [])),
       );
+      // A decoded Unicode evasion hides a finding with no source span, so it
+      // always refuses, even if another occurrence decodes to the same text.
       const hasUnreadable = scan.decoded.some((result) =>
-        result.findings.some((f) => typeof f.match_text !== "string"),
+        result.findings.some((f) =>
+          typeof f.match_text !== "string" ||
+          (f as { unicode_detected?: unknown }).unicode_detected !== undefined,
+        ),
       );
       const directMatches = scan.original.findings.flatMap((f) =>
         typeof f.match_text === "string" ? [f.match_text] : [],

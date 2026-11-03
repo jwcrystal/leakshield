@@ -372,12 +372,15 @@ export interface EncodedRun {
 /**
  * True when masking the runs located in `text` accounts for EVERY decoded
  * finding in `decodedMatches` (the match_text values the whole-segment
- * decoding scan reported). Two checks:
+ * decoding scan reported). Three checks:
  * - Normalization: any zero-width or look-alike character in `text` returns
  *   false, wherever it sits. The generic decoder also decodes the stripped and
  *   folded sources, whose runs the locator cannot map back, so partial
  *   masking of the raw source could erase the evidence that a hidden part
  *   remains.
+ * - Evasion: a located decoded form that reports a Unicode evasion returns
+ *   false. The same character can be percent-encoded, which the normalization
+ *   check cannot see, and the finding it hides has no source span.
  * - Coverage: each decoded match must equal, or be a substring of, a decoded
  *   match of a located run or a direct match (substring because the generic
  *   decoder's +/-50 windows can clip a value the locator sees in full). Direct
@@ -392,8 +395,10 @@ export function decodedFindingsAttributable(
   directMatches: readonly string[],
 ): boolean {
   if (foldConfusables(text.replace(ZERO_WIDTH_CHARS, "")) !== text) return false;
+  const { runs, evasion } = locateEncoded(text, config, opts);
+  if (evasion) return false;
   const located = new Set<string>(directMatches);
-  for (const run of locateEncodedRuns(text, config, opts)) {
+  for (const run of runs) {
     for (const match of run.decodedMatches) located.add(match);
   }
   for (const wanted of new Set(decodedMatches)) {
@@ -441,7 +446,16 @@ const PERCENT_RUNS = /(?:%[0-9A-Fa-f]{2})+/g;
  *   direct scan already handles the rest) and its offsets are exact.
  */
 export function locateEncodedRuns(text: string, config: GuardConfig, opts?: ScanOptions): EncodedRun[] {
+  return locateEncoded(text, config, opts).runs;
+}
+
+function hasUnicodeEvasion(findings: readonly Finding[]): boolean {
+  return findings.some((f) => (f as { unicode_detected?: unknown }).unicode_detected !== undefined);
+}
+
+function locateEncoded(text: string, config: GuardConfig, opts?: ScanOptions): { runs: EncodedRun[]; evasion: boolean } {
   const runs: EncodedRun[] = [];
+  let evasion = false;
 
   const locate = (candidates: EncodedCandidate[], decode: (s: string) => DecodingResult | null, minConfidence: number): void => {
     for (const candidate of candidates) {
@@ -449,6 +463,7 @@ export function locateEncodedRuns(text: string, config: GuardConfig, opts?: Scan
       if (!decoded || decoded.confidence < minConfidence) continue;
       const result = scanTextInternal(decoded.decoded, config, opts);
       if (!result.safe) {
+        if (hasUnicodeEvasion(result.findings)) evasion = true;
         runs.push({
           start: candidate.index,
           end: candidate.index + candidate.text.length,
@@ -461,14 +476,24 @@ export function locateEncodedRuns(text: string, config: GuardConfig, opts?: Scan
   locate(detectBase64Matches(text), tryDecodeBase64, 0.6);
   locate(detectHexMatches(text), tryDecodeHex, 0.5);
 
-  runs.push(...locateUrlRuns(text, config, true, opts));
+  const locateUrl = (plusAsSpace: boolean): void => {
+    const url = locateUrlRuns(text, config, plusAsSpace, opts);
+    runs.push(...url.runs);
+    if (url.evasion) evasion = true;
+  };
+  locateUrl(true);
   // "+" is ambiguous: as a space it splits "a+b%40example.com" and would leave
   // "a+" unmasked, so also locate with "+" kept literal. Callers merge overlaps.
-  if (text.includes("+")) runs.push(...locateUrlRuns(text, config, false, opts));
-  return runs;
+  if (text.includes("+")) locateUrl(false);
+  return { runs, evasion };
 }
 
-function locateUrlRuns(text: string, config: GuardConfig, plusAsSpace: boolean, opts?: ScanOptions): EncodedRun[] {
+function locateUrlRuns(
+  text: string,
+  config: GuardConfig,
+  plusAsSpace: boolean,
+  opts?: ScanOptions,
+): { runs: EncodedRun[]; evasion: boolean } {
   const pieces: string[] = [];
   // Per decoded UTF-16 unit: the source range it maps to, and whether it came
   // from a decoded run or a "+" (only those can hide a finding from the scan).
@@ -511,11 +536,11 @@ function locateUrlRuns(text: string, config: GuardConfig, plusAsSpace: boolean, 
     anyHot = true;
   }
   addLiteral(cursor, text.length);
-  if (!anyHot) return [];
+  if (!anyHot) return { runs: [], evasion: false };
 
   const decodedText = pieces.join("");
   const result = scanTextInternal(decodedText, config, opts);
-  if (result.safe || result.was_truncated) return [];
+  if (result.safe || result.was_truncated) return { runs: [], evasion: false };
 
   const runs: EncodedRun[] = [];
   for (const finding of result.findings) {
@@ -535,5 +560,5 @@ function locateUrlRuns(text: string, config: GuardConfig, plusAsSpace: boolean, 
     if (!hot) continue;
     runs.push({ start: unitStart[start], end: unitEnd[end - 1], severity: finding.severity, decodedMatches: [matched] });
   }
-  return runs;
+  return { runs, evasion: hasUnicodeEvasion(result.findings) };
 }

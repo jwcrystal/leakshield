@@ -1565,6 +1565,30 @@ describe("encoded runs are masked when their source span is attributable (#48)",
     const hiddenKey = `%73k-Abcdefghijklmnopqrst%4${ZW}1UVWXYZ`;
 
     it.each([
+      ["a percent-encoded zero-width character", "%E2%80%8B"],
+      ["a percent-encoded look-alike letter", "%D0%B0"],
+    ])("refuses a key split by %s", (_name, separator) => {
+      const short = `%73k-Abcdefghijklmnopqrst${separator}UVWXYZ`;
+      // Longer than the 50-unit window, so no window sees the whole key.
+      const long = `%73k-${"Abcdefghij".repeat(7)}${separator}UVWXYZ`;
+      // A separate Base64 occurrence decodes to the same findings.
+      const blob = Buffer.from(`sk-Abcdefghijklmnopqrst${decodeURIComponent(separator)}UVWXYZ${" ".repeat(20)}`).toString("base64");
+      for (const input of [short, long, `${short}${" ".repeat(120)}${blob}`]) {
+        expect(makeService().protectText("s", input)).toEqual({ ok: false, reason: "encoded_content" });
+      }
+    });
+
+    it("still masks an encoded email beside a percent-encoded zero-width character that hides nothing", () => {
+      const ps = makeService();
+      const input = "user%40example.com a%E2%80%8Bb";
+      const result = ps.protectText("s", input);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.text).not.toContain("example");
+      expect(ps.restoreText("s", result.text)).toEqual({ ok: true, text: input });
+    });
+
+    it.each([
       ["a plain email beside an encoded email", `${EMAIL1} and bob%40example.com`],
       ["a plain email near a harmless percent run", `${EMAIL1} a%20b`],
       ["a plain key near a harmless percent run", `${KEY1} hello%20world`],

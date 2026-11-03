@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { loadConfig, loadConfigWithFingerprint } from "../src/config/loader.js";
+import { z } from "zod";
+import { GuardConfigSchema, loadConfig, loadConfigWithFingerprint } from "../src/config/loader.js";
 
 // The ESM namespace of fs cannot be spied on directly; a transparent spread
 // of the actual module keeps everything real while the single-read test can
@@ -233,5 +234,136 @@ describe("loadConfigWithFingerprint() — 單次讀取綁定", () => {
     const viaLoader = loadConfigWithFingerprint(p).config;
     expect(viaDelegate.settings.max_chars).toBe(viaLoader.settings.max_chars);
     expect(viaDelegate.nda_keywords).toEqual(viaLoader.nda_keywords);
+  });
+});
+
+// ─── zod 4 遷移：預設值、非 mapping 輸入、上限、錯誤不洩漏 ──────────────────────
+
+describe("loadConfig() — zod 4 嚴格性", () => {
+  let dir: string;
+
+  afterEach(() => {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function load(content: string) {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "guard-zod4-"));
+    const file = path.join(dir, "guard.config.yaml");
+    fs.writeFileSync(file, content, "utf-8");
+    return loadConfig(file, dir);
+  }
+
+  const SETTINGS_DEFAULTS = {
+    max_chars: 200000,
+    show_line_numbers: true,
+    preview_length: 60,
+    encoding_detection: false,
+    env_files: [],
+    rule_overrides: {},
+    private_cidrs: [],
+    allowlist: [],
+  };
+
+  it("省略 settings 時內層預設值仍然生效", () => {
+    const config = GuardConfigSchema.parse({});
+    expect(config.settings).toEqual(SETTINGS_DEFAULTS);
+    expect(load("nda_keywords:\n  - X\n").settings).toEqual(SETTINGS_DEFAULTS);
+  });
+
+  it("settings: {} 時內層預設值仍然生效", () => {
+    expect(GuardConfigSchema.parse({ settings: {} }).settings).toEqual(SETTINGS_DEFAULTS);
+    expect(load("settings: {}\n").settings).toEqual(SETTINGS_DEFAULTS);
+  });
+
+  it("省略 nda_keywords 保留 4 個預設值；custom_rules: null 得到 []", () => {
+    const config = GuardConfigSchema.parse({ custom_rules: null });
+    expect(config.nda_keywords).toHaveLength(4);
+    expect(config.custom_rules).toEqual([]);
+  });
+
+  it.each([
+    ["settings 為 YAML 時間戳", "settings: 2024-01-01\n"],
+    ["根節點為 YAML 時間戳", "2024-01-01\n"],
+    ["settings 為 !!binary", "settings: !!binary aGVsbG8=\n"],
+    ["空 YAML", ""],
+    ["根節點為純量", "hello\n"],
+    ["根節點為清單", "- a\n- b\n"],
+  ])("載入失敗（fail-closed）：%s", (_name, content) => {
+    expect(() => load(content)).toThrow();
+  });
+
+  it("根節點為 Date 時拋出 ZodError（path []），不是 TypeError", () => {
+    const result = GuardConfigSchema.safeParse(new Date());
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].path).toEqual([]);
+      expect(result.error.issues[0].message).toBe("expected a mapping");
+    }
+    let thrown: unknown;
+    try {
+      GuardConfigSchema.parse(new Date());
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(z.ZodError);
+  });
+
+  it("null 原型物件（js-yaml !!set 等）仍被接受", () => {
+    const settings = Object.assign(Object.create(null), { max_chars: 10 });
+    expect(GuardConfigSchema.parse({ settings }).settings.max_chars).toBe(10);
+  });
+
+  describe("集合上限", () => {
+    const rule = { description: "d", pattern: "p" };
+    it("恰好在上限內可接受", () => {
+      expect(GuardConfigSchema.safeParse({ nda_keywords: Array(4096).fill("k") }).success).toBe(true);
+      expect(GuardConfigSchema.safeParse({ private_domains: Array(4096).fill("a.com") }).success).toBe(true);
+      expect(GuardConfigSchema.safeParse({ custom_rules: Array(1024).fill(rule) }).success).toBe(true);
+    });
+    it("多一筆即拒絕", () => {
+      expect(GuardConfigSchema.safeParse({ nda_keywords: Array(4097).fill("k") }).success).toBe(false);
+      expect(GuardConfigSchema.safeParse({ private_domains: Array(4097).fill("a.com") }).success).toBe(false);
+      expect(GuardConfigSchema.safeParse({ custom_rules: Array(1025).fill(rule) }).success).toBe(false);
+    });
+  });
+
+  describe("錯誤訊息不洩漏被拒絕的值", () => {
+    const SENTINEL = "sk-LEAKCHECK-value";
+    const long = SENTINEL + "x".repeat(300);
+    const cases: Array<[string, unknown]> = [
+      ["rule_overrides 值", { settings: { rule_overrides: { "aws-access-key": SENTINEL } } }],
+      ["severity", { custom_rules: [{ description: "d", pattern: "p", severity: SENTINEL }] }],
+      ["flags", { custom_rules: [{ description: "d", pattern: "p", flags: SENTINEL }] }],
+      ["過長的 nda_keywords 項目", { nda_keywords: [long] }],
+      ["過長的 pattern", { custom_rules: [{ description: "d", pattern: long }] }],
+    ];
+
+    it.each(cases)("%s", (_name, input) => {
+      const result = GuardConfigSchema.safeParse(input);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.message).not.toContain(SENTINEL);
+        expect(result.error.message).not.toContain('"input"');
+      }
+    });
+
+    it("無法編譯的 pattern 訊息不含 pattern 本身", () => {
+      const pattern = "(" + SENTINEL;
+      const result = GuardConfigSchema.safeParse({ custom_rules: [{ description: "d", pattern }] });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.message).toContain("does not compile");
+        expect(result.error.message).not.toContain(SENTINEL);
+      }
+    });
+  });
+
+  it("未知 rule_overrides id 與不合法的 private_cidrs 仍被拒絕", () => {
+    const unknown = GuardConfigSchema.safeParse({ settings: { rule_overrides: { "no-such-rule": true } } });
+    expect(unknown.success).toBe(false);
+    if (!unknown.success) expect(unknown.error.message).toContain("unknown builtin rule id");
+    const cidr = GuardConfigSchema.safeParse({ settings: { private_cidrs: ["not-a-cidr"] } });
+    expect(cidr.success).toBe(false);
+    if (!cidr.success) expect(cidr.error.message).toContain("is not a valid IPv4 CIDR");
   });
 });

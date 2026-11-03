@@ -91,6 +91,8 @@ const PLACEHOLDER_MAP: Record<FindingType, string> = {
   PII_IBAN: "[REDACTED_PII_IBAN]",
   PII_IP: "[REDACTED_PII_IP]",
   PII_URL: "[REDACTED_PII_URL]",
+  // 編碼過的片段（Base64 / hex / percent-run）；只由 pseudonymization 的定位器產生
+  ENCODED: "[REDACTED_ENCODED]",
   CUSTOM: "[REDACTED_CUSTOM]",
 };
 

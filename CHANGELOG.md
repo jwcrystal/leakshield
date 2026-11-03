@@ -4,6 +4,22 @@ All notable changes are listed here.
 
 ## Unreleased
 
+**Breaking:** OpenCode v1 is no longer supported. LeakShield supports OpenCode v2 only. Run `leakshield --doctor` after upgrading.
+
+### Security
+
+- zod is upgraded to ^4.6.7, which fixes GHSA-mrhx-c7xc-m3w5 (high: memory exhaustion when validating oversized constrained collections). `nda_keywords` and `private_domains` are now capped at 4096 entries and `custom_rules` at 1024, and a config over a cap fails the load. A YAML value that is not a mapping where a mapping is expected (a timestamp or `!!binary` for `settings`, or a non-mapping root) fails the load, as it did before the upgrade.
+
+### Removed
+
+- OpenCode v1 support. A v1 host that loads the package now gets hooks that fail closed and abort every model request with a message that says to upgrade to OpenCode v2; it no longer runs `block` mode with the legacy hooks, and the v1 env query tools are gone. `leakshield --doctor` reports `BROKEN` for a v1 host, with the fix "upgrade to OpenCode v2". Upgrade to OpenCode v2.
+- `@opencode-ai/plugin` is no longer installed with the package. It moved to `devDependencies` (type-only imports, erased at build), which removes 28 transitive packages from every install, including `effect` and its `toml` dependency with 4 high advisories, `zod@4.1.8` and `msgpackr-extract` with an install script.
+
+### Changed
+
+- The default `mode` is always `transparent`; there is no longer a per-host default. `block` stays available with `"mode": "block"`.
+- Config and option validation errors are worded by zod 4 and no longer echo rejected enum values.
+
 ### Fixed
 
 - A transparent-mode request refused because a string, before or after masking, exceeded `settings.max_chars` now says so. The refusal carried only `reason=truncated_content`; it now names the configured bound and asks to raise it or split the content. Nothing is sent unscanned either way, and the limit's documentation no longer says "truncate", which is what the standalone scanner does, not transparent mode. ([#47](https://github.com/jwcrystal/leakshield/issues/47))

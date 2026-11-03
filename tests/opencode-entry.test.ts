@@ -2,19 +2,18 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { Part } from "@opencode-ai/sdk";
 import leakshieldPlugin, * as pluginModule from "../src/opencode.js";
 
 const secret = "sk-12345678901234567890";
 const temporaryDirectories: string[] = [];
 const exactSecret = "unclassified-opaque-value-987654321";
 
-function textPart(text: string): Part {
+function textPart(text: string) {
   return {
     id: "part-1",
     sessionID: "session-1",
     messageID: "message-1",
-    type: "text",
+    type: "text" as const,
     text,
   };
 }
@@ -26,162 +25,129 @@ afterEach(() => {
 });
 
 describe("OpenCode plugin entry", () => {
-  it("exports one default entry that serves both OpenCode v1 and v2 loaders", () => {
+  it("exports one default entry with the v2 setup and a v1 fail-closed stub", () => {
     expect(Object.keys(pluginModule)).toEqual(["default"]);
     expect(leakshieldPlugin.id).toBe("leakshield");
     expect(typeof leakshieldPlugin.setup).toBe("function");
     expect(typeof leakshieldPlugin.server).toBe("function");
   });
 
-  it("removes sensitive content before constructing a provider payload (v1 server)", async () => {
-    const hooks = await leakshieldPlugin.server({} as never, { mode: "block" });
-    const parts = [textPart(`token=${secret}`)];
+  it("returns fail-closed hooks from the v1 server stub without throwing", async () => {
+    const validOptions = [undefined, {}, { mode: "block" }, { mode: "redact" }, { mode: "transparent" }];
+    for (const options of validOptions) {
+      const hooks = await leakshieldPlugin.server({} as never, options);
 
-    await hooks["chat.message"]!({ sessionID: "session-1" }, { message: {} as never, parts });
-    const providerPayload = JSON.stringify(parts);
-
-    expect(providerPayload).not.toContain(secret);
-    expect(providerPayload).toContain("LeakShield blocked message text");
+      await expect(
+        hooks["chat.message"]!({ sessionID: "session-1" }, {
+          message: {} as never,
+          parts: [textPart(`token=${secret}`)],
+        }),
+      ).rejects.toThrow("no longer supports OpenCode v1");
+      await expect(hooks["experimental.chat.messages.transform"]!({}, { messages: [] }))
+        .rejects.toThrow("Upgrade to OpenCode v2");
+      await expect(hooks["experimental.chat.system.transform"]!({ model: {} as never }, { system: [] }))
+        .rejects.toThrow("no longer supports OpenCode v1");
+      await expect(hooks["tool.definition"]!({ toolID: "t" }, { description: "d", parameters: {} }))
+        .rejects.toThrow("no longer supports OpenCode v1");
+      await expect(hooks["tool.execute.after"]!(
+        { tool: "read", sessionID: "session-1", callID: "call-1", args: {} },
+        { title: "t", output: "o", metadata: {} },
+      )).rejects.toThrow("no longer supports OpenCode v1");
+      expect(hooks.tool).toBeUndefined();
+    }
   });
 
-  it("blocks model requests when configuration loading fails (v1 server)", async () => {
+  it("blocks model requests when configuration loading fails in block mode (v2 setup)", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-"));
     temporaryDirectories.push(directory);
     const configPath = path.join(directory, "invalid.yaml");
     fs.writeFileSync(configPath, "settings:\n  max_chars: invalid\n", "utf8");
 
-    const hooks = await leakshieldPlugin.server({} as never, { configPath });
-    const invokeHook = hooks["chat.message"]!({ sessionID: "session-1" }, {
-      message: {} as never,
-      parts: [textPart("safe text")],
-    });
+    const registered: Array<{ name: string; callback: unknown }> = [];
+    await leakshieldPlugin.setup({
+      options: { mode: "block", configPath },
+      location: { directory },
+      session: {
+        hook: async (name: string, callback: unknown) => {
+          registered.push({ name, callback });
+          return { dispose: async () => {} };
+        },
+      },
+      tool: {
+        hook: async (name: string, callback: unknown) => {
+          registered.push({ name: `tool:${name}`, callback });
+          return { dispose: async () => {} };
+        },
+      },
+    } as never);
 
-    await expect(invokeHook).rejects.toThrow("LeakShield initialization failed");
+    expect(registered.length).toBe(6);
+    const promptHook = registered[0].callback as (event: unknown) => Promise<void>;
+    await expect(promptHook({ prompt: { text: "safe text" } })).rejects.toThrow(
+      "LeakShield initialization failed",
+    );
   });
 
-  it("loads configured env_files relative to the OpenCode workspace (v1 server)", async () => {
+  it("loads configured env_files relative to the OpenCode workspace (v2 setup)", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-"));
     temporaryDirectories.push(directory);
     const configPath = path.join(directory, "guard.config.yaml");
     fs.writeFileSync(path.join(directory, ".env"), `TOKEN=${exactSecret}\n`, "utf8");
     fs.writeFileSync(configPath, "settings:\n  env_files:\n    - .env\n", "utf8");
 
-    const hooks = await leakshieldPlugin.server({ worktree: directory } as never, { configPath });
-    const parts = [textPart(`token=${exactSecret}`)];
-    await hooks["chat.message"]!({ sessionID: "session-1" }, { message: {} as never, parts });
+    const registered: Array<{ name: string; callback: unknown }> = [];
+    await leakshieldPlugin.setup({
+      options: { mode: "block", configPath },
+      location: { directory },
+      session: {
+        hook: async (name: string, callback: unknown) => {
+          registered.push({ name, callback });
+          return { dispose: async () => {} };
+        },
+      },
+      tool: { hook: async () => ({ dispose: async () => {} }) },
+    } as never);
 
-    expect(JSON.stringify(parts)).not.toContain(exactSecret);
-    expect(JSON.stringify(parts)).toContain("LeakShield blocked message text");
+    const promptHook = registered.find((r) => r.name === "prompt")!.callback as (event: unknown) => Promise<void>;
+    const event = { prompt: { text: `token=${exactSecret}`, files: [] } };
+    await promptHook(event);
+
+    expect(event.prompt.text).not.toContain(exactSecret);
+    expect(event.prompt.text).toContain("LeakShield blocked message text");
   });
 
-  it("fails closed when deidentify is requested on the v1 server (v1 has no de-identification)", async () => {
-    const hooks = await leakshieldPlugin.server({} as never, { mode: "redact", deidentify: true });
-
-    await expect(
-      hooks["chat.message"]!({ sessionID: "session-1" }, {
-        message: {} as never,
-        parts: [textPart("safe text")],
-      }),
-    ).rejects.toThrow("LeakShield initialization failed");
-  });
-
-  it("blocks model requests when plugin options are invalid (v1 server)", async () => {
-    const hooks = await leakshieldPlugin.server({} as never, { mode: "unsupported" });
-
-    await expect(hooks["experimental.chat.messages.transform"]!({}, { messages: [] }))
-      .rejects.toThrow("LeakShield initialization failed");
-  });
-
-  it("registers no env query tools by default (v1 server)", async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-"));
-    temporaryDirectories.push(directory);
-    const configPath = path.join(directory, "guard.config.yaml");
-    fs.writeFileSync(path.join(directory, ".env"), "KEY=value\n", "utf8");
-    fs.writeFileSync(configPath, "settings:\n  env_files:\n    - .env\n", "utf8");
-
-    const hooks = await leakshieldPlugin.server({ worktree: directory } as never, { configPath });
-    expect(hooks.tool).toBeUndefined();
-  });
-
-  it("fails closed when envQueries has the wrong type (v1 server)", async () => {
-    const hooks = await leakshieldPlugin.server({} as never, { envQueries: "yes" });
-
-    await expect(hooks["chat.message"]!({ sessionID: "session-1" }, {
-      message: {} as never,
-      parts: [textPart("safe text")],
-    })).rejects.toThrow("LeakShield initialization failed");
-  });
-
-  it("exposes readonly env query tools when envQueries is enabled (v1 server)", async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-"));
-    temporaryDirectories.push(directory);
-    const configPath = path.join(directory, "guard.config.yaml");
-    fs.writeFileSync(path.join(directory, ".env"), `API_TOKEN=${exactSecret}\nFLAG=true\n`, "utf8");
-    fs.writeFileSync(configPath, "settings:\n  env_files:\n    - .env\n", "utf8");
-
-    const hooks = await leakshieldPlugin.server(
-      { worktree: directory } as never,
-      { configPath, envQueries: true },
-    );
-    const tools = hooks.tool!;
-    expect(Object.keys(tools).sort()).toEqual(["guard_env_compare", "guard_env_inspect", "guard_env_list"]);
-
-    const context = { sessionID: "session-1" } as never;
-    const list = JSON.parse(
-      (await (tools.guard_env_list!.execute as (args: unknown, ctx: unknown) => Promise<{ output: string }>)(
-        {},
-        context,
-      )).output,
-    );
-    expect(list.files).toHaveLength(1);
-    expect(list.files[0].available).toBe(true);
-    expect(list.files[0].keys).toEqual(["API_TOKEN", "FLAG"]);
-    const fileId = list.files[0].file_id;
-    expect(fileId).toMatch(/^[0-9a-f]{16}$/);
-
-    const inspect = JSON.parse(
-      (await tools.guard_env_inspect!.execute({ file_id: fileId, key: "FLAG" }, context)).output,
-    );
-    expect(inspect).toEqual({ status: "nonempty", shape: "boolean_like" });
-
-    const compare = JSON.parse(
-      (await tools.guard_env_compare!.execute(
-        { left_file_id: fileId, left_key: "API_TOKEN", right_file_id: fileId, right_key: "API_TOKEN" },
-        context,
-      )).output,
-    );
-    expect(compare).toEqual({ result: "equal" });
-
-    // Tool payloads carry key names and statuses only — never values or paths.
-    const serialized = JSON.stringify([list, inspect, compare]);
-    expect(serialized).not.toContain(exactSecret);
-    expect(serialized).not.toContain(".env");
-    expect(serialized).not.toContain(directory);
-
-    // Config drift disables the tools until restart (fixed sanitized error).
-    fs.writeFileSync(configPath, "settings:\n  env_files: []\n", "utf8");
-    const disabled = JSON.parse(
-      (await tools.guard_env_list!.execute({}, { sessionID: "session-1" } as never)).output,
-    );
-    expect(disabled).toEqual({
-      error: "Env queries are disabled because the guard configuration changed. Restart OpenCode.",
-    });
-  });
-
-  it("keeps protection hooks active alongside env query tools (v1 server)", async () => {
+  it("keeps protection hooks active alongside env query tools (v2 setup)", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-"));
     temporaryDirectories.push(directory);
     const configPath = path.join(directory, "guard.config.yaml");
     fs.writeFileSync(path.join(directory, ".env"), `API_TOKEN=${exactSecret}\n`, "utf8");
     fs.writeFileSync(configPath, "settings:\n  env_files:\n    - .env\n", "utf8");
 
-    const hooks = await leakshieldPlugin.server(
-      { worktree: directory } as never,
-      { configPath, envQueries: true },
-    );
-    const parts = [textPart(`token=${exactSecret}`)];
-    await hooks["chat.message"]!({ sessionID: "session-1" }, { message: {} as never, parts });
-    expect(JSON.stringify(parts)).not.toContain(exactSecret);
+    const registered: Array<{ name: string; callback: unknown }> = [];
+    const addedTools: string[] = [];
+    await leakshieldPlugin.setup({
+      options: { mode: "block", configPath, envQueries: true },
+      location: { directory },
+      session: {
+        hook: async (name: string, callback: unknown) => {
+          registered.push({ name, callback });
+          return { dispose: async () => {} };
+        },
+      },
+      tool: {
+        hook: async () => ({ dispose: async () => {} }),
+        transform: async (callback: (editor: unknown) => void) => {
+          callback({ add: (tool: { name: string }) => addedTools.push(tool.name) });
+          return { dispose: async () => {} };
+        },
+      },
+    } as never);
+
+    expect(addedTools).toHaveLength(3);
+    const promptHook = registered.find((r) => r.name === "prompt")!.callback as (event: unknown) => Promise<void>;
+    const event = { prompt: { text: `token=${exactSecret}`, files: [] } };
+    await promptHook(event);
+    expect(event.prompt.text).not.toContain(exactSecret);
   });
 
   it("registers protecting hooks on the OpenCode v2 context (v2 setup)", async () => {
@@ -798,28 +764,5 @@ describe("OpenCode plugin entry", () => {
     expect(registered).toHaveLength(12);
     const httpHook = registered.find((r) => r.name === "http.request")!.callback as (event: unknown) => Promise<void>;
     await expect((async () => httpHook({ sessionID: "s" }))()).rejects.toThrow("LeakShield initialization failed");
-  });
-
-  it("defaults to block mode when options omit mode (v1 server)", async () => {
-    for (const options of [undefined, {}]) {
-      const hooks = await leakshieldPlugin.server({} as never, options);
-      const parts = [textPart(`token=${secret}`)];
-
-      await hooks["chat.message"]!({ sessionID: "session-1" }, { message: {} as never, parts });
-
-      expect(JSON.stringify(parts)).not.toContain(secret);
-      expect(JSON.stringify(parts)).toContain("LeakShield blocked message text");
-    }
-  });
-
-  it("fails closed when transparent is requested on the v1 server (v1 has no transport hooks)", async () => {
-    const hooks = await leakshieldPlugin.server({} as never, { mode: "transparent" });
-
-    await expect(
-      hooks["chat.message"]!({ sessionID: "session-1" }, {
-        message: {} as never,
-        parts: [textPart("safe text")],
-      }),
-    ).rejects.toThrow("LeakShield initialization failed");
   });
 });

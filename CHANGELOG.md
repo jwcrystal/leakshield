@@ -23,6 +23,7 @@ All notable changes are listed here.
 ### Fixed
 
 - A transparent-mode request refused because a string, before or after masking, exceeded `settings.max_chars` now says so. The refusal carried only `reason=truncated_content`; it now names the configured bound and asks to raise it or split the content. Nothing is sent unscanned either way, and the limit's documentation no longer says "truncate", which is what the standalone scanner does, not transparent mode. ([#47](https://github.com/jwcrystal/leakshield/issues/47))
+- `leakshield --doctor` reads every config file OpenCode merges, not only the first one that exists. A project `opencode.json` that set only `$schema` made it report `NOT_REGISTERED` and exit 1 while a global config registered the plugin; the registration is now found and the check names the file that supplied it. The check also lists the config chain in its `config` line. A nearer config that sets `plugins` without LeakShield still fails, but now says it replaces the global list rather than claiming the plugin is absent. ([#65](https://github.com/jwcrystal/leakshield/issues/65))
 
 ## 0.1.3 — 2026-11-03
 

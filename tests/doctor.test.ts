@@ -58,6 +58,19 @@ function makeFixture(overrides: {
 
 const distRef = (tmp: string) => path.join(tmp, "leakshield", "dist");
 
+/** Global config at the path `candidateConfigPaths` probes for `home: tmp`. */
+function writeGlobalConfig(
+  tmp: string,
+  config: unknown,
+  name = "opencode.json",
+): string {
+  const dir = path.join(tmp, ".config", "opencode");
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, name);
+  fs.writeFileSync(file, typeof config === "string" ? config : JSON.stringify(config, null, 2));
+  return file;
+}
+
 describe("parseJsonc", () => {
   it("parses plain JSON", () => {
     expect(parseJsonc('{"a":1}')).toEqual({ a: 1 });
@@ -271,6 +284,56 @@ describe("runDoctor", () => {
     const report = await runDoctor(deps);
     expect(report.status).toBe("NOT_REGISTERED");
     expect(report.snippet).toContain('"plugins"');
+  });
+
+  it("finds a global registration when the project config only sets $schema (#65)", async () => {
+    const { deps, tmp } = makeFixture({
+      config: () => ({ $schema: "https://opencode.ai/config.json" }),
+    });
+    const globalPath = writeGlobalConfig(tmp, {
+      plugins: [{ package: "leakshield", options: { mode: "transparent" } }],
+    });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("PROTECTED");
+    const registration = report.checks.find((c) => c.id === "registration");
+    expect(registration?.state).toBe("ok");
+    expect(registration?.detail).toContain(`(from ${globalPath})`);
+    // Both files are in the chain, highest precedence first.
+    expect(report.checks.find((c) => c.id === "config")?.detail).toBe(
+      `${path.join(tmp, "opencode.json")}, ${globalPath}`,
+    );
+    expect(report.configPath).toBe(path.join(tmp, "opencode.json"));
+  });
+
+  it("does not lose the chain when only the global config has a plugins key (#65)", async () => {
+    const { deps, tmp } = makeFixture({ config: () => ({ model: "openai/gpt-6" }) });
+    writeGlobalConfig(tmp, { plugins: [{ package: "leakshield" }] });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("PROTECTED");
+  });
+
+  it("reports NOT_REGISTERED when a nearer config replaces the list without LeakShield (#65)", async () => {
+    const { deps, tmp } = makeFixture({ config: () => ({ plugins: ["some-other-plugin"] }) });
+    const globalPath = writeGlobalConfig(tmp, { plugins: ["leakshield"] });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("NOT_REGISTERED");
+    const detail = report.checks.find((c) => c.id === "registration")?.detail ?? "";
+    expect(detail).toContain(globalPath);
+    expect(detail).toContain(path.join(tmp, "opencode.json"));
+    expect(detail).toContain("replaces the whole list");
+  });
+
+  it("reports BROKEN for an unparsable file anywhere in the chain (#65)", async () => {
+    const { deps, tmp } = makeFixture({
+      config: () => ({ $schema: "https://opencode.ai/config.json" }),
+    });
+    const globalPath = writeGlobalConfig(tmp, "{ not json !!");
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("BROKEN");
+    const config = report.checks.find((c) => c.id === "config");
+    expect(config?.state).toBe("fail");
+    expect(config?.detail).toContain(globalPath);
+    expect(report.configPath).toBe(globalPath);
   });
 
   it("reports NOT_REGISTERED when no config file exists", async () => {

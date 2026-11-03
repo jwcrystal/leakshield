@@ -228,6 +228,87 @@ function candidateConfigPaths(deps: DoctorDeps): string[] {
   return [...workspace, ...global];
 }
 
+interface ConfigSource {
+  path: string;
+  config: unknown;
+}
+
+/**
+ * Every config file OpenCode would read, in precedence order.
+ *
+ * OpenCode merges config files instead of replacing them: "Later configs
+ * override earlier ones only for conflicting keys. Non-conflicting settings
+ * from all configs are preserved" (https://opencode.ai/docs/config/#locations).
+ * Judging registration from the first file that exists makes a project
+ * `opencode.json` that only sets `$schema` hide a registration in the global
+ * config, so doctor reads the whole chain. Within one directory `.json` wins
+ * over `.jsonc`, which is the order `candidateConfigPaths` already returns.
+ */
+function loadConfigSources(deps: DoctorDeps): {
+  sources: ConfigSource[];
+  broken: { path: string; error: string } | null;
+} {
+  const sources: ConfigSource[] = [];
+  const seenDirs = new Set<string>();
+  for (const candidate of candidateConfigPaths(deps)) {
+    const text = deps.readIfExists(candidate);
+    if (text === null) continue;
+    const dir = path.dirname(candidate);
+    if (seenDirs.has(dir)) continue;
+    seenDirs.add(dir);
+    try {
+      sources.push({ path: candidate, config: parseJsonc(text) });
+    } catch (error) {
+      return { sources, broken: { path: candidate, error: (error as Error).message } };
+    }
+  }
+  return { sources, broken: null };
+}
+
+function definesPlugins(config: unknown): boolean {
+  return (
+    !!config &&
+    typeof config === "object" &&
+    Object.prototype.hasOwnProperty.call(config, "plugins")
+  );
+}
+
+interface ResolvedRegistration {
+  registration: RegistrationMatch | null;
+  /** File that supplied the winning `plugins` list. */
+  source: string | null;
+  /** A higher-precedence file replaces the list without LeakShield in it. */
+  replacesAt: string | null;
+  /** The lower-precedence file that does register LeakShield. */
+  registeredAt: string | null;
+}
+
+/**
+ * Registration from the merged view: the highest-precedence file that defines
+ * `plugins` supplies the list, because an array is replaced as a whole rather
+ * than merged element-wise. A project list without LeakShield therefore does
+ * unregister a global one, and that case stays a failure — it is reported with
+ * both files named instead of as a bare "not registered".
+ */
+function resolveRegistration(sources: ConfigSource[]): ResolvedRegistration {
+  for (let index = 0; index < sources.length; index += 1) {
+    const owner = sources[index];
+    if (!definesPlugins(owner.config)) continue;
+    const registration = findRegistration(owner.config);
+    if (registration) {
+      return { registration, source: owner.path, replacesAt: null, registeredAt: null };
+    }
+    const registered = sources.slice(index + 1).find((source) => findRegistration(source.config));
+    return {
+      registration: null,
+      source: owner.path,
+      replacesAt: registered ? owner.path : null,
+      registeredAt: registered?.path ?? null,
+    };
+  }
+  return { registration: null, source: null, replacesAt: null, registeredAt: null };
+}
+
 /**
  * W2 (B5) persistence status — a warn/ok/skip check, never a status flip:
  * a degraded store weakens nothing (the plugin degrades to memory-only);
@@ -326,49 +407,43 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   }
   checks.push({ id: "host", state: "ok", detail: `OpenCode ${host.version.trim()} (${host.generation})` });
 
-  // Config discovery
-  let configPath: string | null = null;
-  let rawConfig: string | null = null;
-  for (const candidate of candidateConfigPaths(deps)) {
-    const text = deps.readIfExists(candidate);
-    if (text !== null) {
-      configPath = candidate;
-      rawConfig = text;
-      break;
-    }
+  // Config discovery across every file OpenCode merges
+  const { sources, broken } = loadConfigSources(deps);
+  const configPaths = sources.map((source) => source.path);
+  const configPath = broken?.path ?? configPaths[0] ?? null;
+
+  if (broken) {
+    checks.push({
+      id: "config",
+      state: "fail",
+      detail: `${broken.path} is not parseable JSON/JSONC: ${broken.error}`,
+      fix: "Fix the syntax error; doctor reads every config file OpenCode merges, so one broken file hides the rest.",
+    });
+    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
   }
 
-  let parsedConfig: unknown = null;
-  if (configPath && rawConfig !== null) {
-    try {
-      parsedConfig = parseJsonc(rawConfig);
-      checks.push({ id: "config", state: "ok", detail: configPath });
-    } catch (error) {
-      checks.push({
-        id: "config",
-        state: "fail",
-        detail: `${configPath} is not parseable JSON/JSONC: ${(error as Error).message}`,
-        fix: "Fix the syntax error, or remove the file so another candidate can apply.",
-      });
-      return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
-    }
-  } else {
+  if (sources.length === 0) {
     checks.push({
       id: "config",
       state: "warn",
       detail: "No opencode.json / opencode.jsonc found (workspace or global).",
       fix: "Create one with the snippet below.",
     });
+  } else {
+    checks.push({ id: "config", state: "ok", detail: configPaths.join(", ") });
   }
 
-  const registration = findRegistration(parsedConfig);
+  const resolved = resolveRegistration(sources);
+  const registration = resolved.registration;
   const distDir = path.resolve(deps.cwd, "dist");
 
   if (!registration) {
     checks.push({
       id: "registration",
       state: "fail",
-      detail: "LeakShield is not registered in the OpenCode config.",
+      detail: resolved.registeredAt
+        ? `LeakShield is registered in ${resolved.registeredAt}, but ${resolved.replacesAt} also sets "plugins" without it, and a later config replaces the whole list.`
+        : "LeakShield is not registered in the OpenCode config.",
       fix: "Add it (snippet below), then rerun this doctor.",
     });
     return {
@@ -380,10 +455,11 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       snippet: registrationSnippet(distDir),
     };
   }
+  const fromSource = resolved.source && sources.length > 1 ? ` (from ${resolved.source})` : "";
   checks.push({
     id: "registration",
     state: "ok",
-    detail: `Registered as "${registration.packageRef}"${registration.options && Object.keys(registration.options as object).length > 0 ? " with options" : ""}.`,
+    detail: `Registered as "${registration.packageRef}"${registration.options && Object.keys(registration.options as object).length > 0 ? " with options" : ""}${fromSource}.`,
   });
 
   // Local dist presence (silent-skip guard: the host logs and skips a plugin

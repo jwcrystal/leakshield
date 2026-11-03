@@ -227,8 +227,9 @@ function isLeakshieldPath(resolved: string): boolean {
  * `leakshield` path segment anywhere means the entry is LeakShield's and must be
  * reported as unloadable rather than skipped — a heuristic, since the reference
  * cannot be resolved. Literal tab/CR/LF are removed first, as URL parsing does,
- * so a broken escape elsewhere does not hide the rest of the path; the parsed
- * pathname is preferred because it also normalises dot segments.
+ * and encoded separators are split so one broken escape cannot hide the rest of
+ * the path; the parsed pathname is preferred because it also normalises dot
+ * segments.
  */
 function invalidFileUrlId(ref: string): string {
   const cleaned = ref.replace(/[\t\n\r]/g, "");
@@ -238,7 +239,10 @@ function invalidFileUrlId(ref: string): string {
   } catch {
     pathname = null;
   }
-  const text = pathname ?? cleaned.replace(/^file:\/\//, "").split(/[?#]/)[0] ?? "";
+  const text = (pathname ?? cleaned.replace(/^file:\/\//, "").split(/[?#]/)[0] ?? "")
+    // An encoded separator cannot appear in a loadable path, which is why this
+    // reference is here; splitting on it keeps the segments identifiable.
+    .replace(/%2f|%5c/gi, "/");
   const parts = text
     .split("/")
     .filter(Boolean)

@@ -609,6 +609,13 @@ describe("runDoctor", () => {
     expect((await runDoctor(deps)).status).toBe("BROKEN");
   });
 
+  it("splits encoded separators even next to a bad escape (#65)", async () => {
+    const { deps } = makeFixture({
+      config: () => ({ plugins: ["leakshield", "file:///Users/x/leakshield%2Fdist%ZZ"] }),
+    });
+    expect((await runDoctor(deps)).status).toBe("BROKEN");
+  });
+
   it("resolves a relative plugin path from the config file that declared it (#65)", async () => {
     const { deps, tmp } = makeFixture({});
     const dir = path.join(tmp, ".opencode", "leakshield", "dist");

@@ -378,6 +378,56 @@ describe("runDoctor", () => {
     expect((await runDoctor(deps)).status).toBe("NOT_REGISTERED");
   });
 
+  it("matches a disable against the plugin id, not the dist path (#65)", async () => {
+    const { deps, tmp } = makeFixture({
+      distFiles: true,
+      config: () => ({ plugins: ["-leakshield"] }),
+    });
+    writeGlobalConfig(tmp, { plugins: [{ package: distRef(tmp) }] });
+    expect((await runDoctor(deps)).status).toBe("NOT_REGISTERED");
+  });
+
+  it("does not let a removal of another plugin suppress LeakShield (#65)", async () => {
+    const { deps, tmp } = makeFixture({ config: () => ({ plugins: ["-acme.reviewer"] }) });
+    writeGlobalConfig(tmp, { plugins: ["leakshield"] });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("PROTECTED");
+    expect(report.checks.find((c) => c.id === "registration")?.detail).not.toContain("disabled");
+  });
+
+  it("restores entries with a wildcard enable (#65)", async () => {
+    const { deps } = makeFixture({
+      config: () => ({ plugins: ["leakshield", "-leakshield", "*"] }),
+    });
+    expect((await runDoctor(deps)).status).toBe("PROTECTED");
+  });
+
+  it("validates the options of the entry applied last, even for the same package (#65)", async () => {
+    const { deps, tmp } = makeFixture({
+      distFiles: true,
+      config: (fixtureTmp) => ({
+        plugins: [{ package: distRef(fixtureTmp), options: { mode: "bogus" } }],
+      }),
+    });
+    writeGlobalConfig(tmp, {
+      plugins: [{ package: distRef(tmp), options: { mode: "transparent" } }],
+    });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("BROKEN");
+    expect(report.checks.find((c) => c.id === "options")?.state).toBe("fail");
+  });
+
+  it("resolves a relative plugin path from the config file that declared it (#65)", async () => {
+    const { deps, tmp } = makeFixture({});
+    const dir = path.join(tmp, ".opencode", "leakshield", "dist");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "index.js"), "export {};");
+    writeRepoConfig(tmp, { plugins: ["./leakshield/dist"] });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("PROTECTED");
+    expect(report.checks.find((c) => c.id === "dist")?.state).toBe("ok");
+  });
+
   it("lets a later entry re-enable what a project list disabled (#65)", async () => {
     const { deps, tmp } = makeFixture({ config: () => ({ plugins: ["-leakshield"] }) });
     writeGlobalConfig(tmp, { plugins: ["leakshield"] });

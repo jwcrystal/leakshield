@@ -177,8 +177,22 @@ interface RegistrationMatch {
 }
 
 function matchesLeakshield(entry: string): boolean {
-  if (entry === "leakshield") return true;
-  return /\/leakshield(\/dist(\/opencode\.js)?)?$/.test(entry);
+  const ref = entry.replace(/^file:\/\//, "");
+  if (ref === "leakshield" || ref.startsWith("leakshield@")) return true;
+  return /\/leakshield(\/dist(\/opencode\.js)?)?$/.test(ref);
+}
+
+/**
+ * The ID a plugin entry registers under, which is what `-id` and `-prefix.*`
+ * removals match. LeakShield always resolves to `leakshield` (the id its entry
+ * declares in src/opencode.ts), whatever form the entry was written in: the
+ * package name, a pinned name, a relative or absolute dist path, a `file://`
+ * URL, or a directory. Other entries lose only their `@version`.
+ */
+function pluginIdOf(ref: string): string {
+  if (matchesLeakshield(ref)) return "leakshield";
+  const at = ref.indexOf("@", 1); // keep a leading @scope
+  return at === -1 ? ref : ref.slice(0, at);
 }
 
 function registrationSnippet(distDir: string): string {
@@ -269,42 +283,50 @@ function loadConfigSources(deps: DoctorDeps): {
   return { sources, broken: null };
 }
 
-function pluginEntryId(entry: unknown): string | null {
-  if (typeof entry === "string") return entry;
-  if (entry && typeof entry === "object" && !Array.isArray(entry)) {
-    const pkg = (entry as Record<string, unknown>).package;
-    return typeof pkg === "string" ? pkg : null;
-  }
-  return null;
-}
-
 interface AppliedPlugin {
+  /** Plugin id removals match; `leakshield` for every LeakShield form. */
   id: string;
+  /** The package reference as written, kept for path resolution. */
+  ref: string;
   options: unknown;
+  /** Config file that applied this entry last. */
   source: string;
 }
 
 /**
  * Apply every `plugins` array doctor can read, lowest precedence first, the way
  * the host does: entries accumulate across files instead of replacing one
- * another, `-id` / `-prefix.*` / `-*` remove an entry, and a later entry
- * re-enables it (https://opencode.ai/v2/docs/plugins/#configure, #control).
+ * another, `-id` / `-prefix.*` / `-*` remove an entry, `*` restores every entry
+ * seen so far, and a later entry re-enables it
+ * (https://opencode.ai/v2/docs/plugins/#configure, #control).
  */
 function applyPluginLists(sourcesLowToHigh: ConfigSource[]): {
   registered: AppliedPlugin | null;
   disabled: { source: string; entry: string } | null;
 } {
+  const known = new Map<string, AppliedPlugin>();
   const enabled = new Map<string, AppliedPlugin>();
+  let registered: AppliedPlugin | null = null;
   let disabled: { source: string; entry: string } | null = null;
 
+  const enable = (applied: AppliedPlugin): void => {
+    known.set(applied.id, applied);
+    enabled.set(applied.id, applied);
+    if (applied.id === "leakshield") {
+      registered = applied;
+      disabled = null;
+    }
+  };
+
   const removeWhere = (source: string, entry: string, matches: (id: string) => boolean): void => {
-    let removed = false;
     for (const id of [...enabled.keys()]) {
       if (!matches(id)) continue;
       enabled.delete(id);
-      if (matchesLeakshield(id)) removed = true;
+      if (id === "leakshield") {
+        registered = null;
+        disabled = { source, entry };
+      }
     }
-    if (removed) disabled = { source, entry };
   };
 
   for (const source of sourcesLowToHigh) {
@@ -326,23 +348,21 @@ function applyPluginLists(sourcesLowToHigh: ConfigSource[]): {
           );
           continue;
         }
-        if (entry === "*") continue; // wildcard enable: nothing specific to add
-        enabled.set(entry, { id: entry, options: {}, source: source.path });
-        if (matchesLeakshield(entry)) disabled = null;
+        if (entry === "*") {
+          for (const knownEntry of known.values()) enable({ ...knownEntry, source: source.path });
+          continue;
+        }
+        enable({ id: pluginIdOf(entry), ref: entry, options: {}, source: source.path });
         continue;
       }
-      const id = pluginEntryId(entry);
-      if (!id) continue;
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      const ref = (entry as Record<string, unknown>).package;
+      if (typeof ref !== "string") continue;
       const options = (entry as Record<string, unknown>).options ?? {};
-      enabled.set(id, { id, options, source: source.path });
-      if (matchesLeakshield(id)) disabled = null;
+      enable({ id: pluginIdOf(ref), ref, options, source: source.path });
     }
   }
 
-  let registered: AppliedPlugin | null = null;
-  for (const applied of enabled.values()) {
-    if (matchesLeakshield(applied.id)) registered = applied;
-  }
   return { registered, disabled: registered ? null : disabled };
 }
 
@@ -472,11 +492,12 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   }
 
   const applied = applyPluginLists([...sources].reverse());
-  const registration: RegistrationMatch | null = applied.registered
+  const appliedEntry = applied.registered;
+  const registration: RegistrationMatch | null = appliedEntry
     ? {
-        packageRef: applied.registered.id,
-        options: applied.registered.options,
-        isLocalDistPath: applied.registered.id.includes("/"),
+        packageRef: appliedEntry.ref,
+        options: appliedEntry.options,
+        isLocalDistPath: appliedEntry.ref.includes("/"),
       }
     : null;
   const distDir = path.resolve(deps.cwd, "dist");
@@ -500,7 +521,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     };
   }
   const fromSource =
-    applied.registered && sources.length > 1 ? ` (from ${applied.registered.source})` : "";
+    appliedEntry && sources.length > 1 ? ` (from ${appliedEntry.source})` : "";
   checks.push({
     id: "registration",
     state: "ok",
@@ -511,7 +532,10 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   // whose entry point cannot be resolved, which looks like "no protection"
   // with no visible failure).
   if (registration.isLocalDistPath && registration.packageRef) {
-    const resolved = path.resolve(deps.cwd, registration.packageRef);
+    // A relative path resolves from the config file that declared it
+    // (https://opencode.ai/v2/docs/plugins/#configure), not from the cwd.
+    const base = appliedEntry ? path.dirname(appliedEntry.source) : deps.cwd;
+    const resolved = path.resolve(base, registration.packageRef.replace(/^file:\/\//, ""));
     // A directory registration resolves to index.js through the host; an
     // entry ending in .js points directly at the compiled file.
     const entryOk = registration.packageRef.endsWith(".js")

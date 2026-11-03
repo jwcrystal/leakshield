@@ -39,8 +39,10 @@ function getRules(config: GuardConfig): Rule[] {
   return [...configuredBuiltins, ...dynamic];
 }
 
-function hasMatchingRange(findings: readonly Finding[], index: number, length: number): boolean {
-  return findings.some((finding) => finding.match_start === index && finding.match_end === index + length);
+function hasHighFindingAtRange(findings: readonly Finding[], index: number, length: number): boolean {
+  return findings.some(
+    (finding) => finding.severity === "HIGH" && finding.match_start === index && finding.match_end === index + length,
+  );
 }
 
 function collapseOverlappingMatches(matches: readonly MatchEntry[]): MatchEntry[] {
@@ -85,7 +87,9 @@ function addExactValueFindings(
   const globalAllow = allowSet(config.settings.allowlist);
 
   for (const match of detector.findAll(text)) {
-    if (hasMatchingRange(findings, match.index, match.length)) continue;
+    // A HIGH rule finding already says all ENV_SECRET would. A weaker one must
+    // not hide it, or the decision drops and --min-severity high loses the match.
+    if (hasHighFindingAtRange(findings, match.index, match.length)) continue;
     const { line, col } = lineColAt(lineStarts, match.index);
     if (ignoredLines.has(line)) continue;
     const matchedText = text.slice(match.index, match.index + match.length);
@@ -452,6 +456,8 @@ export function redactText(
   if (detector) {
     for (const match of detector.findAll(truncated)) {
       if (overlapsSpan(match.index, match.index + match.length, protectedSpans)) continue;
+      // Only the mask is decided here, so any match on this range already covers
+      // it. Severity is reported by the scanText call below.
       if (matches.some((entry) => entry.index === match.index && entry.length === match.length)) continue;
       const { line } = lineColAt(truncatedLineStarts, match.index);
       if (ignoredLines.has(line)) continue;

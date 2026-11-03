@@ -5,6 +5,7 @@
  */
 
 import { z } from "zod";
+import { plainObject } from "./config/plain-object.js";
 
 // deidentify is valid only in redact mode; an invalid combination
 // makes the parse throw, and every entry path already fails closed on that.
@@ -46,8 +47,8 @@ export const PluginOptionsSchema = z
      * the ladder OS keychain → explicit keyfile → memory-only degrade;
      * conversations are never blocked by a missing key.
      */
-    persistence: z
-      .object({
+    persistence: plainObject(
+      z.object({
         enabled: z.boolean().default(false),
         /** Session TTL in days; 0 = never expire (manual forget only). */
         ttlDays: z.number().int().min(0).max(3650).default(7),
@@ -57,8 +58,8 @@ export const PluginOptionsSchema = z
         keyFile: z.boolean().default(false),
         /** Overrides the default keyfile location. */
         keyfilePath: z.string().min(1).optional(),
-      })
-      .default({}),
+      }),
+    ).prefault({}),
   })
   .refine((options) => !options.deidentify || options.mode === "redact", {
     message: "deidentify requires mode 'redact'",

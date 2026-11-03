@@ -8,6 +8,7 @@ import { loadExactValueDetector } from "../scanner/exact-values.js";
 import { parseCidr } from "../scanner/cidr.js";
 import { BUILTIN_RULE_IDS } from "../rules/builtin.js";
 import { customRulePattern } from "../rules/dynamic.js";
+import { plainObject } from "./plain-object.js";
 import type { GuardConfig } from "../types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -20,6 +21,9 @@ const MAX_RULE_ALLOW_ENTRIES = 32;
 const MAX_GLOBAL_ALLOW_ENTRIES = 64;
 const MAX_RULE_PATH_ENTRIES = 16;
 const MAX_RULE_PATH_LENGTH = 512;
+const MAX_NDA_KEYWORDS = 4096;
+const MAX_PRIVATE_DOMAINS = 4096;
+const MAX_CUSTOM_RULES = 1024;
 // `g` is always added by the scanner; the rest is the documented subset.
 const CUSTOM_FLAG_CHARS = /^[gimsuy]*$/;
 
@@ -39,11 +43,11 @@ const CustomRuleSchema = z.object({
   path: z.array(z.string().min(1).max(MAX_RULE_PATH_LENGTH)).max(MAX_RULE_PATH_ENTRIES).optional(),
 });
 
-export const GuardConfigSchema = z.object({
-  nda_keywords: z.array(z.string().min(1).max(MAX_DYNAMIC_RULE_LENGTH)).default(["CONFIDENTIAL", "INTERNAL ONLY", "DO NOT SHARE", "NDA"]),
-  private_domains: z.array(z.string().min(1).max(MAX_PRIVATE_DOMAIN_LENGTH)).default([]),
-  custom_rules: z.array(CustomRuleSchema).nullable().default([]).transform((v) => v ?? []),
-  settings: z.object({
+export const GuardConfigSchema = plainObject(z.object({
+  nda_keywords: z.array(z.string().min(1).max(MAX_DYNAMIC_RULE_LENGTH)).max(MAX_NDA_KEYWORDS).default(["CONFIDENTIAL", "INTERNAL ONLY", "DO NOT SHARE", "NDA"]),
+  private_domains: z.array(z.string().min(1).max(MAX_PRIVATE_DOMAIN_LENGTH)).max(MAX_PRIVATE_DOMAINS).default([]),
+  custom_rules: z.array(CustomRuleSchema).max(MAX_CUSTOM_RULES).nullable().default([]).transform((v) => v ?? []),
+  settings: plainObject(z.object({
     max_chars: z.number().int().positive().default(200000),
     show_line_numbers: z.boolean().default(true),
     preview_length: z.number().int().positive().default(60),
@@ -52,15 +56,15 @@ export const GuardConfigSchema = z.object({
     rule_overrides: z.record(z.string().min(1), z.boolean()).default({}),
     private_cidrs: z.array(z.string().min(1).max(64)).max(64).default([]),
     allowlist: z.array(AllowEntry).max(MAX_GLOBAL_ALLOW_ENTRIES).default([]),
-  }).default({}),
-}).superRefine((config, ctx) => {
+  })).prefault({}),
+})).superRefine((config, ctx) => {
   // Unknown rule ids in `rule_overrides` fail the parse (fail-closed): a typo
   // must never silently leave a rule in the wrong state.
   const overrides = config.settings.rule_overrides ?? {};
   for (const id of Object.keys(overrides)) {
     if (!BUILTIN_RULE_IDS.has(id)) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["settings", "rule_overrides", id],
         message: `unknown builtin rule id "${id}" (see src/rules/builtin.ts BUILTIN_RULE_IDS)`,
       });
@@ -71,7 +75,7 @@ export const GuardConfigSchema = z.object({
   (config.settings.private_cidrs ?? []).forEach((entry, index) => {
     if (parseCidr(entry) === null) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["settings", "private_cidrs", index],
         message: `private_cidrs[${index}] is not a valid IPv4 CIDR (expected a.b.c.d/prefix)`,
       });
@@ -90,7 +94,7 @@ export const GuardConfigSchema = z.object({
       const message = (error as Error).message;
       const reason = message.includes(": ") ? message.split(": ").pop() : message;
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["custom_rules", index, "pattern"],
         message: `custom_rules[${index}] "${rule.description}": pattern does not compile (${reason})`,
       });

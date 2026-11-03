@@ -48,3 +48,43 @@ describe("default mode", () => {
     expect(PluginOptionsSchema.safeParse({}).success).toBe(false);
   });
 });
+
+describe("persistence option (zod 4)", () => {
+  it("omitted persistence gets inner defaults", () => {
+    const result = validatePluginOptions({ mode: "transparent" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.options.persistence).toEqual({ enabled: false, ttlDays: 7, keyFile: false });
+  });
+
+  it.each([new Date(), new Map(), new Uint8Array(1), [], "x", null])("rejects non-mapping persistence %#", (persistence) => {
+    expect(validatePluginOptions({ mode: "transparent", persistence }).ok).toBe(false);
+  });
+
+  it("never throws on a Date root", () => {
+    expect(() => validatePluginOptions(new Date())).not.toThrow();
+  });
+
+  it("keeps each refinement message", () => {
+    const error = (input: unknown) => {
+      const r = validatePluginOptions(input);
+      return r.ok ? "" : r.error;
+    };
+    expect(error({ mode: "block", deidentify: true })).toContain("deidentify requires mode 'redact'");
+    expect(error({ mode: "transparent", envQueries: true })).toContain("envQueries is not supported in mode 'transparent'");
+    expect(error({ mode: "block", attachments: "allow" })).toContain('attachments "allow" requires mode "transparent"');
+    expect(error({ mode: "block", wireProtection: false })).toContain('wireProtection requires mode "transparent"');
+    expect(error({ mode: "block", persistence: { enabled: true } })).toContain('persistence requires mode "transparent"');
+  });
+
+  it("does not echo rejected values in the error", () => {
+    const SENTINEL = "sk-LEAKCHECK-value";
+    for (const input of [{ mode: SENTINEL }, { mode: "transparent", attachments: SENTINEL }]) {
+      const result = validatePluginOptions(input);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).not.toContain(SENTINEL);
+        expect(result.error).not.toContain("input");
+      }
+    }
+  });
+});

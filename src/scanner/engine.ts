@@ -3,7 +3,7 @@ import { BUILTIN_RULES } from "../rules/builtin.js";
 import { buildDynamicRules } from "../rules/dynamic.js";
 import { allowSet, isAllowlisted, noteAllowlistSuppression } from "./allowlist.js";
 import { containsAddressInRun, parseCidrList } from "./cidr.js";
-import { redact, getLineCol, getIgnoredLines } from "./utils.js";
+import { redact, createLineIndex, lineColAt, getIgnoredLines } from "./utils.js";
 import { t } from "../i18n/index.js";
 import * as encoding from "./encoding.js";
 import { sanitizeForScanning, isLikelyHomographAttack, detectSuspiciousUnicode, foldConfusables } from "./unicode.js";
@@ -75,6 +75,7 @@ function collapseOverlappingMatches(matches: readonly MatchEntry[]): MatchEntry[
 
 function addExactValueFindings(
   text: string,
+  lineStarts: readonly number[],
   config: GuardConfig,
   ignoredLines: ReadonlySet<number>,
   findings: Finding[],
@@ -85,7 +86,7 @@ function addExactValueFindings(
 
   for (const match of detector.findAll(text)) {
     if (hasMatchingRange(findings, match.index, match.length)) continue;
-    const { line, col } = getLineCol(text, match.index);
+    const { line, col } = lineColAt(lineStarts, match.index);
     if (ignoredLines.has(line)) continue;
     const matchedText = text.slice(match.index, match.index + match.length);
     if (isAllowlisted(matchedText, globalAllow, undefined)) {
@@ -134,6 +135,7 @@ function collectRuleFindings(
   config: GuardConfig,
   ignoredLines: Set<number>,
 ): Finding[] {
+  const lineStarts = createLineIndex(text);
   const findings: Finding[] = [];
   const seen = new Set<string>();
   const globalAllow = allowSet(config.settings.allowlist);
@@ -152,7 +154,7 @@ function collectRuleFindings(
       const key = `${rule.type}:${start}`;
       if (seen.has(key)) continue;
 
-      const { line, col } = getLineCol(text, start);
+      const { line, col } = lineColAt(lineStarts, start);
       if (ignoredLines.has(line)) continue;
       if (isAllowlisted(matchedText, globalAllow, rule.allow)) {
         noteAllowlistSuppression();
@@ -178,7 +180,7 @@ function collectRuleFindings(
     }
   }
 
-  addExactValueFindings(text, config, ignoredLines, findings);
+  addExactValueFindings(text, lineStarts, config, ignoredLines, findings);
   return findings;
 }
 
@@ -419,6 +421,7 @@ export function redactText(
   const truncated = text.slice(0, config.settings.max_chars);
   const allRules = getRules(config);
   const ignoredLines = honorDirectives(opts) ? getIgnoredLines(truncated) : new Set<number>();
+  const truncatedLineStarts = createLineIndex(truncated);
 
   const matches: MatchEntry[] = [];
   const seen = new Set<string>();
@@ -437,7 +440,7 @@ export function redactText(
       if (overlapsSpan(start, end, protectedSpans)) continue;
       const key = `${start}:${end - start}`;
       if (seen.has(key)) continue;
-      const { line } = getLineCol(truncated, start);
+      const { line } = lineColAt(truncatedLineStarts, start);
       if (ignoredLines.has(line)) continue;
       // An allowlisted literal is left as written, exactly as the scanner leaves
       // it unreported; redacting it would contradict the bypass the user chose.
@@ -452,7 +455,7 @@ export function redactText(
     for (const match of detector.findAll(truncated)) {
       if (overlapsSpan(match.index, match.index + match.length, protectedSpans)) continue;
       if (matches.some((entry) => entry.index === match.index && entry.length === match.length)) continue;
-      const { line } = getLineCol(truncated, match.index);
+      const { line } = lineColAt(truncatedLineStarts, match.index);
       if (ignoredLines.has(line)) continue;
       const matchedText = truncated.slice(match.index, match.index + match.length);
       if (isAllowlisted(matchedText, globalAllow, undefined)) continue;

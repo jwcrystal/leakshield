@@ -6,6 +6,7 @@
 import type { Finding, GuardConfig, ScanResult } from "../types.js";
 import { ZERO_WIDTH_CHARS, scanTextInternal, type ScanOptions } from "./engine.js";
 import { foldConfusables } from "./unicode.js";
+import { getLineCol } from "./utils.js";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -14,6 +15,9 @@ export interface DecodingResult {
   encoding_type: string;
   confidence: number; // 0-1
 }
+
+/** Decoded text that hints at a credential; raises the decoder's confidence. */
+const SENSITIVE_HINT = /(?:api|key|secret|token|password|sk-|ghp_|gho_)/i;
 
 /** A detected candidate and where it starts in the text it was detected in. */
 interface EncodedCandidate {
@@ -85,7 +89,7 @@ function tryDecodeBase64(encoded: string): DecodingResult | null {
     if (!/[a-zA-Z]{2,}/.test(decoded)) return null;
 
     // Check for common sensitive patterns in decoded text
-    const hasSensitivePattern = /(?:api|key|secret|token|password|sk-|ghp_|gho_)/i.test(decoded);
+    const hasSensitivePattern = SENSITIVE_HINT.test(decoded);
 
     return {
       decoded,
@@ -133,7 +137,7 @@ function tryDecodeUrl(encoded: string): DecodingResult | null {
 
     if (decoded === encoded) return null; // Nothing was decoded
 
-    const hasSensitivePattern = /(?:api|key|secret|token|password|sk-|ghp_|gho_)/i.test(decoded);
+    const hasSensitivePattern = SENSITIVE_HINT.test(decoded);
 
     return {
       decoded,
@@ -188,7 +192,7 @@ function tryDecodeHex(encoded: string): DecodingResult | null {
 
     if (decoded.length < 10) return null;
 
-    const hasSensitivePattern = /(?:api|key|secret|token|password|sk-|ghp_|gho_)/i.test(decoded);
+    const hasSensitivePattern = SENSITIVE_HINT.test(decoded);
 
     return {
       decoded,
@@ -367,6 +371,8 @@ export interface EncodedRun {
   severity: Finding["severity"];
   /** match_text of the decoded findings behind this run. */
   decodedMatches: string[];
+  /** The decoded findings behind this run, tagged with `encoding_detected`. */
+  findings: Finding[];
 }
 
 /**
@@ -413,6 +419,93 @@ export function decodedFindingsAttributable(
     if (!covered) return false;
   }
   return true;
+}
+
+/** What makes two findings distinct: dropping one must never lose a severity. */
+function findingIdentity(finding: Finding): string {
+  return JSON.stringify([finding.type, finding.severity, finding.description, finding.match_text]);
+}
+
+/**
+ * Re-expresses the encoded findings of a decoding scan as spans of `text`.
+ * scanTextWithDecoding reports decoded findings at offsets of the DECODED
+ * string, which redaction would apply to the source. Here each located run
+ * contributes its decoded findings at the run's exact source span, so a
+ * placeholder replaces the whole run.
+ *
+ * When the decoded findings cannot all be attributed to located runs (a
+ * hidden run, a Unicode evasion, a finding without text), it fails closed:
+ * every encoded finding loses its offsets, so no redacted content or safe
+ * preview is built for the result. `encoding_detected` is kept either way,
+ * which the redaction verifier and deidentify rely on to stay fail-closed.
+ */
+export function anchorDecodedFindings(
+  text: string,
+  scan: ScanWithDecodingResult,
+  config: GuardConfig,
+  opts?: ScanOptions,
+): Finding[] {
+  if (scan.decoded.length === 0) return scan.findings;
+
+  const decodedFindings = scan.decoded.flatMap((r) => r.findings);
+  const decodedMatches: string[] = [];
+  let attributable = true;
+  for (const finding of decodedFindings) {
+    if (typeof finding.match_text !== "string" || (finding as { unicode_detected?: unknown }).unicode_detected !== undefined) {
+      attributable = false;
+      break;
+    }
+    decodedMatches.push(finding.match_text);
+  }
+  if (attributable) {
+    const directMatches = scan.original.findings.flatMap((f) => (typeof f.match_text === "string" ? [f.match_text] : []));
+    attributable = decodedFindingsAttributable(text, config, opts, decodedMatches, directMatches);
+  }
+  if (!attributable) {
+    // Read scan.decoded, not the merged findings: the merge drops a decoded
+    // finding whose decoded offsets equal a direct finding's, and the direct
+    // finding alone would still produce a redaction that misses the run.
+    const seen = new Set<string>();
+    const stripped: Finding[] = [];
+    for (const finding of decodedFindings) {
+      const key = findingIdentity(finding);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const { match_start: _start, match_end: _end, ...rest } = finding;
+      stripped.push(rest);
+    }
+    return [...scan.original.findings, ...stripped];
+  }
+
+  const anchored: Finding[] = [];
+  const seen = new Set<string>();
+  // Every finding of a run shares the run's span, so the span alone cannot
+  // tell them apart: identity comes from the decoded match, taken before
+  // match_text is rewritten to the source slice.
+  const add = (finding: Finding, identity: string): void => {
+    const key = `${finding.match_start}:${finding.match_end}:${identity}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    anchored.push(finding);
+  };
+  for (const finding of scan.original.findings) add(finding, findingIdentity(finding));
+  for (const run of locateEncodedRuns(text, config, opts)) {
+    const { line, col } = getLineCol(text, run.start);
+    for (const finding of run.findings) {
+      add(
+        {
+          ...finding,
+          line,
+          column: col,
+          match_start: run.start,
+          match_end: run.end,
+          match_text: text.slice(run.start, run.end),
+        },
+        findingIdentity(finding),
+      );
+    }
+  }
+  return anchored;
 }
 
 const SEVERITY_ORDER: Record<Finding["severity"], number> = { HIGH: 3, MEDIUM: 2, LOW: 1 };
@@ -464,11 +557,16 @@ function locateEncoded(text: string, config: GuardConfig, opts?: ScanOptions): {
       const result = scanTextInternal(decoded.decoded, config, opts);
       if (!result.safe) {
         if (hasUnicodeEvasion(result.findings)) evasion = true;
+        const type = decoded.encoding_type as "Base64" | "Hex";
+        const encoding_detected: NonNullable<Finding["encoding_detected"]> = type === "Base64"
+          ? { type, confidence: decoded.confidence, encoded_length: candidate.text.length, decoded_length: decoded.decoded.length }
+          : { type, confidence: decoded.confidence };
         runs.push({
           start: candidate.index,
           end: candidate.index + candidate.text.length,
           severity: highestSeverity(result.findings),
           decodedMatches: result.findings.flatMap((f) => (typeof f.match_text === "string" ? [f.match_text] : [])),
+          findings: result.findings.map((f) => ({ ...f, encoding_detected: { ...encoding_detected } })),
         });
       }
     }
@@ -558,7 +656,14 @@ function locateUrlRuns(
     let hot = false;
     for (let i = start; i < end && !hot; i += 1) hot = unitHot[i];
     if (!hot) continue;
-    runs.push({ start: unitStart[start], end: unitEnd[end - 1], severity: finding.severity, decodedMatches: [matched] });
+    const encoding_detected = { type: "URL" as const, confidence: SENSITIVE_HINT.test(decodedText) ? 0.85 : 0.5 };
+    runs.push({
+      start: unitStart[start],
+      end: unitEnd[end - 1],
+      severity: finding.severity,
+      decodedMatches: [matched],
+      findings: [{ ...finding, encoding_detected }],
+    });
   }
   return { runs, evasion: hasUnicodeEvasion(result.findings) };
 }

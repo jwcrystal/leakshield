@@ -283,6 +283,11 @@ function homoglyphHidesFinding(
   return transformHidesFinding(text, fold, rawFindings, rules, config, ignoredLines);
 }
 
+/** Appends the ` [WARNING: a, b]` suffix to a summary; no suffix when there is none. */
+export function appendWarnings(summary: string, warnings: readonly string[] | undefined): string {
+  return warnings !== undefined && warnings.length > 0 ? `${summary} [WARNING: ${warnings.join(", ")}]` : summary;
+}
+
 /**
  * Internal scan function without encoding detection.
  * Used by scanTextWithDecoding to avoid infinite recursion.
@@ -345,22 +350,19 @@ function scanTextInternal(text: string, config: GuardConfig, opts?: ScanOptions)
     : t("scan.unsafe_recommendation");
 
   // Add warnings for Unicode issues and truncation
-  const warnings = [];
+  const warnings: string[] = [];
   if (zeroWidthEvasion) warnings.push("零寬字符");
   if (homoglyphEvasion) warnings.push("可疑 Unicode");
   if (wasTruncated) warnings.push("內容截斷");
-
-  const finalSummary = warnings.length > 0
-    ? summary + ` [WARNING: ${warnings.join(', ')}]`
-    : summary;
 
   return {
     safe,
     total_findings: findings.length,
     findings,
-    summary: finalSummary,
+    summary: appendWarnings(summary, warnings),
     recommendation,
     was_truncated: wasTruncated || undefined,
+    ...(warnings.length > 0 ? { warnings } : {}),
   };
 }
 
@@ -368,17 +370,20 @@ export function scanText(text: string, config: GuardConfig, opts?: ScanOptions):
   // If encoding detection is enabled, use the enhanced scanner
   if (config.settings.encoding_detection) {
     const result = encoding.scanTextWithDecoding(text, config, opts);
+    // Decoded findings carry offsets of the decoded string; anchor them to
+    // spans of `text` so redaction and previews apply to the right bytes.
+    const findings = encoding.anchorDecodedFindings(text, result, config, opts);
 
-    // Generate proper summary based on merged results
-    const safe = result.safe;
-    const highCount = result.findings.filter((f) => f.severity === "HIGH").length;
-    const medCount = result.findings.filter((f) => f.severity === "MEDIUM").length;
-    const lowCount = result.findings.length - highCount - medCount;
+    // Generate proper summary based on the anchored results
+    const safe = findings.length === 0;
+    const highCount = findings.filter((f) => f.severity === "HIGH").length;
+    const medCount = findings.filter((f) => f.severity === "MEDIUM").length;
+    const lowCount = findings.length - highCount - medCount;
 
     const summary = safe
       ? t("scan.safe_summary")
       : t("scan.unsafe_summary", {
-          count: result.findings.length,
+          count: findings.length,
           high: highCount,
           med: medCount,
           low: lowCount,
@@ -389,7 +394,7 @@ export function scanText(text: string, config: GuardConfig, opts?: ScanOptions):
       : t("scan.unsafe_recommendation");
 
     // Add warnings for encoding detection and truncation
-    const warnings = [];
+    const warnings: string[] = [];
     if (result.was_decoded) {
       warnings.push(`編碼檢測: ${result.encoding_types_found.join(', ')}`);
     }
@@ -397,17 +402,14 @@ export function scanText(text: string, config: GuardConfig, opts?: ScanOptions):
       warnings.push("內容截斷");
     }
 
-    const finalSummary = warnings.length > 0
-      ? summary + ` [WARNING: ${warnings.join(', ')}]`
-      : summary;
-
     return {
       safe,
-      total_findings: result.total_findings,
-      findings: result.findings,
-      summary: finalSummary,
+      total_findings: findings.length,
+      findings,
+      summary: appendWarnings(summary, warnings),
       recommendation,
       was_truncated: result.original.was_truncated,
+      ...(warnings.length > 0 ? { warnings } : {}),
     };
   }
 

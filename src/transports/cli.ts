@@ -3,7 +3,7 @@ import * as path from "path";
 import chalk from "chalk";
 import type { FindingType, Finding, ScanResult } from "../types.js";
 import { loadConfig } from "../config/loader.js";
-import { scanText, redactText } from "../scanner/engine.js";
+import { scanText, redactText, appendWarnings } from "../scanner/engine.js";
 import { redactAndVerify } from "../scanner/redaction-verifier.js";
 import { sanitizeRedactResultForExport } from "../decision/redaction.js";
 import { toDecisionResult } from "../decision/model.js";
@@ -37,7 +37,7 @@ export function filterBySeverity(result: ScanResult, min: MinSeverity): ScanResu
         med: medCount,
         low: findings.length - highCount - medCount,
       });
-  return { ...result, findings, total_findings: findings.length, safe, summary };
+  return { ...result, findings, total_findings: findings.length, safe, summary: appendWarnings(summary, result.warnings) };
 }
 
 // ─── Decision-aware CLI formatting ──────────────────────────────────────────

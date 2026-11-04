@@ -124,6 +124,8 @@ The `CONFIRM` decision includes:
 - `safePreview`: a masked excerpt around the first finding
 - `redactedContent`: the full content with all sensitive spans replaced
 
+`safePreview` and `redactedContent` are left out when a sensitive span cannot be located exactly, such as an encoded run split by a zero-width character. A missing field means no safe version is available.
+
 ### JSON Output Fields
 
 When using `--format json`, the output includes these decision-oriented fields:
@@ -134,8 +136,8 @@ When using `--format json`, the output includes these decision-oriented fields:
 | `riskLevel` | `LOW`, `MEDIUM`, `HIGH`, or `CRITICAL` |
 | `recommendedAction` | `REVIEW` or `BLOCK` (CONFIRM only) |
 | `findings` | Array of sanitized findings (no internal metadata) |
-| `safePreview` | Masked excerpt (CONFIRM only) |
-| `redactedContent` | Full redacted text (CONFIRM only) |
+| `safePreview` | Masked excerpt (CONFIRM only; can be absent) |
+| `redactedContent` | Full redacted text (CONFIRM only; can be absent) |
 
 ---
 
@@ -337,7 +339,7 @@ To test the published package, use `"leakshield"` instead of the local `dist` pa
 npm run scan -- --doctor     # or: leakshield --doctor after global install
 ```
 
-The doctor verifies the install without sending anything anywhere: it checks the OpenCode host version, finds `opencode.json` (workspace then global), confirms LeakShield is registered with options that the plugin itself would accept, verifies a local `dist` entry point actually exists (a missing one makes OpenCode silently log-and-skip the plugin — sessions look normal but are unprotected), loads the guard config, and runs the synthetic-canary smoke scan locally. Exit code 0 means `PROTECTED` or `PARTIAL` (`wireProtection: false`: final outbound HTTP bodies are not inspected); a v1 host is reported `BROKEN` with a fix that says to upgrade to OpenCode v2; any other status prints the failing check with a concrete fix, including a copy-paste registration snippet when the plugin is missing.
+The doctor verifies the install without sending anything anywhere: it checks the OpenCode host version, reads the `opencode.json` or `opencode.jsonc` files OpenCode applies (`.opencode/`, the project root and one global directory), combines their `plugins` arrays the way the host does, confirms LeakShield is registered with options that the plugin itself would accept, verifies a local `dist` entry point actually exists (a missing one makes OpenCode silently log-and-skip the plugin — sessions look normal but are unprotected), loads the guard config, and runs the synthetic-canary smoke scan locally. Exit code 0 means `PROTECTED` or `PARTIAL` (`wireProtection: false`: final outbound HTTP bodies are not inspected); a v1 host is reported `BROKEN` with a fix that says to upgrade to OpenCode v2; any other status prints the failing check with a concrete fix, including a copy-paste registration snippet when the plugin is missing.
 
 Doctor is an install-level check that runs outside the host — it cannot see inside a live session. Runtime proof comes from the smoke test above or `scripts/e2e/run-boundary.mjs`.
 
@@ -394,7 +396,7 @@ Redacted output goes to **stdout**; the findings summary goes to **stderr** so t
 
 | Flag | Behaviour |
 |------|-----------|
-| `--redact` | Replace findings with `[REDACTED_TYPE]`, write to stdout |
+| `--redact` | Replace findings with `[REDACTED_TYPE]`, write to stdout; output is suppressed if findings remain after redaction |
 | `--redact --dry-run` | Preview findings only, no output; exit `1` if any found |
 | `--redact --out <path>` | Write redacted text to file instead of stdout |
 | `--redact --format json` | Return JSON with `redacted`, `findings`, and `summary` fields |
@@ -451,6 +453,12 @@ echo "password%3Dsecret123" | npm run scan -- --enable-encoding-detection --stdi
 # Normal text is unaffected
 echo "This is safe content" | npm run scan -- --enable-encoding-detection --stdin
 # → Safe, no sensitive content
+```
+
+When encoded content is found, the text and JSON summaries name the encoding types, in the language set by `LEAKSHIELD_LANG`:
+
+```
+[WARNING: Encoded content: Base64, URL]
 ```
 
 #### Workspace Path Restriction

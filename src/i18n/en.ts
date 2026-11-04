@@ -7,6 +7,10 @@ export const en = {
     "Content looks safe, but please verify there are no business-logic secrets.",
   "scan.unsafe_recommendation":
     "⛔ Please address the above sensitive items before sending to AI services. Use placeholder data or remove sensitive fields, then retry.",
+  "scan.warning_encoded": "Encoded content: {types}",
+  "scan.warning_truncated": "Content truncated",
+  "scan.warning_zero_width": "Zero-width characters",
+  "scan.warning_suspicious_unicode": "Suspicious Unicode",
 
   // engine — redact
   "redact.safe_summary": "✅ No sensitive content detected, nothing to redact.",

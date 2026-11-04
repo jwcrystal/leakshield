@@ -124,6 +124,8 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 - `safePreview`：圍繞第一個發現的遮罩摘錄
 - `redactedContent`：所有敏感片段都已取代的完整內容
 
+無法精確定位敏感片段時（例如編碼片段中夾了零寬字元），不會有 `safePreview` 和 `redactedContent`。欄位不存在代表沒有可用的安全版本。
+
 ### JSON 輸出欄位
 
 使用 `--format json` 時，輸出包含以下與決策相關的欄位：
@@ -134,8 +136,8 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 | `riskLevel` | `LOW`、`MEDIUM`、`HIGH` 或 `CRITICAL` |
 | `recommendedAction` | `REVIEW` 或 `BLOCK`（僅 CONFIRM） |
 | `findings` | 已清理的發現陣列（不含內部中繼資料） |
-| `safePreview` | 遮罩摘錄（僅 CONFIRM） |
-| `redactedContent` | 完整的脫敏文字（僅 CONFIRM） |
+| `safePreview` | 遮罩摘錄（僅 CONFIRM；可能不存在） |
+| `redactedContent` | 完整的脫敏文字（僅 CONFIRM；可能不存在） |
 
 ---
 
@@ -333,7 +335,7 @@ rm -rf "$SMOKE_DIR"
 leakshield --doctor     # 全域安裝或 npm link 後；在 repo 內可用 npm run scan -- --doctor
 ```
 
-Doctor 不會把任何內容送出去。它會檢查 OpenCode host 版本、尋找 `opencode.json`（先 workspace 再全域）、確認 LeakShield 已用 plugin 本身接受的選項註冊、確認本機 `dist` 進入點真的存在（缺少時 OpenCode 會靜默記錄並跳過 plugin：session 看起來正常但沒有保護）、載入 guard 設定，並在本機跑合成 canary 的 smoke scan。Exit code 0 代表 `PROTECTED` 或 `PARTIAL`（`wireProtection: false`：不檢查最終出站 HTTP body）；v1 host 會回報 `BROKEN`，修正方式是升級到 OpenCode v2；其他狀態會印出失敗的檢查項與具體修正方式，plugin 未註冊時還會附上可直接複製的註冊片段。
+Doctor 不會把任何內容送出去。它會檢查 OpenCode host 版本、讀取 OpenCode 會套用的 `opencode.json` 或 `opencode.jsonc`（`.opencode/`、專案根目錄和一個全域目錄）、依 host 的方式合併其中的 `plugins` 陣列、確認 LeakShield 已用 plugin 本身接受的選項註冊、確認本機 `dist` 進入點真的存在（缺少時 OpenCode 會靜默記錄並跳過 plugin：session 看起來正常但沒有保護）、載入 guard 設定，並在本機跑合成 canary 的 smoke scan。Exit code 0 代表 `PROTECTED` 或 `PARTIAL`（`wireProtection: false`：不檢查最終出站 HTTP body）；v1 host 會回報 `BROKEN`，修正方式是升級到 OpenCode v2；其他狀態會印出失敗的檢查項與具體修正方式，plugin 未註冊時還會附上可直接複製的註冊片段。
 
 Doctor 是在 host 之外執行的安裝層檢查，看不到執行中的 session。執行期的證明來自上面的 smoke test 或 `scripts/e2e/run-boundary.mjs`。
 
@@ -390,7 +392,7 @@ npm run scan -- --redact --dry-run --file .env
 
 | Flag | 行為 |
 |------|------|
-| `--redact` | 替換命中內容為 `[REDACTED_TYPE]`，寫入 stdout |
+| `--redact` | 替換命中內容為 `[REDACTED_TYPE]`，寫入 stdout；脫敏後仍有命中時不輸出 |
 | `--redact --dry-run` | 僅預覽命中位置，不輸出；有命中時 exit `1` |
 | `--redact --out <path>` | 脫敏結果寫入指定檔案，不寫到 stdout |
 | `--redact --format json` | 以 JSON 格式回傳 `redacted`、`findings`、`summary` |
@@ -449,7 +451,8 @@ echo "This is safe content" | npm run scan -- --enable-encoding-detection --stdi
 # → 安全，無敏感內容
 ```
 
-當啟用編碼檢測時，摘要會包含檢測到的編碼類型：
+偵測到編碼內容時，文字與 JSON 摘要都會列出編碼類型，語言依 `LEAKSHIELD_LANG` 而定。下面是 `LEAKSHIELD_LANG=zh-TW` 的輸出；預設為英文，會顯示 `[WARNING: Encoded content: Base64, URL]`：
+
 ```
 [WARNING: 編碼檢測: Base64, URL]
 ```

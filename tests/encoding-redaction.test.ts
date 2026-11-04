@@ -121,25 +121,25 @@ describe("filterBySeverity keeps the scan warnings", () => {
 
   it("keeps the encoding warning with --min-severity low", () => {
     const filtered = filterBySeverity(scanText(run, config), "low");
-    expect(filtered.summary).toContain("編碼檢測: Base64");
+    expect(filtered.summary).toContain("Encoded content: Base64");
     expect(filtered.summary).toContain("[WARNING:");
   });
 
   it("keeps the encoding warning when filtering to high", () => {
     const filtered = filterBySeverity(scanText(run, config), "high");
-    expect(filtered.summary).toContain("編碼檢測: Base64");
+    expect(filtered.summary).toContain("Encoded content: Base64");
   });
 
   it("keeps the truncation warning", () => {
     const small: GuardConfig = { ...config, settings: { ...config.settings, max_chars: 20 } };
     const filtered = filterBySeverity(scanText(`${KEY} ${"x".repeat(100)}`, small), "low");
-    expect(filtered.summary).toContain("內容截斷");
+    expect(filtered.summary).toContain("Content truncated");
   });
 
   it("keeps the truncation warning with encoding detection off", () => {
     const small: GuardConfig = { ...config, settings: { ...config.settings, max_chars: 20, encoding_detection: false } };
     const filtered = filterBySeverity(scanText(`${KEY} ${"x".repeat(100)}`, small), "low");
-    expect(filtered.summary).toContain("內容截斷");
+    expect(filtered.summary).toContain("Content truncated");
   });
 
   it("adds no suffix when there is no warning", () => {

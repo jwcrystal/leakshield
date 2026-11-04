@@ -453,6 +453,12 @@ echo "This is safe content" | npm run scan -- --enable-encoding-detection --stdi
 # → Safe, no sensitive content
 ```
 
+When encoded content is found, the text and JSON summaries name the encoding types. The label is currently in Chinese in every `LEAKSHIELD_LANG`:
+
+```
+[WARNING: 編碼檢測: Base64, URL]
+```
+
 #### Workspace Path Restriction
 
 By default, `--file` and `--dir` only accept paths **inside the current working directory**. Attempts to scan outside (e.g. `../shared.env` or `/etc/passwd`) will be rejected with an error.

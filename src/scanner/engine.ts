@@ -351,9 +351,9 @@ function scanTextInternal(text: string, config: GuardConfig, opts?: ScanOptions)
 
   // Add warnings for Unicode issues and truncation
   const warnings: string[] = [];
-  if (zeroWidthEvasion) warnings.push("零寬字符");
-  if (homoglyphEvasion) warnings.push("可疑 Unicode");
-  if (wasTruncated) warnings.push("內容截斷");
+  if (zeroWidthEvasion) warnings.push(t("scan.warning_zero_width"));
+  if (homoglyphEvasion) warnings.push(t("scan.warning_suspicious_unicode"));
+  if (wasTruncated) warnings.push(t("scan.warning_truncated"));
 
   return {
     safe,
@@ -396,10 +396,10 @@ export function scanText(text: string, config: GuardConfig, opts?: ScanOptions):
     // Add warnings for encoding detection and truncation
     const warnings: string[] = [];
     if (result.was_decoded) {
-      warnings.push(`編碼檢測: ${result.encoding_types_found.join(', ')}`);
+      warnings.push(t("scan.warning_encoded", { types: result.encoding_types_found.join(", ") }));
     }
     if (result.original.was_truncated) {
-      warnings.push("內容截斷");
+      warnings.push(t("scan.warning_truncated"));
     }
 
     return {

@@ -6,6 +6,10 @@ export const zhTW = {
   "scan.safe_recommendation": "內容看起來安全，但仍請確認沒有業務邏輯上的機密資訊。",
   "scan.unsafe_recommendation":
     "⛔ 建議先處理上述敏感項目後再傳送給 AI 服務。請用假資料、佔位符或移除敏感欄位後再重試。",
+  "scan.warning_encoded": "編碼檢測: {types}",
+  "scan.warning_truncated": "內容截斷",
+  "scan.warning_zero_width": "零寬字符",
+  "scan.warning_suspicious_unicode": "可疑 Unicode",
 
   // engine — redact
   "redact.safe_summary": "✅ 未偵測到敏感內容，無需脫敏。",

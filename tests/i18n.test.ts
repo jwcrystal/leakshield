@@ -9,6 +9,41 @@ async function loadT(lang: string) {
   return mod.t;
 }
 
+async function scanSummary(lang: string, text: string, settings: Record<string, unknown>) {
+  vi.resetModules();
+  vi.stubEnv("LEAKSHIELD_LANG", lang);
+  const { GuardConfigSchema } = await import("../src/config/loader.js");
+  const { scanText } = await import("../src/scanner/engine.js");
+  return scanText(text, GuardConfigSchema.parse({ settings })).summary;
+}
+
+// ─── Scan warning labels ──────────────────────────────────────────────────────
+
+describe("i18n — scan warning labels", () => {
+  beforeEach(() => vi.unstubAllEnvs());
+
+  const KEY = "sk-proj-test1234567890abcdef";
+  const encoded = Buffer.from(KEY).toString("base64");
+  const zeroWidth = KEY.replace("test", "te​st");
+  const lookAlike = "pаssword=supersecret123";
+  const long = `${KEY} ${"x".repeat(100)}`;
+
+  it.each([
+    ["en", encoded, { encoding_detection: true }, "[WARNING: Encoded content: Base64]"],
+    ["zh-TW", encoded, { encoding_detection: true }, "[WARNING: 編碼檢測: Base64]"],
+    ["en", long, { encoding_detection: true, max_chars: 40 }, "[WARNING: Content truncated]"],
+    ["zh-TW", long, { encoding_detection: true, max_chars: 40 }, "[WARNING: 內容截斷]"],
+    ["en", long, { max_chars: 40 }, "[WARNING: Content truncated]"],
+    ["zh-TW", long, { max_chars: 40 }, "[WARNING: 內容截斷]"],
+    ["en", zeroWidth, {}, "[WARNING: Zero-width characters]"],
+    ["zh-TW", zeroWidth, {}, "[WARNING: 零寬字符]"],
+    ["en", lookAlike, {}, "[WARNING: Suspicious Unicode]"],
+    ["zh-TW", lookAlike, {}, "[WARNING: 可疑 Unicode]"],
+  ])("uses the %s label for %s", async (lang, text, settings, expected) => {
+    expect(await scanSummary(lang, text, settings)).toContain(expected);
+  });
+});
+
 // ─── English (default) ────────────────────────────────────────────────────────
 
 describe("i18n — English (default)", () => {

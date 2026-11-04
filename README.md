@@ -453,10 +453,10 @@ echo "This is safe content" | npm run scan -- --enable-encoding-detection --stdi
 # → Safe, no sensitive content
 ```
 
-When encoded content is found, the text and JSON summaries name the encoding types. The label is currently in Chinese in every `LEAKSHIELD_LANG`:
+When encoded content is found, the text and JSON summaries name the encoding types, in the language set by `LEAKSHIELD_LANG`:
 
 ```
-[WARNING: 編碼檢測: Base64, URL]
+[WARNING: Encoded content: Base64, URL]
 ```
 
 #### Workspace Path Restriction

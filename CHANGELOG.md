@@ -2,9 +2,9 @@
 
 All notable changes are listed here.
 
-## Unreleased
+## 0.2.0 — 2026-11-04
 
-**Breaking:** OpenCode v1 is no longer supported. LeakShield supports OpenCode v2 only. Run `leakshield --doctor` after upgrading.
+**Breaking:** OpenCode v1 is no longer supported. LeakShield supports OpenCode v2 only. On a v1 host this version aborts every model request, so upgrade to OpenCode v2 before upgrading LeakShield. Staying on `leakshield@0.1.3` keeps a v1 host working, without the security fixes below. Two more changes can affect an existing setup: a config over the new list caps fails the load, and the warning labels in the default English `summary` are no longer in Chinese. Run `leakshield --doctor` after upgrading.
 
 ### Security
 
@@ -20,6 +20,7 @@ All notable changes are listed here.
 
 - The default `mode` is always `transparent`; there is no longer a per-host default. `block` stays available with `"mode": "block"`.
 - Config and option validation errors are worded by zod 4 and no longer echo rejected enum values.
+- Large strings are faster to process. Transparent mode searches for detected values in one pass instead of once per value, and the scanner builds one line index per scanned text. Results and refusals are unchanged.
 
 ### Fixed
 
@@ -28,6 +29,7 @@ All notable changes are listed here.
 - A transparent-mode request refused because a string, before or after masking, exceeded `settings.max_chars` now says so. The refusal carried only `reason=truncated_content`; it now names the configured bound and asks to raise it or split the content. Nothing is sent unscanned either way, and the limit's documentation no longer says "truncate", which is what the standalone scanner does, not transparent mode. ([#47](https://github.com/jwcrystal/leakshield/issues/47))
 - Encoded content that decodes to a finding is masked with an `ENCODED` token and restored exactly, instead of refusing the whole transparent-mode request, when the decoder can report the run's exact source span: a percent-encoded email, an encoded email in a URL query string, a `+tag` local part, and a key's whole Base64 or raw hex run. An encoded run hidden by zero-width or look-alike characters, one that crosses an existing token, a structural identifier that carries a secret, and a run whose span cannot be attributed still refuse. ([#48](https://github.com/jwcrystal/leakshield/issues/48))
 - With `encoding_detection` on, a Base64, hex or percent-encoded finding is now masked over the whole encoded run in `redactedContent` and `safePreview`. It was masked at offsets of the decoded text, so the tail of the run survived (`c2stcHJvai10ZXN0MTIzNDU2Nzg5MGFiY2RlZg==` became `[REDACTED_API_KEY]MGFiY2RlZg==`), a long prefix was overwritten while the whole run survived, and an encoded key whose decoded offsets equalled a direct finding's was not reported at all. A run that cannot be attributed to a source span (a zero-width or look-alike character inside it) gives no redacted content or preview, and `--redact` still suppresses its output.
+- `leakshield --doctor` still identifies LeakShield in a `file://` URL it cannot parse or decode, such as one with a bad percent escape, by reading its path segments, so the entry is reported as unloadable instead of being skipped. This is a heuristic, since such a reference cannot be resolved. ([#65](https://github.com/jwcrystal/leakshield/issues/65))
 - The `[WARNING: ...]` suffix (encoding, truncation, zero-width, suspicious Unicode) is kept in the CLI text and JSON summary. The severity filter rebuilt the summary on every scan and dropped it.
 - The labels in that suffix follow `LEAKSHIELD_LANG`. They were always in Chinese, so the default English summary now reads, for example, `[WARNING: Encoded content: Base64]`. A script that matched the old text in `summary` needs updating.
 - `leakshield --doctor` reads every config file OpenCode reads — `.opencode/`, the project file, and one global root — and applies their `plugins` arrays the way the host does: entries accumulate from lowest to highest precedence instead of replacing one another, `-leakshield`, `-prefix.*` and `-*` remove an entry, and `*` restores the entries seen so far. Removals match the plugin id, so `-leakshield` disables a dist-path entry too, a relative plugin path resolves from the config file that declared it (`file://` URLs are absolute and decoded, and one this platform cannot turn into a path is reported instead of crashing the doctor), and a configured path that points at a single file is reported as skipped rather than accepted. A project `opencode.json` that set only `$schema` used to hide a global registration and report `NOT_REGISTERED` with exit 1; it is now found, and the check names the file that supplied the entry. A config that disables the plugin still fails, but as disabled — naming the entry and the file rather than claiming the plugin is absent. When several entries reference LeakShield, every one is validated — its guard config must load, its scanner must still flag the canary, and `attachments: "allow"` counts — and the weakest decides the verdict, so a hook-only entry is not hidden behind a stronger one. ([#65](https://github.com/jwcrystal/leakshield/issues/65), [#67](https://github.com/jwcrystal/leakshield/issues/67))

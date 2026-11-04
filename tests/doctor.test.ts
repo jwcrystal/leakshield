@@ -547,14 +547,73 @@ describe("runDoctor", () => {
   });
 
   it("reports a LeakShield entry with an invalid file:// URL as unloadable (#65)", async () => {
+    // A malformed escape is not a path on any platform, unlike a remote host (a
+    // valid UNC URL on Windows).
     const { deps } = makeFixture({
-      config: () => ({ plugins: ["file://remote-host/opt/leakshield/dist"] }),
+      config: () => ({ plugins: ["file:///bad%/leakshield/dist"] }),
     });
     const report = await runDoctor(deps);
     expect(report.status).toBe("BROKEN");
     const dist = report.checks.find((c) => c.id === "dist");
     expect(dist?.state).toBe("fail");
     expect(dist?.detail).toContain("not a file URL");
+  });
+
+  it("keeps a valid registration from hiding an invalid LeakShield URL (#65)", async () => {
+    const { deps } = makeFixture({
+      config: () => ({ plugins: ["leakshield", "file:///bad%/leakshield/dist"] }),
+    });
+    // Before the tolerant decode this returned PROTECTED: the unloadable entry
+    // was not recognised as LeakShield, so it escaped both checks.
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("BROKEN");
+    const dist = report.checks.find((c) => c.id === "dist");
+    expect(dist?.state).toBe("fail");
+    expect(dist?.detail).toContain("not a file URL");
+  });
+
+  it("keeps the LeakShield id when the URL itself is unparsable (#65)", async () => {
+    // `new URL` throws on the host, so the id comes from the raw text.
+    const { deps } = makeFixture({
+      config: () => ({ plugins: ["leakshield", "file://[bad]/leakshield/dist"] }),
+    });
+    expect((await runDoctor(deps)).status).toBe("BROKEN");
+  });
+
+  it("recognises LeakShield across dot segments in an unloadable URL (#65)", async () => {
+    const { deps } = makeFixture({
+      config: () => ({ plugins: ["leakshield", "file://[bad]/leakshield/./dist"] }),
+    });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("BROKEN");
+    const dist = report.checks.find((c) => c.id === "dist");
+    expect(dist?.state).toBe("fail");
+    expect(dist?.detail).toContain("file://[bad]/leakshield/./dist");
+  });
+
+  it("strips literal control characters before identifying an unloadable URL (#65)", async () => {
+    // URL parsing removes tab/CR/LF, so the path reads as /leakshield/dist.
+    const { deps } = makeFixture({
+      config: () => ({ plugins: ["leakshield", "file:///bad%/leakshie\tld/dist"] }),
+    });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("BROKEN");
+    expect(report.checks.find((c) => c.id === "dist")?.state).toBe("fail");
+  });
+
+  it("matches a case-variant LeakShield path in an unloadable URL (#65)", async () => {
+    // On a case-insensitive filesystem this is the same directory.
+    const { deps } = makeFixture({
+      config: () => ({ plugins: ["leakshield", "file://[bad]/Users/x/LeakShield/dist"] }),
+    });
+    expect((await runDoctor(deps)).status).toBe("BROKEN");
+  });
+
+  it("splits encoded separators even next to a bad escape (#65)", async () => {
+    const { deps } = makeFixture({
+      config: () => ({ plugins: ["leakshield", "file:///Users/x/leakshield%2Fdist%ZZ"] }),
+    });
+    expect((await runDoctor(deps)).status).toBe("BROKEN");
   });
 
   it("resolves a relative plugin path from the config file that declared it (#65)", async () => {
@@ -653,10 +712,13 @@ describe("runDoctor", () => {
   });
 
   it("reports allow when any transparent entry allows attachments (#67)", async () => {
-    const { deps, tmp } = makeFixture({ config: () => ({ plugins: ["leakshield"] }) });
-    writeGlobalConfig(tmp, {
-      plugins: [{ package: "leakshield", options: { mode: "transparent", attachments: "allow" } }],
+    const { deps, tmp } = makeFixture({
+      config: () => ({
+        plugins: [{ package: "leakshield", options: { mode: "transparent", attachments: "allow" } }],
+      }),
     });
+    // The stricter entry comes first, so it wins the tie without the aggregate.
+    writeGlobalConfig(tmp, { plugins: ["leakshield"] });
     const report = await runDoctor(deps);
     expect(report.checks.find((c) => c.id === "coverage")?.detail).toContain("ALLOW");
   });

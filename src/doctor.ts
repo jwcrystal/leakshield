@@ -223,18 +223,43 @@ function isLeakshieldPath(resolved: string): boolean {
 }
 
 /**
- * Best-effort id for a `file://` URL that has no path on this platform, read
- * from its URL path segments, so an unloadable LeakShield entry is reported as
- * LeakShield's rather than as some other plugin.
+ * Best-effort id for a `file://` URL that has no path on this platform. A
+ * `leakshield` path segment anywhere means the entry is LeakShield's and must be
+ * reported as unloadable rather than skipped — a heuristic, since the reference
+ * cannot be resolved. Literal tab/CR/LF are removed first, as URL parsing does,
+ * and encoded separators are split so one broken escape cannot hide the rest of
+ * the path; the parsed pathname is preferred because it also normalises dot
+ * segments.
  */
 function invalidFileUrlId(ref: string): string {
-  let parts: string[];
+  const cleaned = ref.replace(/[\t\n\r]/g, "");
+  let pathname: string | null = null;
   try {
-    parts = new URL(ref).pathname.split("/").filter(Boolean).map((part) => decodeURIComponent(part));
+    pathname = new URL(cleaned).pathname;
   } catch {
-    return ref;
+    pathname = null;
   }
-  if (isLeakshieldParts(parts)) return "leakshield";
+  const text = (pathname ?? cleaned.replace(/^file:\/\//, "").split(/[?#]/)[0] ?? "")
+    // An encoded separator cannot appear in a loadable path, which is why this
+    // reference is here; splitting on it keeps the segments identifiable.
+    .replace(/%2f|%5c/gi, "/");
+  const parts = text
+    .split("/")
+    .filter(Boolean)
+    .map((part) => {
+      try {
+        return decodeURIComponent(part);
+      } catch {
+        return part;
+      }
+    });
+  // Case-insensitive here only: this runs for references that cannot become a
+  // path, and a case-insensitive filesystem makes `/LeakShield/dist` the same
+  // directory. Identification of a usable path stays exact.
+  const isLeakshieldSegment = (part: string): boolean =>
+    part.toLowerCase() === "leakshield" ||
+    part.split(/[\\/]/).some((segment) => segment.toLowerCase() === "leakshield");
+  if (parts.some(isLeakshieldSegment)) return "leakshield";
   return parts[parts.length - 1] ?? ref;
 }
 
@@ -757,7 +782,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     detail: options.configPath
       ? `Loaded ${options.configPath}.`
       : validated.length > 1
-        ? `Default guard config resolved for ${validated.length} entries.`
+        ? `Guard configs resolved for ${validated.length} entries.`
         : "Default guard config resolved.",
   });
 

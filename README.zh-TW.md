@@ -449,7 +449,8 @@ echo "This is safe content" | npm run scan -- --enable-encoding-detection --stdi
 # → 安全，無敏感內容
 ```
 
-當啟用編碼檢測時，摘要會包含檢測到的編碼類型：
+偵測到編碼內容時，文字與 JSON 摘要都會列出編碼類型，語言依 `LEAKSHIELD_LANG` 而定。下面是 `LEAKSHIELD_LANG=zh-TW` 的輸出；預設為英文，會顯示 `[WARNING: Encoded content: Base64, URL]`：
+
 ```
 [WARNING: 編碼檢測: Base64, URL]
 ```

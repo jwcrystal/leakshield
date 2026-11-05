@@ -115,7 +115,7 @@ const TOOL_CODE_FETCH_ERROR =
 const TOOL_PLACEHOLDER_NEAR_MISS_ERROR =
   "LeakShield blocked this tool call; the tool did not run.\n- A value looks like a placeholder from this conversation, but its format was changed.\n- Fix: copy it exactly as it appears, including its brackets; do not replace it with other text.\n- Do not ask for or write the real value. If refused again, stop and ask the user.";
 const TOOL_INPUT_SHAPE_ERROR =
-  "LeakShield blocked this tool call because its argument structure cannot be safely restored. Use plain JSON values and try again.";
+  "LeakShield blocked this tool call because the structure of one argument could not be restored. This is not about what the value looks like or contains. Use plain JSON values (strings, numbers, booleans, arrays and plain objects) and try again.";
 const STRUCTURAL_SENSITIVE_ERROR =
   "LeakShield blocked this request because a structural identifier (message or tool id, name, role, or part type) scans as sensitive and cannot be masked. Change it or adjust the matching rule, then try again.";
 
@@ -230,6 +230,38 @@ const INLINE_SCRIPT_FLAGS = new Map<string, Set<string>>([
 const SCRIPT_ARGUMENT_INTERPRETERS = new Set(["awk", "sed", "jq"]);
 const SHELL_INTERPRETERS = new Set(["sh", "bash", "dash", "zsh", "ksh", "ash", "csh", "tcsh", "fish"]);
 
+/**
+ * `rtk` is a command-output wrapper: `rtk <command> <args>` runs the command
+ * and condenses its output, so the command actually executed is the word
+ * after it. Without this, `rtk sh -c T` would be judged as plain arguments to
+ * `rtk` and restore a token into a second shell parse. These subcommands run
+ * another command themselves (`rtk err sh -c T`, `rtk proxy sh -c T`), so the
+ * word after them cannot be judged as the executed command and the form is
+ * refused. The list comes from `rtk --help` for rtk 1.1.0; a new rtk release
+ * may add runners. `rtk` counts however it's spelled (a path, quotes, any case),
+ * as the other command checks do.
+ */
+const RTK_COMMAND_RUNNERS = new Set(["err", "test", "summary", "run", "bypass", "proxy", "pipe"]);
+
+/**
+ * Index of the word that names the command actually executed: the first
+ * non-assignment word, or the word after a leading `rtk`. Returns -1 when
+ * there is no such word or the form must be refused (`rtk` alone, an option
+ * after `rtk`, `rtk` wrapping `rtk`, or an rtk subcommand that runs another
+ * command).
+ */
+function resolveExecutedCommandIndex(words: readonly LiteralShellWord[]): number {
+  const commandIndex = words.findIndex((word) => word.quote !== "none" || !ASSIGNMENT_WORD.test(word.value));
+  if (commandIndex === -1) return -1;
+  const command = words[commandIndex] as LiteralShellWord;
+  if (command.redirect || command.value.split("/").at(-1)?.toLowerCase() !== "rtk") return commandIndex;
+  const next = words[commandIndex + 1];
+  if (next === undefined || next.redirect || next.value.startsWith("-")) return -1;
+  if (next.value.split("/").at(-1)?.toLowerCase() === "rtk") return -1;
+  if (RTK_COMMAND_RUNNERS.has(next.value.toLowerCase())) return -1;
+  return commandIndex + 1;
+}
+
 /** Returns only ordinary arguments, never command/assignment/redirect words. */
 function parseSupportedShellArguments(text: string): LiteralShellWord[] | null {
   const parsed = parseLiteralShellWords(text);
@@ -243,7 +275,7 @@ function parseSupportedShellArguments(text: string): LiteralShellWord[] | null {
     ) return null;
   }
   const words = redirectIndex === -1 ? parsed : parsed.slice(0, redirectIndex);
-  const commandIndex = words.findIndex((word) => word.quote !== "none" || !ASSIGNMENT_WORD.test(word.value));
+  const commandIndex = resolveExecutedCommandIndex(words);
   if (commandIndex === -1) return null;
   const commandName = words[commandIndex].value.split("/").at(-1)?.toLowerCase() ?? "";
   if (SHELL_COMMAND_WRAPPERS.has(commandName) || SCRIPT_ARGUMENT_INTERPRETERS.has(commandName)) return null;
@@ -364,6 +396,9 @@ function isShellSafeOriginal(text: string, quote: ShellQuote): boolean {
  * their arguments again, so embedding is decided by the command that actually
  * executes: the first word, unquoted, exactly one of these names. Paths,
  * quoted names, assignments and wrappers (`env`, `sudo`) do not qualify.
+ * `rtk curl ...` does not qualify either: rtk records command lines in its
+ * local history database in plaintext, so a restored secret would persist
+ * there. Under `rtk` only whole-word placeholders restore.
  */
 const EMBEDDED_PLACEHOLDER_COMMANDS = new Set(["curl", "http"]);
 function commandAllowsEmbeddedTokens(text: string): boolean {
@@ -390,7 +425,7 @@ function commandAllowsEmbeddedTokens(text: string): boolean {
 function isWgetExecuteCommand(text: string): boolean {
   const words = parseLiteralShellWords(text);
   if (words === null) return false;
-  const commandIndex = words.findIndex((word) => word.quote !== "none" || !ASSIGNMENT_WORD.test(word.value));
+  const commandIndex = resolveExecutedCommandIndex(words);
   if (commandIndex === -1) return false;
   if (words[commandIndex].value.split("/").at(-1)?.toLowerCase() !== "wget") return false;
   return words.slice(commandIndex + 1).some((word) => {
@@ -1637,12 +1672,18 @@ export function createTransparentSessionGuard(
     throw new Error(toolRestoreError(restored.reason));
   };
 
-  type ToolAssignment = { container: RecordLike | unknown[]; key: string | number; value: string };
+  type ToolAssignment = { container: RecordLike | unknown[]; key: string | number; value: unknown };
 
   /**
    * Planning pass: computes every replacement WITHOUT mutating, and rejects
-   * frozen/unwritable containers or token-bearing keys. Nothing is written
-   * until the whole plan is known to be applicable.
+   * proxies, shared/cyclic references, symbol keys, accessors, odd prototypes,
+   * non-index array keys and token-bearing keys anywhere in the tree.
+   *
+   * A writable container gets its replacements pushed onto `out`. A frozen
+   * container is never written: when its subtree needs a change it is rebuilt
+   * as a new plain container and RETURNED, so the caller (the nearest writable
+   * ancestor, or an enclosing frozen copy) takes it in place of the original.
+   * It returns `undefined` when the value needs no replacement.
    */
   const planToolInput = (
     value: unknown,
@@ -1652,47 +1693,76 @@ export function createTransparentSessionGuard(
     out: ToolAssignment[],
     allowDegraded: boolean,
     degraded: { count: number },
-  ): void => {
-    if (value === null || typeof value !== "object") return;
-    if (types.isProxy(value) || seen.has(value) || Object.isFrozen(value)) {
-      throw new Error(TOOL_INPUT_SHAPE_ERROR);
-    }
+  ): unknown => {
+    if (value === null || typeof value !== "object") return undefined;
+    if (types.isProxy(value) || seen.has(value)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
     seen.add(value);
+    const frozen = Object.isFrozen(value);
     if (Object.getOwnPropertySymbols(value).length > 0) throw new Error(TOOL_INPUT_SHAPE_ERROR);
-    if (Array.isArray(value)) {
-      for (const key of Object.keys(value)) {
-        if (!/^(0|[1-9]\d*)$/.test(key)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
-      }
-      for (let index = 0; index < value.length; index++) {
-        const descriptor = Object.getOwnPropertyDescriptor(value, index);
-        if (descriptor === undefined) continue;
-        if (!("value" in descriptor)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
-        const item = descriptor.value;
-        if (typeof item === "string") {
-          const next = restoreLeaf(sessionID, item, policy, allowDegraded, degraded);
-          if (next !== item) out.push({ container: value, key: index, value: next });
-        } else {
-          planToolInput(item, sessionID, policy, seen, out, allowDegraded, degraded);
-        }
-      }
-      return;
-    }
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) throw new Error(TOOL_INPUT_SHAPE_ERROR);
-    const record = value as RecordLike;
-    for (const key of Object.keys(record)) {
-      if (containsTokenPrefix(key)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
-      const descriptor = Object.getOwnPropertyDescriptor(record, key);
-      if (descriptor === undefined || !("value" in descriptor)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
-      const item = descriptor.value;
-      const itemPolicy = keyPolicy(key, policy);
+    const isArray = Array.isArray(value);
+    const changes: { key: string | number; next: unknown }[] = [];
+    const plan = (item: unknown, itemPolicy: ToolLeafPolicy, key: string | number): void => {
       if (typeof item === "string") {
         const next = restoreLeaf(sessionID, item, itemPolicy, allowDegraded, degraded);
-        if (next !== item) out.push({ container: record, key, value: next });
+        if (next !== item) changes.push({ key, next });
       } else {
-        planToolInput(item, sessionID, itemPolicy, seen, out, allowDegraded, degraded);
+        const next = planToolInput(item, sessionID, itemPolicy, seen, out, allowDegraded, degraded);
+        if (next !== undefined) changes.push({ key, next });
+      }
+    };
+    if (isArray) {
+      const array = value as unknown[];
+      for (const key of Object.keys(array)) {
+        if (!/^(0|[1-9]\d*)$/.test(key)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
+      }
+      for (let index = 0; index < array.length; index++) {
+        const descriptor = Object.getOwnPropertyDescriptor(array, index);
+        if (descriptor === undefined) continue;
+        if (!("value" in descriptor) || !descriptor.enumerable) throw new Error(TOOL_INPUT_SHAPE_ERROR);
+        plan(descriptor.value, policy, index);
+      }
+    } else {
+      const prototype = Object.getPrototypeOf(value);
+      if (prototype !== Object.prototype && prototype !== null) throw new Error(TOOL_INPUT_SHAPE_ERROR);
+      const record = value as RecordLike;
+      // A copy keeps enumerable keys only, so a hidden property would vanish from it.
+      if (Object.getOwnPropertyNames(record).length !== Object.keys(record).length) throw new Error(TOOL_INPUT_SHAPE_ERROR);
+      for (const key of Object.keys(record)) {
+        if (containsTokenPrefix(key)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
+        const descriptor = Object.getOwnPropertyDescriptor(record, key);
+        if (descriptor === undefined || !("value" in descriptor)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
+        plan(descriptor.value, keyPolicy(key, policy), key);
       }
     }
+    if (changes.length === 0) return undefined;
+    if (!frozen) {
+      for (const change of changes) {
+        out.push({ container: value as RecordLike | unknown[], key: change.key, value: change.next });
+      }
+      return undefined;
+    }
+    // Frozen: copy only this container, keeping key order and array positions.
+    const replaced = new Map<string | number, unknown>(changes.map((change) => [change.key, change.next]));
+    if (isArray) {
+      const source = value as unknown[];
+      const copy = new Array<unknown>(source.length);
+      for (const key of Object.keys(source)) {
+        const index = Number(key);
+        copy[index] = replaced.has(index) ? replaced.get(index) : source[index];
+      }
+      return copy;
+    }
+    const source = value as RecordLike;
+    const copy = Object.create(Object.getPrototypeOf(source)) as RecordLike;
+    for (const key of Object.keys(source)) {
+      Object.defineProperty(copy, key, {
+        value: replaced.has(key) ? replaced.get(key) : source[key],
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
+    }
+    return copy;
   };
 
   const assertToolPlanWritable = (plan: readonly ToolAssignment[]): void => {
@@ -1714,9 +1784,15 @@ export function createTransparentSessionGuard(
     }
   };
 
+  /** Classifies without running a getter or proxy trap: only an own string data property counts. */
+  const isCodeModeCall = (event: RecordLike): boolean => {
+    if (event.tool !== CODE_MODE_TOOL || !isRecordLike(event.input) || types.isProxy(event.input)) return false;
+    const descriptor = Object.getOwnPropertyDescriptor(event.input, "code");
+    return descriptor !== undefined && "value" in descriptor && typeof descriptor.value === "string";
+  };
+
   const onToolBefore = (event: RecordLike): void => {
-    const codeMode =
-      event.tool === CODE_MODE_TOOL && isRecordLike(event.input) && typeof (event.input as RecordLike).code === "string";
+    const codeMode = isCodeModeCall(event);
     // Placeholders whose format the model changed would reach the tool as junk
     // with no error; refuse them before anything is restored or mutated.
     if (typeof event.sessionID === "string" && event.sessionID.length > 0) {
@@ -1767,6 +1843,11 @@ export function createTransparentSessionGuard(
       }
       event.input = restoreLeaf(sessionID, event.input, rootPolicy, allowDegraded, degraded);
     } else {
+      // The root is the one container that is never copied: it is the host's
+      // own event object slot, so a frozen root stays refused.
+      if (event.input !== null && typeof event.input === "object" && (types.isProxy(event.input) || Object.isFrozen(event.input))) {
+        throw new Error(TOOL_INPUT_SHAPE_ERROR);
+      }
       const plan: ToolAssignment[] = [];
       planToolInput(event.input, sessionID, rootPolicy, new WeakSet(), plan, allowDegraded, degraded);
       assertToolPlanWritable(plan);

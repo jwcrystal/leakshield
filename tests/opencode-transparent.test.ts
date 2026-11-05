@@ -1277,6 +1277,33 @@ describe("transparent tool execution gate", () => {
         await expect(run(hook, "execute", { code: "fetch(1)" }, undefined)).resolves.toBeUndefined();
       });
 
+      it("refuses a root proxy without running its traps", async () => {
+        const { hook } = await arm();
+        const T = await mintToken(hook, KEY);
+        let called = 0;
+        const count = () => {
+          called += 1;
+          return false;
+        };
+        const proxied = new Proxy({ command: `echo ${T}` }, { isExtensible: count, ownKeys() { called += 1; return ["command"]; } });
+        await expect(run(hook, "shell", proxied)).rejects.toThrow("structure");
+        expect(called).toBe(0);
+      });
+
+      it("refuses non-enumerable properties rather than dropping them from a copy", async () => {
+        const { hook } = await arm();
+        const T = await mintToken(hook, KEY);
+        const hiddenIndex: unknown[] = [T, "b"];
+        Object.defineProperty(hiddenIndex, 1, { value: T, enumerable: false });
+        const hiddenKey = { a: T };
+        Object.defineProperty(hiddenKey, "hidden", { value: T, enumerable: false });
+        for (const nested of [Object.freeze(hiddenIndex), Object.freeze(hiddenKey)]) {
+          const input = { parameters: nested };
+          await expect(run(hook, "write", input)).rejects.toThrow("structure");
+          expect(input.parameters).toBe(nested);
+        }
+      });
+
       it("never runs a getter or proxy trap on an execute call's code", async () => {
         const { hook } = await arm();
         const T = await mintToken(hook, KEY);
@@ -1374,7 +1401,7 @@ describe("transparent tool execution gate", () => {
       "rtk err sh -c T", "rtk err T", "rtk test T", "rtk summary T", "rtk run T", "rtk run -c T",
       "rtk bypass T", "rtk proxy sh -c T", "rtk proxy T", "rtk pipe T", "rtk --version T", "rtk T",
       "rtk wget -e T u", "rtk wget --exec a=T u", "rtk curl -H x:T u", "rtk curl -H 'x: T' u",
-      "FOO=1 rtk sh -c T", "/opt/homebrew/bin/rtk sh -c T", "./rtk sh -c T", "RTK sh -c T", "'rtk' sh -c T", "/x/rtk err sh -c T", "'rtk' 'err' T",
+      "rtk rtk sh -c T", "rtk /x/rtk sh -c T", "rtk RTK eval T", "rtk rtk wget -e T u", "FOO=1 rtk sh -c T", "/opt/homebrew/bin/rtk sh -c T", "./rtk sh -c T", "RTK sh -c T", "'rtk' sh -c T", "/x/rtk err sh -c T", "'rtk' 'err' T",
     ])("refuses a token under rtk: %s", async (template) => {
       await refused(KEY, baseConfig, template);
     });

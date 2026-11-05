@@ -247,7 +247,8 @@ const RTK_COMMAND_RUNNERS = new Set(["err", "test", "summary", "run", "bypass", 
  * Index of the word that names the command actually executed: the first
  * non-assignment word, or the word after a leading `rtk`. Returns -1 when
  * there is no such word or the form must be refused (`rtk` alone, an option
- * after `rtk`, or an rtk subcommand that runs another command).
+ * after `rtk`, `rtk` wrapping `rtk`, or an rtk subcommand that runs another
+ * command).
  */
 function resolveExecutedCommandIndex(words: readonly LiteralShellWord[]): number {
   const commandIndex = words.findIndex((word) => word.quote !== "none" || !ASSIGNMENT_WORD.test(word.value));
@@ -256,6 +257,7 @@ function resolveExecutedCommandIndex(words: readonly LiteralShellWord[]): number
   if (command.redirect || command.value.split("/").at(-1)?.toLowerCase() !== "rtk") return commandIndex;
   const next = words[commandIndex + 1];
   if (next === undefined || next.redirect || next.value.startsWith("-")) return -1;
+  if (next.value.split("/").at(-1)?.toLowerCase() === "rtk") return -1;
   if (RTK_COMMAND_RUNNERS.has(next.value.toLowerCase())) return -1;
   return commandIndex + 1;
 }
@@ -1716,13 +1718,15 @@ export function createTransparentSessionGuard(
       for (let index = 0; index < array.length; index++) {
         const descriptor = Object.getOwnPropertyDescriptor(array, index);
         if (descriptor === undefined) continue;
-        if (!("value" in descriptor)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
+        if (!("value" in descriptor) || !descriptor.enumerable) throw new Error(TOOL_INPUT_SHAPE_ERROR);
         plan(descriptor.value, policy, index);
       }
     } else {
       const prototype = Object.getPrototypeOf(value);
       if (prototype !== Object.prototype && prototype !== null) throw new Error(TOOL_INPUT_SHAPE_ERROR);
       const record = value as RecordLike;
+      // A copy keeps enumerable keys only, so a hidden property would vanish from it.
+      if (Object.getOwnPropertyNames(record).length !== Object.keys(record).length) throw new Error(TOOL_INPUT_SHAPE_ERROR);
       for (const key of Object.keys(record)) {
         if (containsTokenPrefix(key)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
         const descriptor = Object.getOwnPropertyDescriptor(record, key);
@@ -1841,7 +1845,7 @@ export function createTransparentSessionGuard(
     } else {
       // The root is the one container that is never copied: it is the host's
       // own event object slot, so a frozen root stays refused.
-      if (event.input !== null && typeof event.input === "object" && Object.isFrozen(event.input)) {
+      if (event.input !== null && typeof event.input === "object" && (types.isProxy(event.input) || Object.isFrozen(event.input))) {
         throw new Error(TOOL_INPUT_SHAPE_ERROR);
       }
       const plan: ToolAssignment[] = [];

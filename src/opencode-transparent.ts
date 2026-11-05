@@ -95,7 +95,7 @@ const TOOL_SHELL_CONTEXT_ERROR =
 const TOOL_CODE_CONTEXT_ERROR =
   "LeakShield blocked this tool call because a protected value cannot be safely inserted into code. Pass the value through a plain argument or a file instead, or ask the user.";
 const TOOL_CODE_POSITION_ERROR =
-  "LeakShield blocked this tool call: the tool did not run. The placeholder is kept and nothing was substituted. A placeholder in a code field is restored only in a plain quoted string with no interpolation, written on a single line that is outside any multi-line string and does not follow a line continuation. Rewrite it that way, for example value = '<placeholder>', then reference the variable. Do not ask for or write the real value. If it is refused again, stop retrying and ask the user.";
+  "LeakShield blocked this tool call; the tool did not run.\n- Allowed: a placeholder in a plain single-line quoted string with no interpolation, outside any multi-line string or line continuation.\n- Fix: value = '<placeholder>', then reference the variable.\n- Do not ask for or write the real value. If refused again, stop and ask the user.";
 const TOOL_INPUT_SHAPE_ERROR =
   "LeakShield blocked this tool call because its argument structure cannot be safely restored. Use plain JSON values and try again.";
 const STRUCTURAL_SENSITIVE_ERROR =

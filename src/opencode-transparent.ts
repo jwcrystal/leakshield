@@ -64,7 +64,7 @@ import {
   withOpaqueAttachments,
   type TransportMaskingService,
 } from "./opencode-transparent-http.js";
-import type { GuardConfig } from "./types.js";
+import { FINDING_TYPES, type GuardConfig } from "./types.js";
 import { createResponsesWebSocketAdapter } from "./opencode-transparent-ws.js";
 import { createAISDKTransportAdmission } from "./opencode-transparent-aisdk.js";
 import { BUILTIN_RULES } from "./rules/builtin.js";
@@ -95,7 +95,25 @@ const TOOL_SHELL_CONTEXT_ERROR =
 const TOOL_CODE_CONTEXT_ERROR =
   "LeakShield blocked this tool call because a protected value cannot be safely inserted into code. Pass the value through a plain argument or a file instead, or ask the user.";
 const TOOL_CODE_POSITION_ERROR =
-  "LeakShield blocked this tool call; the tool did not run.\n- Allowed: a placeholder in a plain single-line quoted string with no interpolation, outside any multi-line string or line continuation.\n- Fix: value = '<placeholder>', then reference the variable.\n- Do not ask for or write the real value. If refused again, stop and ask the user.";
+  "LeakShield blocked this tool call; the tool did not run.\n- Allowed: a placeholder in a plain single-line quoted string with no interpolation, outside any multi-line string or line continuation.\n- Fix: copy the placeholder exactly as it appears in this conversation, including its brackets, into such a string, assign that to a variable, and reference the variable.\n- Do not replace the placeholder with other text, and do not ask for or write the real value. If refused again, stop and ask the user.";
+/**
+ * OpenCode's built-in Code Mode tool (v2.2.5): custom tools are reachable only
+ * through it, with input `{code: string}`.
+ */
+const CODE_MODE_TOOL = "execute";
+/**
+ * Refusal for `fetch` inside Code Mode source that holds a protected value.
+ * This only avoids a misleading result: the inner fetch would send the
+ * placeholder, the remote would answer with an error, and the model would read
+ * that as a verdict on the real value. It is NOT a security boundary: it is a
+ * text match on the source, not a network control, so other spellings are not
+ * caught (and then send only the placeholder).
+ */
+const TOOL_CODE_FETCH_ERROR =
+  "LeakShield blocked this tool call; the tool did not run.\n- Reason: fetch inside execute cannot use protected values, because it would send the placeholder rather than the real value, so a failed response says nothing about the value.\n- Fix: use a tool call instead, or tell the user this cannot be done here.\n- Do not report the value as invalid, and do not ask for or write the real value.";
+/** Refusal for a value recognisably derived from this session's placeholder whose format was changed. */
+const TOOL_PLACEHOLDER_NEAR_MISS_ERROR =
+  "LeakShield blocked this tool call; the tool did not run.\n- A value looks like a placeholder from this conversation, but its format was changed.\n- Fix: copy it exactly as it appears, including its brackets; do not replace it with other text.\n- Do not ask for or write the real value. If refused again, stop and ask the user.";
 const TOOL_INPUT_SHAPE_ERROR =
   "LeakShield blocked this tool call because its argument structure cannot be safely restored. Use plain JSON values and try again.";
 const STRUCTURAL_SENSITIVE_ERROR =
@@ -337,9 +355,96 @@ function isShellSafeOriginal(text: string, quote: ShellQuote): boolean {
   if (quote === "double") return !/["`\\$!]/.test(text);
   return !SHELL_UNSAFE.test(text);
 }
+/**
+ * HTTP clients that take credentials inside an argument (`-H 'x-api-key: T'`,
+ * `-u user:T`, `--header=x:T`). `wget` is deliberately not listed: its `-e`
+ * option family keeps producing bypasses, so it follows the whole-word rule.
+ * `isShellSafeOriginal` only covers the first
+ * shell parse; commands such as `sh -c`, `python -c`, `ssh` and `eval` parse
+ * their arguments again, so embedding is decided by the command that actually
+ * executes: the first word, unquoted, exactly one of these names. Paths,
+ * quoted names, assignments and wrappers (`env`, `sudo`) do not qualify.
+ */
+const EMBEDDED_PLACEHOLDER_COMMANDS = new Set(["curl", "http"]);
+function commandAllowsEmbeddedTokens(text: string): boolean {
+  const first = parseLiteralShellWords(text)?.[0];
+  return (
+    first !== undefined &&
+    first.quote === "none" &&
+    !first.redirect &&
+    EMBEDDED_PLACEHOLDER_COMMANDS.has(first.value)
+  );
+}
+/**
+ * `wget -e CMD` / `--execute CMD` hands its value to wgetrc parsing, a second
+ * parse that `isShellSafeOriginal` does not cover (the value can set
+ * `output_document`, `post_file` and the like). This check stays although
+ * `wget` no longer holds embedded tokens: `wget -e T u` would otherwise
+ * restore a whole-word token into wgetrc parsing. The command must be
+ * `wget` however it's spelled (a path, quotes, leading assignments), resolved
+ * as in `parseSupportedShellArguments`. `curl -e` is a referer and
+ * `curl -K`/`--config` only name a file.
+ * GNU long options accept unique abbreviations (`--exec`), so any prefix of
+ * `--execute` counts; the shorter ambiguous ones make wget exit with an error.
+ */
+function isWgetExecuteCommand(text: string): boolean {
+  const words = parseLiteralShellWords(text);
+  if (words === null) return false;
+  const commandIndex = words.findIndex((word) => word.quote !== "none" || !ASSIGNMENT_WORD.test(word.value));
+  if (commandIndex === -1) return false;
+  if (words[commandIndex].value.split("/").at(-1)?.toLowerCase() !== "wget") return false;
+  return words.slice(commandIndex + 1).some((word) => {
+    if (word.redirect) return false;
+    const optionName = word.value.split("=", 1)[0] as string;
+    return /^-[A-Za-z0-9]*e/.test(word.value) || (optionName.length >= 3 && "--execute".startsWith(optionName));
+  });
+}
 /** Matches a fully formed reserved token (either version), for per-token shell safety checks. */
 const TOKEN_SCAN =
   /\[SGP1:[0-9a-f]{32}-\d{8,12}\]|\[SGP2:[A-Z][A-Z_]{0,31}-[a-z]{4}-[a-z]{4}-[a-z]{4}\]/g;
+
+/**
+ * Relaxed (brackets optional, separators up to 4 non-alphanumerics, any case)
+ * forms of the SGP2 placeholder, used only to spot a placeholder the
+ * model reformatted. Every quantifier is bounded and there is no nested
+ * unbounded group. A candidate counts only if its canonical form restores in
+ * the session, so no token enumeration is needed.
+ *
+ * SGP2 reads the letters after the `SGP2` head, tolerating separator runs of
+ * up to 4 non-alphanumerics between letters (changed separators) or none at
+ * all (removed separators), and stopping at a digit, a longer run or about 80
+ * letters. Each known category, compared without underscores, is tried as a
+ * prefix of those letters; the next 12 letters become the three segments. The
+ * text after a stripped token is often more short words, which this ignores
+ * because only exactly 12 letters follow the category.
+ */
+const NEAR_MISS_V2_HEAD = /(?<![A-Za-z0-9])SGP2/gi;
+const NEAR_MISS_V2_MAX_SEPARATOR = 4;
+const NEAR_MISS_V2_MAX_LETTERS = 80;
+const NEAR_MISS_V2_SEGMENT_LETTERS = 12;
+const NEAR_MISS_V2_CATEGORIES: ReadonlyMap<string, string> = new Map(
+  FINDING_TYPES.map((label) => [label.replaceAll("_", "").toUpperCase(), label] as const),
+);
+/** Letters following `from`, skipping short separator runs; stops at a digit or a long run. */
+function collectNearMissLetters(text: string, from: number): string {
+  let letters = "";
+  let at = from;
+  while (at < text.length && letters.length < NEAR_MISS_V2_MAX_LETTERS) {
+    const char = text[at] as string;
+    if (/[A-Za-z]/.test(char)) {
+      letters += char;
+      at += 1;
+    } else if (/[0-9]/.test(char)) {
+      break;
+    } else {
+      let run = 0;
+      while (at + run < text.length && /[^A-Za-z0-9]/.test(text[at + run] as string)) run += 1;
+      if (run > NEAR_MISS_V2_MAX_SEPARATOR) break;
+      at += run;
+    }
+  }
+  return letters;
+}
 
 /**
  * Builds the position check for the placeholders of one code/script field.
@@ -1397,6 +1502,71 @@ export function createTransparentSessionGuard(
   };
 
   /**
+   * True when `text` holds a placeholder of this session whose format was
+   * changed (brackets dropped or half-dropped, separators swapped, case
+   * lowered, separators changed or removed). Exact canonical tokens are blanked first; partially masked forms
+   * and tokens unknown to the session never qualify.
+   */
+  const textHasNearMiss = (sessionID: string, text: string): boolean => {
+    if (!/sgp2/i.test(text)) return false;
+    const rest = text.replace(TOKEN_SCAN, " ");
+    for (const head of rest.matchAll(NEAR_MISS_V2_HEAD)) {
+      const letters = collectNearMissLetters(rest, head.index + head[0].length);
+      const upper = letters.toUpperCase();
+      for (const [compact, label] of NEAR_MISS_V2_CATEGORIES) {
+        if (!upper.startsWith(compact) || letters.length - compact.length < NEAR_MISS_V2_SEGMENT_LETTERS) continue;
+        const body = letters.slice(compact.length, compact.length + NEAR_MISS_V2_SEGMENT_LETTERS).toLowerCase();
+        const canonical = `[SGP2:${label}-${body.slice(0, 4)}-${body.slice(4, 8)}-${body.slice(8, 12)}]`;
+        ensureSeeded(sessionID);
+        if (transportService.restoreText(sessionID, canonical).ok) return true;
+      }
+    }
+    return false;
+  };
+
+  /**
+   * Read-only walk over every string leaf and object key of a tool input.
+   * Never throws and never runs getters: proxies, accessors, symbols and
+   * non-plain objects are skipped silently, cycles are guarded, frozen objects
+   * are scanned. `skipCode` leaves the top-level `code` string of a Code Mode
+   * call alone.
+   */
+  const inputHasNearMiss = (sessionID: string, input: unknown, skipCode: boolean): boolean => {
+    try {
+      if (typeof input === "string") return textHasNearMiss(sessionID, input);
+      const seen = new WeakSet<object>();
+      const stack: Array<{ value: unknown; top: boolean }> = [{ value: input, top: true }];
+      while (stack.length > 0) {
+        const { value, top } = stack.pop()!;
+        if (value === null || typeof value !== "object") continue;
+        if (types.isProxy(value) || seen.has(value)) continue;
+        seen.add(value);
+        const isArray = Array.isArray(value);
+        if (!isArray) {
+          const prototype = Object.getPrototypeOf(value);
+          if (prototype !== Object.prototype && prototype !== null) continue;
+        }
+        const descriptors = Object.getOwnPropertyDescriptors(value);
+        for (const key of Object.keys(descriptors)) {
+          if (isArray && key === "length") continue;
+          if (!isArray && textHasNearMiss(sessionID, key)) return true;
+          const descriptor = descriptors[key];
+          if (!("value" in descriptor)) continue;
+          if (skipCode && top && key === "code" && typeof descriptor.value === "string") continue;
+          if (typeof descriptor.value === "string") {
+            if (textHasNearMiss(sessionID, descriptor.value)) return true;
+          } else {
+            stack.push({ value: descriptor.value, top: false });
+          }
+        }
+      }
+    } catch {
+      return false;
+    }
+    return false;
+  };
+
+  /**
    * Restores registered tokens in a tool input leaf according to its policy.
    * "shell": the token must occupy a complete argument word AND its original
    * must be safe in that word's quote context; command/assignment/redirect
@@ -1435,10 +1605,20 @@ export function createTransparentSessionGuard(
     if (policy === "shell" && containsMappedToken(sessionID, text)) {
       const argumentsOnly = parseSupportedShellArguments(text);
       if (argumentsOnly === null) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
+      const embedded = commandAllowsEmbeddedTokens(text);
+      if (isWgetExecuteCommand(text)) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
       for (const match of text.matchAll(TOKEN_SCAN)) {
         const end = match.index + match[0].length;
-        const argument = argumentsOnly.find((word) => word.value === match[0] && word.start <= match.index && word.end >= end);
+        const argument = argumentsOnly.find(
+          (word) => (embedded || word.value === match[0]) && word.start <= match.index && word.end >= end,
+        );
         if (argument === undefined) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
+        // In a word starting with `-`, only `--name=value` may hold a token. Short
+        // options cluster, with punctuation flags too (`-#`, `-:`), so restored
+        // text could become an option and its value (`-#T/tmp/x` uploads a file).
+        const valueStart = argument.start + (argument.quote === "none" ? 0 : 1);
+        const before = text.slice(valueStart, match.index);
+        if (before.startsWith("-") && !/^--[A-Za-z0-9-]+=/.test(before)) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
         const restoredToken = transportService.restoreText(sessionID, match[0]);
         if (!restoredToken.ok) throw new Error(toolRestoreError(restoredToken.reason));
         if (!isShellSafeOriginal(restoredToken.text, argument.quote)) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
@@ -1535,11 +1715,36 @@ export function createTransparentSessionGuard(
   };
 
   const onToolBefore = (event: RecordLike): void => {
+    const codeMode =
+      event.tool === CODE_MODE_TOOL && isRecordLike(event.input) && typeof (event.input as RecordLike).code === "string";
+    // Placeholders whose format the model changed would reach the tool as junk
+    // with no error; refuse them before anything is restored or mutated.
+    if (typeof event.sessionID === "string" && event.sessionID.length > 0) {
+      if (inputHasNearMiss(event.sessionID, event.input, codeMode)) {
+        throw new Error(TOOL_PLACEHOLDER_NEAR_MISS_ERROR);
+      }
+      if (codeMode) {
+        const code = (event.input as RecordLike).code as string;
+        if (/\bfetch\b/.test(code) && /sgp[12]/i.test(code)) {
+          ensureSeeded(event.sessionID);
+          if (containsMappedToken(event.sessionID, code) || textHasNearMiss(event.sessionID, code)) {
+            throw new Error(TOOL_CODE_FETCH_ERROR);
+          }
+        }
+      }
+    }
     if (!inputCarriesToken(event.input, new WeakSet())) return;
     const sessionID = requireSessionID(event);
     ensureSeeded(sessionID);
     const rawTool = typeof event.tool === "string" ? event.tool : "";
     const tool = rawTool.toLowerCase();
+    // Code Mode source is JavaScript and the host re-fires this hook for each
+    // inner tool call with evaluated arguments; that is where restoration and
+    // the shell/inert/verbatim rules apply. A placeholder in the source stays
+    // literal. Any other shape or name falls through to the logic below.
+    if (codeMode) {
+      return;
+    }
     // Field-level model: the root policy is "shell" for shell tools and
     // "verbatim" otherwise; each key may then switch the policy for its value
     // (shell/command-like keys -> "shell", code/script keys -> "inert",

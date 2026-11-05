@@ -988,6 +988,451 @@ describe("transparent tool execution gate", () => {
     ).rejects.toThrow("placeholder has no mapping in this session");
   });
 
+  describe("Code Mode execute tool", () => {
+    const UNSAFE = "abc'; touch /tmp/pwn; echo 'x";
+    const unsafeConfig: GuardConfig = { ...baseConfig, nda_keywords: [UNSAFE] };
+    const run = (hook: (name: string) => (event: unknown) => Promise<unknown> | unknown, tool: string, input: unknown) =>
+      hook("tool:execute.before")({ tool, sessionID: "session-1", input });
+
+    it("leaves execute {code} byte-identical for every source shape", async () => {
+      const { hook } = await arm(unsafeConfig);
+      const T = await mintToken(hook, KEY);
+      const U = await mintToken(hook, UNSAFE);
+      const sources = [
+        `const s = \`line1\nkey ${T}\nline3\`;`,
+        `const s = "a\nb ${T}";`,
+        T,
+        `\${${T}}`,
+        FOREIGN_TOKEN,
+        `const s = '${U}';`,
+      ];
+      for (const code of sources) {
+        const input = { code };
+        await expect(run(hook, "execute", input)).resolves.toBeUndefined();
+        expect(input.code).toBe(code);
+      }
+    });
+
+    it("restores and refuses at the inner tool calls on the same session", async () => {
+      const { hook } = await arm();
+      const T = await mintToken(hook, KEY);
+      const outer = { code: `await tools.openchamber_render({ui: "x ${T}"})` };
+      await run(hook, "execute", outer);
+      expect(outer.code).toContain(T);
+
+      const render = { ui: `Deploy\nAPI key ${T}` };
+      await run(hook, "openchamber_render", render);
+      expect(render.ui).toBe(`Deploy\nAPI key ${KEY}`);
+
+      const batch = { commands: [{ label: "a", command: `echo $(printf ${T})` }] };
+      const batchBefore = JSON.stringify(batch);
+      await expect(run(hook, "ctx_batch_execute", batch)).rejects.toThrow(TOOL_REFUSED);
+      expect(JSON.stringify(batch)).toBe(batchBefore);
+
+      const ctx = { code: `v = f"{${T}}"` };
+      await expect(run(hook, "ctx_execute", ctx)).rejects.toThrow(TOOL_REFUSED);
+      expect(ctx.code).toBe(`v = f"{${T}}"`);
+
+      await expect(run(hook, "openchamber_render", { ui: FOREIGN_TOKEN })).rejects.toThrow(
+        "placeholder has no mapping in this session",
+      );
+    });
+
+    it("falls through for any other shape or name", async () => {
+      const { hook } = await arm();
+      const T = await mintToken(hook, KEY);
+      const cmd = { command: `echo $(printf ${T})` };
+      await expect(run(hook, "execute", cmd)).rejects.toThrow(TOOL_REFUSED);
+      expect(cmd.command).toBe(`echo $(printf ${T})`);
+
+      await expect(run(hook, "Execute", { code: T })).rejects.toThrow("outside any multi-line string");
+
+      const strEvent = { tool: "execute", sessionID: "session-1", input: `x ${T}` };
+      await hook("tool:execute.before")(strEvent);
+      expect(strEvent.input).toBe(`x ${KEY}`);
+
+      const mixed = { code: 5, value: T };
+      await run(hook, "execute", mixed);
+      expect(mixed.value).toBe(KEY);
+    });
+
+    it("explains the fix without a literal placeholder example", async () => {
+      const { hook } = await arm();
+      const T = await mintToken(hook, KEY);
+      let message = "";
+      try {
+        await run(hook, "Execute", { code: T });
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toContain("including its brackets");
+      expect(message).not.toContain("<placeholder>");
+      expect(message).not.toContain("[SGP");
+    });
+  });
+
+  describe("fetch refusal and placeholder near-miss", () => {
+    type Hook = (name: string) => (event: unknown) => Promise<unknown> | unknown;
+    const run = (hook: Hook, tool: string, input: unknown, sessionID: string | undefined = "session-1") =>
+      hook("tool:execute.before")({ tool, sessionID, input });
+    const strip = (t: string): string => t.slice(1, -1);
+    const spaced = (t: string): string => strip(t).replace(/[:_-]/g, " ");
+    const refusedUnchanged = async (hook: Hook, tool: string, input: unknown, message: string) => {
+      const before = JSON.stringify(input);
+      await expect(run(hook, tool, input)).rejects.toThrow(message);
+      expect(JSON.stringify(input)).toBe(before);
+    };
+    const NEAR = "format was changed";
+    const FETCH = "fetch inside execute cannot use protected values";
+
+    it("error constants carry no placeholder example", async () => {
+      const { hook } = await arm();
+      const T = await mintToken(hook, KEY);
+      for (const [tool, input] of [
+        ["openchamber_render", { ui: strip(T) }],
+        ["execute", { code: `fetch(url, {headers: {k: ${T}}})` }],
+      ] as const) {
+        let message = "";
+        try {
+          await run(hook, tool, input);
+        } catch (error) {
+          message = (error as Error).message;
+        }
+        expect(message).toContain("the tool did not run");
+        expect(message).not.toContain("[SGP");
+        expect(message).not.toContain("<placeholder>");
+      }
+    });
+
+    describe("fetch inside execute", () => {
+      it("refuses a token plus fetch, also through a variable", async () => {
+        const { hook } = await arm();
+        const T = await mintToken(hook, KEY);
+        await refusedUnchanged(hook, "execute", { code: `await fetch("https://x.test", {headers: {k: "${T}"}})` }, FETCH);
+        await refusedUnchanged(hook, "execute", { code: `const k = "${T}";\nconst r = await fetch(u + k);` }, FETCH);
+      });
+
+      it("lets through a token without fetch, fetch without a token, a foreign token, and prefetch", async () => {
+        const { hook } = await arm();
+        const T = await mintToken(hook, KEY);
+        for (const code of [
+          `const k = "${T}"; tools.x({k})`,
+          `await fetch("https://x.test")`,
+          `fetch("https://x.test/${FOREIGN_TOKEN}")`,
+          `prefetch("${T}")`,
+        ]) {
+          const input = { code };
+          await expect(run(hook, "execute", input)).resolves.toBeUndefined();
+          expect(input.code).toBe(code);
+        }
+      });
+
+      it("refuses a stripped token plus fetch with the fetch error", async () => {
+        const { hook } = await arm();
+        const T = await mintToken(hook, KEY);
+        await refusedUnchanged(hook, "execute", { code: `fetch("x/${strip(T)}")` }, FETCH);
+      });
+    });
+
+    describe("near-miss", () => {
+      const tools = [
+        ["openchamber_render", (text: string) => ({ ui: `see ${text} now` })],
+        ["write", (text: string) => ({ filePath: "/tmp/a.txt", content: `see ${text} now` })],
+      ] as const;
+
+      for (const [tool, make] of tools) {
+        describe(tool, () => {
+          it("refuses reformatted SGP2 placeholders", async () => {
+            const { hook } = await arm();
+            const T = await mintToken(hook, KEY);
+            expect(T).toContain("[SGP2:");
+            for (const text of [
+              strip(T),
+              spaced(T),
+              T.toLowerCase(),
+              strip(T).toLowerCase(),
+              T.slice(0, -1),
+              T.slice(1),
+              strip(T).replace(/_/g, " "),
+            ]) {
+              await refusedUnchanged(hook, tool, make(text), NEAR);
+            }
+          });
+
+          it("refuses a mixed canonical token plus near-miss with nothing restored", async () => {
+            const { hook } = await arm();
+            const T = await mintToken(hook, KEY);
+            await refusedUnchanged(hook, tool, make(`${T} and ${strip(T)}`), NEAR);
+          });
+        });
+      }
+
+      it("finds a near-miss in a frozen nested object or array, a key, and a top-level string", async () => {
+        const { hook } = await arm();
+        const T = await mintToken(hook, KEY);
+        const bad = strip(T);
+        await refusedUnchanged(hook, "openchamber_render", Object.freeze({ a: Object.freeze({ b: Object.freeze([bad]) }) }), NEAR);
+        await refusedUnchanged(hook, "openchamber_render", { [bad]: "x" }, NEAR);
+        const event = { tool: "openchamber_render", sessionID: "session-1", input: `x ${bad}` };
+        await expect(hook("tool:execute.before")(event)).rejects.toThrow(NEAR);
+        expect(event.input).toBe(`x ${bad}`);
+      });
+
+      it("refuses a near-miss outside an execute call's code but not inside it", async () => {
+        const { hook } = await arm();
+        const T = await mintToken(hook, KEY);
+        const codeOnly = { code: `const k = "${strip(T)}"` };
+        await expect(run(hook, "execute", codeOnly)).resolves.toBeUndefined();
+        await refusedUnchanged(hook, "execute", { code: "1", extra: strip(T) }, NEAR);
+      });
+
+      it("finds a stripped token followed by short words (seen from a real model)", async () => {
+        const { hook } = await arm();
+        const T = await mintToken(hook, KEY);
+        const inputs: Array<[string, Record<string, unknown>]> = [
+          ["shell", { command: `curl -sS -H 'x-api-key: ${strip(T)}' http://127.0.0.1:1/v1/ping` }],
+          ["write", { path: "p", content: `${strip(T)} then this word here` }],
+          ["write", { path: "p", content: `${spaced(T)} http next` }],
+          ["write", { path: "p", content: `SGP2-ab ${strip(T)} word` }],
+        ];
+        for (const [tool, input] of inputs) await refusedUnchanged(hook, tool, input, NEAR);
+      });
+
+      describe("changed or removed separators", () => {
+        const parts = (T: string) => {
+          const m = /^\[SGP2:([A-Z_]+)-([a-z]{4})-([a-z]{4})-([a-z]{4})\]$/.exec(T);
+          if (m === null) throw new Error("unexpected token shape");
+          return { cat: m[1] as string, a: m[2] as string, b: m[3] as string, c: m[4] as string };
+        };
+        const forms = (T: string): string[] => {
+          const { cat, a, b, c } = parts(T);
+          const base = [
+            `SGP2:${cat}-${a}-${b}-${c}`,
+            `SGP2 ${cat.replaceAll("_", " ")} ${a} ${b} ${c}`,
+            `SGP2:${cat.replaceAll("_", "")}-${a}-${b}-${c}`,
+            `SGP2${cat.replaceAll("_", "")}${a}${b}${c}`,
+          ];
+          return [...base, ...base.map((f) => f.toLowerCase())];
+        };
+        for (const [tool, make] of [
+          ["shell", (text: string) => ({ command: `echo see ${text} now` })],
+          ["write", (text: string) => ({ filePath: "/tmp/a.txt", content: `see ${text} now` })],
+        ] as const) {
+          it(`refuses every changed or removed separator form on ${tool}`, async () => {
+            const { hook } = await arm();
+            const T = await mintToken(hook, KEY);
+            for (const text of forms(T)) await refusedUnchanged(hook, tool, make(text), NEAR);
+          });
+          it(`refuses a stripped token followed by short words on ${tool}`, async () => {
+            const { hook } = await arm();
+            const T = await mintToken(hook, KEY);
+            const { cat, a, b, c } = parts(T);
+            const stripped = `SGP2:${cat}-${a}-${b}-${c}`;
+            for (const text of [`${stripped}' http://x`, `${stripped} then this word`]) {
+              await refusedUnchanged(hook, tool, make(text), NEAR);
+            }
+          });
+          it(`refuses a nda keyword placeholder with changed separators on ${tool}`, async () => {
+            const { hook } = await arm({ ...baseConfig, nda_keywords: ["a b c"] });
+            const T = await mintToken(hook, "a b c");
+            expect(T).toContain("NDA_KEYWORD");
+            for (const text of forms(T)) await refusedUnchanged(hook, tool, make(text), NEAR);
+          });
+          it(`passes partial masks, foreign tokens and a bare prefix on ${tool}`, async () => {
+            const { hook } = await arm();
+            await mintToken(hook, KEY);
+            for (const text of [
+              "SGP2:API_KEY-****-efgh-ijkl",
+              "SGP2:API_KEY-ab-efgh-ijkl",
+              "SGP2 API KEY abcd efgh",
+              "SGP2:API_KEY-zzzz-zzzz-zzzz",
+              "SGP2:",
+              "SGP2",
+            ]) {
+              const input = make(text);
+              await expect(run(hook, tool, input)).resolves.toBeUndefined();
+            }
+          });
+        }
+      });
+
+      it("passes partial masks, foreign stripped tokens, a bare prefix and canonical tokens", async () => {
+        const { hook } = await arm();
+        const T = await mintToken(hook, KEY);
+        // Near-miss covers SGP2 only: nothing mints SGP1, so a changed SGP1 form passes.
+        for (const text of ["SGP2:API_KEY-••••-vxpu", strip(FOREIGN_TOKEN), spaced(FOREIGN_TOKEN), "the SGP2: format is documented", "SGP1 and SGP2"]) {
+          const input = { ui: `x ${text}` };
+          await expect(run(hook, "openchamber_render", input)).resolves.toBeUndefined();
+          expect(input.ui).toBe(`x ${text}`);
+        }
+        const ok = { ui: `key ${T}` };
+        await run(hook, "openchamber_render", ok);
+        expect(ok.ui).toBe(`key ${KEY}`);
+      });
+
+      it("keeps token-free calls without a sessionID passing", async () => {
+        const { hook } = await arm();
+        const input = { ui: "hello" };
+        await expect(run(hook, "openchamber_render", input, undefined)).resolves.toBeUndefined();
+        await expect(run(hook, "execute", { code: "fetch(1)" }, undefined)).resolves.toBeUndefined();
+      });
+
+      it("never runs a getter", async () => {
+        const { hook } = await arm();
+        let called = false;
+        const input = {
+          get ui(): string {
+            called = true;
+            return "x";
+          },
+        };
+        await run(hook, "openchamber_render", input).catch(() => undefined);
+        expect(called).toBe(false);
+      });
+    });
+  });
+
+  describe("embedded placeholders for HTTP clients", () => {
+    type Hook = (name: string) => (event: unknown) => Promise<unknown> | unknown;
+    const run = (hook: Hook, input: unknown) =>
+      hook("tool:execute.before")({ tool: "shell", sessionID: "session-1", input });
+    const SPACED = "a b c";
+    const originals = [
+      ["KEY", KEY, baseConfig],
+      ["spaced nda keyword", SPACED, { ...baseConfig, nda_keywords: [SPACED] } as GuardConfig],
+    ] as const;
+
+    const allowed = async (original: string, config: GuardConfig, template: string) => {
+      const { hook } = await arm(config);
+      const T = await mintToken(hook, original);
+      const input = { command: template.replaceAll("T", T) };
+      await expect(run(hook, input)).resolves.toBeUndefined();
+      return input.command;
+    };
+    const refused = async (original: string, config: GuardConfig, template: string) => {
+      const { hook } = await arm(config);
+      const T = await mintToken(hook, original);
+      const command = template.replaceAll("T", T);
+      const input = { command };
+      await expect(run(hook, input)).rejects.toThrow(TOOL_REFUSED);
+      expect(input.command).toBe(command);
+    };
+
+    it.skipIf(process.platform === "win32").each([
+      "curl -H 'x-api-key: T' https://x",
+      'curl -H "x-api-key: T" https://x',
+      "curl -H x-api-key:T https://x",
+      "curl -u user:T https://x",
+      "curl --header=x:T https://x",
+      "http https://x x-api-key:T",
+      "curl -u T:T https://x",
+    ])("restores an embedded token: %s", async (template) => {
+      expect(await allowed(KEY, baseConfig, template)).toBe(template.replaceAll("T", KEY));
+    });
+
+    it.skipIf(process.platform === "win32").each([
+      "curl -H 'x-api-key: T' https://x",
+      "curl -H x-api-key:T https://x",
+    ])("restores a spaced-free nda keyword the same way: %s", async (template) => {
+      const original = "abc";
+      expect(await allowed(original, { ...baseConfig, nda_keywords: [original] }, template))
+        .toBe(template.replaceAll("T", original));
+    });
+
+    // wget is not an embedded-placeholder command: it follows the whole-word rule.
+    it.skipIf(process.platform === "win32").each([
+      "wget --header=x:T https://x", "wget --header 'x: T' https://x", "wget --header='x: T' https://x",
+      "wget --exclude-domains a:T u", "wget --egd-file=a:T u", "wget -4 --header=x:T u", "wget -T u",
+    ])("refuses an embedded token for wget: %s", async (template) => {
+      await refused(KEY, baseConfig, template);
+    });
+
+    it.skipIf(process.platform === "win32")("restores a spaced original inside single quotes for curl -H", async () => {
+      const restored = await allowed(SPACED, { ...baseConfig, nda_keywords: [SPACED] }, "curl -H 'x: T' https://x");
+      expect(restored).toBe(`curl -H 'x: ${SPACED}' https://x`);
+    });
+
+    it.skipIf(process.platform === "win32")("refuses a spaced original unquoted in curl -H x:T", async () => {
+      await refused(SPACED, { ...baseConfig, nda_keywords: [SPACED] }, "curl -H x:T https://x");
+    });
+
+    it.skipIf(process.platform === "win32")("refuses an original containing a quote inside single quotes", async () => {
+      const original = "ab'cd";
+      await refused(original, { ...baseConfig, nda_keywords: [original] }, "curl -H 'x: T' https://x");
+    });
+
+    it.skipIf(process.platform === "win32")("refuses an original starting with a dash", async () => {
+      const original = "-secretvalue";
+      await refused(original, { ...baseConfig, nda_keywords: [original] }, "curl -H x:T https://x");
+    });
+
+    for (const [label, original, config] of originals) {
+      it.skipIf(process.platform === "win32").each([
+        `sh -c 'curl -H "x: T" u'`,
+        `bash -c 'echo T'`,
+        `sh -c T`,
+        `python -c 'print("T")'`,
+        `python3 -c T`,
+        `ssh host 'echo a:T'`,
+        `eval "a:T"`,
+        `env curl -H x:T u`,
+        `sudo curl -H x:T u`,
+        `FOO=1 curl -H x:T u`,
+        `/usr/bin/curl -H x:T u`,
+        `./curl -H x:T u`,
+        `'curl' -H x:T u`,
+        `curl -H x:T u; echo`,
+        `curl -H x:T u | cat`,
+        `curl -H x:T u && echo`,
+        `curl "$(echo T)"`,
+        `echo a:T`,
+        `git -c x:T`,
+        `curl u > a:T`,
+      ])(`refuses (${label}): %s`, async (template) => {
+        await refused(original, config, template);
+      });
+    }
+
+    // Documents current behaviour only; no extra rules were added for these.
+    it.skipIf(process.platform === "win32")("documents current behaviour: curl -K T", async () => {
+      expect(await allowed(KEY, baseConfig, "curl -K T")).toBe(`curl -K ${KEY}`);
+    });
+    it.skipIf(process.platform === "win32")("documents current behaviour: curl -K a:T", async () => {
+      expect(await allowed(KEY, baseConfig, "curl -K a:T")).toBe(`curl -K a:${KEY}`);
+    });
+    it.skipIf(process.platform === "win32")("documents current behaviour: curl --config=a:T", async () => {
+      expect(await allowed(KEY, baseConfig, "curl --config=a:T")).toBe(`curl --config=a:${KEY}`);
+    });
+    it.skipIf(process.platform === "win32").each([
+      "curl -#T u", "curl '-#T' u", "curl -:T u", "curl -Hx:T u", "curl -uuser:T u", "http -a:T u",
+      "curl -T u", "curl --T u", "curl -sT u", "curl --fooT u", "curl '-T' u", 'curl "--T" u',
+      "http -T u", "curl -HT u",
+    ])("refuses a token that extends an option name: %s", async (template) => {
+      await refused(KEY, baseConfig, template);
+    });
+
+    it.skipIf(process.platform === "win32").each([
+      "wget -e T u", "wget -e a=T u", "wget -e 'a = T' u", "wget -qe a=T u", "wget -ea=T u",
+      "wget --execute=a=T u", "wget --execute a=T u",
+      // However the command is spelled, it's still wget.
+      "/usr/bin/wget -e T u", "./wget -e T u", "'wget' -e T u", "FOO=1 wget -e T u", "/usr/bin/WGET --exec T u",
+      // Short flags cluster, digits included.
+      "wget -4e a=T u", "wget -6e 'a = T' u", "wget -q4e a=T u", "wget -4ea=T u",
+      // GNU long options accept unique abbreviations.
+      "wget --exe a=T u", "wget --exec a=T u", "wget --execu=a=T u", "wget --execut 'a = T' u",
+    ])("refuses wget -e/--execute, whose value is parsed again: %s", async (template) => {
+      await refused(KEY, baseConfig, template);
+    });
+
+    it.skipIf(process.platform === "win32").each([
+      "curl --header=x:T u", "curl --header=T u", "curl -H x:T u", "curl -u user:T u",
+      "curl -H T u", "curl T u", "curl -e a:T u",
+      "wget T u", "wget --header T u", "wget -4 T u", "wget --exclude-domains T u",
+    ])("still restores an option value or whole word: %s", async (template) => {
+      expect(await allowed(KEY, baseConfig, template)).toBe(template.replaceAll("T", KEY));
+    });
+  });
+
   describe("per-field restore policy", () => {
     const UNSAFE = "abc'; touch /tmp/pwn; echo 'x";
     const unsafeConfig: GuardConfig = { ...baseConfig, nda_keywords: [UNSAFE] };

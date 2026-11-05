@@ -1780,9 +1780,15 @@ export function createTransparentSessionGuard(
     }
   };
 
+  /** Classifies without running a getter or proxy trap: only an own string data property counts. */
+  const isCodeModeCall = (event: RecordLike): boolean => {
+    if (event.tool !== CODE_MODE_TOOL || !isRecordLike(event.input) || types.isProxy(event.input)) return false;
+    const descriptor = Object.getOwnPropertyDescriptor(event.input, "code");
+    return descriptor !== undefined && "value" in descriptor && typeof descriptor.value === "string";
+  };
+
   const onToolBefore = (event: RecordLike): void => {
-    const codeMode =
-      event.tool === CODE_MODE_TOOL && isRecordLike(event.input) && typeof (event.input as RecordLike).code === "string";
+    const codeMode = isCodeModeCall(event);
     // Placeholders whose format the model changed would reach the tool as junk
     // with no error; refuse them before anything is restored or mutated.
     if (typeof event.sessionID === "string" && event.sessionID.length > 0) {

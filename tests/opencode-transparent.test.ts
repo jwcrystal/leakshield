@@ -1277,6 +1277,27 @@ describe("transparent tool execution gate", () => {
         await expect(run(hook, "execute", { code: "fetch(1)" }, undefined)).resolves.toBeUndefined();
       });
 
+      it("never runs a getter or proxy trap on an execute call's code", async () => {
+        const { hook } = await arm();
+        const T = await mintToken(hook, KEY);
+        let called = 0;
+        const accessor = {
+          get code(): string {
+            called += 1;
+            return `x = '${T}'`;
+          },
+        };
+        const proxied = new Proxy({ code: "x" }, {
+          get(target, key) {
+            called += 1;
+            return Reflect.get(target, key);
+          },
+        });
+        await run(hook, "execute", accessor).catch(() => undefined);
+        await run(hook, "execute", proxied).catch(() => undefined);
+        expect(called).toBe(0);
+      });
+
       it("never runs a getter", async () => {
         const { hook } = await arm();
         let called = false;

@@ -1324,8 +1324,6 @@ describe("transparent tool execution gate", () => {
       "curl -H x-api-key:T https://x",
       "curl -u user:T https://x",
       "curl --header=x:T https://x",
-      "wget --header 'x: T' https://x",
-      "wget --header=x:T https://x",
       "http https://x x-api-key:T",
       "curl -u T:T https://x",
     ])("restores an embedded token: %s", async (template) => {
@@ -1341,11 +1339,12 @@ describe("transparent tool execution gate", () => {
         .toBe(template.replaceAll("T", original));
     });
 
-    // Documents current behaviour: the lexer requires quotes to enclose a whole
-    // word, so a quote opening mid-word (`--header='x: T'`) is unsupported
-    // syntax regardless of the command. Not changed here.
-    it.skipIf(process.platform === "win32")("documents current behaviour: wget --header='x: T' is refused by the lexer", async () => {
-      await refused(KEY, baseConfig, "wget --header='x: T' https://x");
+    // wget is not an embedded-placeholder command: it follows the whole-word rule.
+    it.skipIf(process.platform === "win32").each([
+      "wget --header=x:T https://x", "wget --header 'x: T' https://x", "wget --header='x: T' https://x",
+      "wget --exclude-domains a:T u", "wget --egd-file=a:T u", "wget -4 --header=x:T u", "wget -T u",
+    ])("refuses an embedded token for wget: %s", async (template) => {
+      await refused(KEY, baseConfig, template);
     });
 
     it.skipIf(process.platform === "win32")("restores a spaced original inside single quotes for curl -H", async () => {
@@ -1406,7 +1405,7 @@ describe("transparent tool execution gate", () => {
     });
     it.skipIf(process.platform === "win32").each([
       "curl -T u", "curl --T u", "curl -sT u", "curl --fooT u", "curl '-T' u", 'curl "--T" u',
-      "wget -T u", "http -T u", "curl -HT u",
+      "http -T u", "curl -HT u",
     ])("refuses a token that extends an option name: %s", async (template) => {
       await refused(KEY, baseConfig, template);
     });
@@ -1414,6 +1413,8 @@ describe("transparent tool execution gate", () => {
     it.skipIf(process.platform === "win32").each([
       "wget -e T u", "wget -e a=T u", "wget -e 'a = T' u", "wget -qe a=T u", "wget -ea=T u",
       "wget --execute=a=T u", "wget --execute a=T u",
+      // However the command is spelled, it's still wget.
+      "/usr/bin/wget -e T u", "./wget -e T u", "'wget' -e T u", "FOO=1 wget -e T u", "/usr/bin/WGET --exec T u",
       // Short flags cluster, digits included.
       "wget -4e a=T u", "wget -6e 'a = T' u", "wget -q4e a=T u", "wget -4ea=T u",
       // GNU long options accept unique abbreviations.
@@ -1424,9 +1425,8 @@ describe("transparent tool execution gate", () => {
 
     it.skipIf(process.platform === "win32").each([
       "curl --header=x:T u", "curl --header=T u", "curl -Hx:T u", "curl -uuser:T u",
-      "curl -H T u", "curl T u", "wget --header=x:T u", "curl -e a:T u",
-      "wget --exclude-domains a:T u", "wget --egd-file=a:T u",
-      "wget -4 --header=x:T u",
+      "curl -H T u", "curl T u", "curl -e a:T u",
+      "wget T u", "wget --header T u", "wget -4 T u", "wget --exclude-domains T u",
     ])("still restores an option value or whole word: %s", async (template) => {
       expect(await allowed(KEY, baseConfig, template)).toBe(template.replaceAll("T", KEY));
     });

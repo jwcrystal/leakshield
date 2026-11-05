@@ -357,13 +357,15 @@ function isShellSafeOriginal(text: string, quote: ShellQuote): boolean {
 }
 /**
  * HTTP clients that take credentials inside an argument (`-H 'x-api-key: T'`,
- * `-u user:T`, `--header=x:T`). `isShellSafeOriginal` only covers the first
+ * `-u user:T`, `--header=x:T`). `wget` is deliberately not listed: its `-e`
+ * option family keeps producing bypasses, so it follows the whole-word rule.
+ * `isShellSafeOriginal` only covers the first
  * shell parse; commands such as `sh -c`, `python -c`, `ssh` and `eval` parse
  * their arguments again, so embedding is decided by the command that actually
  * executes: the first word, unquoted, exactly one of these names. Paths,
  * quoted names, assignments and wrappers (`env`, `sudo`) do not qualify.
  */
-const EMBEDDED_PLACEHOLDER_COMMANDS = new Set(["curl", "wget", "http"]);
+const EMBEDDED_PLACEHOLDER_COMMANDS = new Set(["curl", "http"]);
 function commandAllowsEmbeddedTokens(text: string): boolean {
   const first = parseLiteralShellWords(text)?.[0];
   return (
@@ -376,15 +378,22 @@ function commandAllowsEmbeddedTokens(text: string): boolean {
 /**
  * `wget -e CMD` / `--execute CMD` hands its value to wgetrc parsing, a second
  * parse that `isShellSafeOriginal` does not cover (the value can set
- * `output_document`, `post_file` and the like). The command must be literally
- * `wget`; `curl -e` is a referer and `curl -K`/`--config` only name a file.
+ * `output_document`, `post_file` and the like). This check stays although
+ * `wget` no longer holds embedded tokens: `wget -e T u` would otherwise
+ * restore a whole-word token into wgetrc parsing. The command must be
+ * `wget` however it's spelled (a path, quotes, leading assignments), resolved
+ * as in `parseSupportedShellArguments`. `curl -e` is a referer and
+ * `curl -K`/`--config` only name a file.
  * GNU long options accept unique abbreviations (`--exec`), so any prefix of
  * `--execute` counts; the shorter ambiguous ones make wget exit with an error.
  */
 function isWgetExecuteCommand(text: string): boolean {
   const words = parseLiteralShellWords(text);
-  if (words === null || !commandAllowsEmbeddedTokens(text) || words[0].value !== "wget") return false;
-  return words.slice(1).some((word) => {
+  if (words === null) return false;
+  const commandIndex = words.findIndex((word) => word.quote !== "none" || !ASSIGNMENT_WORD.test(word.value));
+  if (commandIndex === -1) return false;
+  if (words[commandIndex].value.split("/").at(-1)?.toLowerCase() !== "wget") return false;
+  return words.slice(commandIndex + 1).some((word) => {
     if (word.redirect) return false;
     const optionName = word.value.split("=", 1)[0] as string;
     return /^-[A-Za-z0-9]*e/.test(word.value) || (optionName.length >= 3 && "--execute".startsWith(optionName));

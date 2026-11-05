@@ -64,7 +64,7 @@ import {
   withOpaqueAttachments,
   type TransportMaskingService,
 } from "./opencode-transparent-http.js";
-import type { GuardConfig } from "./types.js";
+import { FINDING_TYPES, type GuardConfig } from "./types.js";
 import { createResponsesWebSocketAdapter } from "./opencode-transparent-ws.js";
 import { createAISDKTransportAdmission } from "./opencode-transparent-aisdk.js";
 import { BUILTIN_RULES } from "./rules/builtin.js";
@@ -355,6 +355,35 @@ function isShellSafeOriginal(text: string, quote: ShellQuote): boolean {
   if (quote === "double") return !/["`\\$!]/.test(text);
   return !SHELL_UNSAFE.test(text);
 }
+/**
+ * HTTP clients that take credentials inside an argument (`-H 'x-api-key: T'`,
+ * `-u user:T`, `--header=x:T`). `isShellSafeOriginal` only covers the first
+ * shell parse; commands such as `sh -c`, `python -c`, `ssh` and `eval` parse
+ * their arguments again, so embedding is decided by the command that actually
+ * executes: the first word, unquoted, exactly one of these names. Paths,
+ * quoted names, assignments and wrappers (`env`, `sudo`) do not qualify.
+ */
+const EMBEDDED_PLACEHOLDER_COMMANDS = new Set(["curl", "wget", "http"]);
+function commandAllowsEmbeddedTokens(text: string): boolean {
+  const first = parseLiteralShellWords(text)?.[0];
+  return (
+    first !== undefined &&
+    first.quote === "none" &&
+    !first.redirect &&
+    EMBEDDED_PLACEHOLDER_COMMANDS.has(first.value)
+  );
+}
+/**
+ * `wget -e CMD` / `--execute CMD` hands its value to wgetrc parsing, a second
+ * parse that `isShellSafeOriginal` does not cover (the value can set
+ * `output_document`, `post_file` and the like). The command must be literally
+ * `wget`; `curl -e` is a referer and `curl -K`/`--config` only name a file.
+ */
+function isWgetExecuteCommand(text: string): boolean {
+  const words = parseLiteralShellWords(text);
+  if (words === null || !commandAllowsEmbeddedTokens(text) || words[0].value !== "wget") return false;
+  return words.slice(1).some((word) => !word.redirect && (/^-[A-Za-z]*e/.test(word.value) || /^--execute(=|$)/.test(word.value)));
+}
 /** Matches a fully formed reserved token (either version), for per-token shell safety checks. */
 const TOKEN_SCAN =
   /\[SGP1:[0-9a-f]{32}-\d{8,12}\]|\[SGP2:[A-Z][A-Z_]{0,31}-[a-z]{4}-[a-z]{4}-[a-z]{4}\]/g;
@@ -366,14 +395,42 @@ const TOKEN_SCAN =
  * unbounded group. A candidate counts only if its canonical form restores in
  * the session, so no token enumeration is needed.
  *
- * SGP2 reads the words after the prefix and tries each category length. One
- * regex can't do this: the text after a stripped token is often more short
- * words, and a greedy category absorbs them and yields a wrong candidate.
+ * SGP2 reads the letters after the `SGP2` head, tolerating separator runs of
+ * up to 4 non-alphanumerics between letters (changed separators) or none at
+ * all (removed separators), and stopping at a digit, a longer run or about 80
+ * letters. Each known category, compared without underscores, is tried as a
+ * prefix of those letters; the next 12 letters become the three segments. The
+ * text after a stripped token is often more short words, which this ignores
+ * because only exactly 12 letters follow the category.
  */
 const NEAR_SEP = "[^A-Za-z0-9]{1,4}";
-const NEAR_MISS_V2_HEAD = /(?<![A-Za-z0-9])SGP2(?=[^A-Za-z0-9])/gi;
-const NEAR_MISS_V2_WORD = new RegExp(`${NEAR_SEP}([A-Za-z]{1,32})(?![A-Za-z0-9])`, "y");
-const NEAR_MISS_V2_MAX_CATEGORY_WORDS = 6;
+const NEAR_MISS_V2_HEAD = /(?<![A-Za-z0-9])SGP2/gi;
+const NEAR_MISS_V2_MAX_SEPARATOR = 4;
+const NEAR_MISS_V2_MAX_LETTERS = 80;
+const NEAR_MISS_V2_SEGMENT_LETTERS = 12;
+const NEAR_MISS_V2_CATEGORIES: ReadonlyMap<string, string> = new Map(
+  FINDING_TYPES.map((label) => [label.replaceAll("_", "").toUpperCase(), label] as const),
+);
+/** Letters following `from`, skipping short separator runs; stops at a digit or a long run. */
+function collectNearMissLetters(text: string, from: number): string {
+  let letters = "";
+  let at = from;
+  while (at < text.length && letters.length < NEAR_MISS_V2_MAX_LETTERS) {
+    const char = text[at] as string;
+    if (/[A-Za-z]/.test(char)) {
+      letters += char;
+      at += 1;
+    } else if (/[0-9]/.test(char)) {
+      break;
+    } else {
+      let run = 0;
+      while (at + run < text.length && /[^A-Za-z0-9]/.test(text[at + run] as string)) run += 1;
+      if (run > NEAR_MISS_V2_MAX_SEPARATOR) break;
+      at += run;
+    }
+  }
+  return letters;
+}
 const NEAR_MISS_V1 = new RegExp(
   `(?<![A-Za-z0-9])SGP1${NEAR_SEP}([0-9a-f]{32})${NEAR_SEP}(\\d{8,12})(?!\\d)`,
   "gi",
@@ -1437,25 +1494,19 @@ export function createTransparentSessionGuard(
   /**
    * True when `text` holds a placeholder of this session whose format was
    * changed (brackets dropped or half-dropped, separators swapped, case
-   * lowered). Exact canonical tokens are blanked first; partially masked forms
+   * lowered, separators changed or removed). Exact canonical tokens are blanked first; partially masked forms
    * and tokens unknown to the session never qualify.
    */
   const textHasNearMiss = (sessionID: string, text: string): boolean => {
     if (!/sgp[12]/i.test(text)) return false;
     const rest = text.replace(TOKEN_SCAN, " ");
     for (const head of rest.matchAll(NEAR_MISS_V2_HEAD)) {
-      const words: string[] = [];
-      NEAR_MISS_V2_WORD.lastIndex = head.index + head[0].length;
-      while (words.length < NEAR_MISS_V2_MAX_CATEGORY_WORDS + 3) {
-        const word = NEAR_MISS_V2_WORD.exec(rest);
-        if (word === null) break;
-        words.push(word[1] as string);
-      }
-      for (let size = 1; size <= NEAR_MISS_V2_MAX_CATEGORY_WORDS && size + 3 <= words.length; size++) {
-        const segments = words.slice(size, size + 3);
-        if (segments.some((segment) => segment.length !== 4)) continue;
-        const category = words.slice(0, size).join("_").toUpperCase();
-        const canonical = `[SGP2:${category}-${segments.join("-").toLowerCase()}]`;
+      const letters = collectNearMissLetters(rest, head.index + head[0].length);
+      const upper = letters.toUpperCase();
+      for (const [compact, label] of NEAR_MISS_V2_CATEGORIES) {
+        if (!upper.startsWith(compact) || letters.length - compact.length < NEAR_MISS_V2_SEGMENT_LETTERS) continue;
+        const body = letters.slice(compact.length, compact.length + NEAR_MISS_V2_SEGMENT_LETTERS).toLowerCase();
+        const canonical = `[SGP2:${label}-${body.slice(0, 4)}-${body.slice(4, 8)}-${body.slice(8, 12)}]`;
         ensureSeeded(sessionID);
         if (transportService.restoreText(sessionID, canonical).ok) return true;
       }
@@ -1549,10 +1600,19 @@ export function createTransparentSessionGuard(
     if (policy === "shell" && containsMappedToken(sessionID, text)) {
       const argumentsOnly = parseSupportedShellArguments(text);
       if (argumentsOnly === null) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
+      const embedded = commandAllowsEmbeddedTokens(text);
+      if (isWgetExecuteCommand(text)) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
       for (const match of text.matchAll(TOKEN_SCAN)) {
         const end = match.index + match[0].length;
-        const argument = argumentsOnly.find((word) => word.value === match[0] && word.start <= match.index && word.end >= end);
+        const argument = argumentsOnly.find(
+          (word) => (embedded || word.value === match[0]) && word.start <= match.index && word.end >= end,
+        );
         if (argument === undefined) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
+        // A token may not extend an option name (`-TOKEN`, `-sTOKEN`, `--TOKEN`):
+        // the restored text would change which option the word is. Option
+        // values (`--header=x:T`, `-Hx:T`) have a non-option character before it.
+        const valueStart = argument.start + (argument.quote === "none" ? 0 : 1);
+        if (/^-[A-Za-z0-9-]*$/.test(text.slice(valueStart, match.index))) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
         const restoredToken = transportService.restoreText(sessionID, match[0]);
         if (!restoredToken.ok) throw new Error(toolRestoreError(restoredToken.reason));
         if (!isShellSafeOriginal(restoredToken.text, argument.quote)) throw new Error(TOOL_SHELL_CONTEXT_ERROR);

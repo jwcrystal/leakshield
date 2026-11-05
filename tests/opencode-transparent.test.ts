@@ -1198,6 +1198,64 @@ describe("transparent tool execution gate", () => {
         for (const [tool, input] of inputs) await refusedUnchanged(hook, tool, input, NEAR);
       });
 
+      describe("changed or removed separators", () => {
+        const parts = (T: string) => {
+          const m = /^\[SGP2:([A-Z_]+)-([a-z]{4})-([a-z]{4})-([a-z]{4})\]$/.exec(T);
+          if (m === null) throw new Error("unexpected token shape");
+          return { cat: m[1] as string, a: m[2] as string, b: m[3] as string, c: m[4] as string };
+        };
+        const forms = (T: string): string[] => {
+          const { cat, a, b, c } = parts(T);
+          const base = [
+            `SGP2:${cat}-${a}-${b}-${c}`,
+            `SGP2 ${cat.replaceAll("_", " ")} ${a} ${b} ${c}`,
+            `SGP2:${cat.replaceAll("_", "")}-${a}-${b}-${c}`,
+            `SGP2${cat.replaceAll("_", "")}${a}${b}${c}`,
+          ];
+          return [...base, ...base.map((f) => f.toLowerCase())];
+        };
+        for (const [tool, make] of [
+          ["shell", (text: string) => ({ command: `echo see ${text} now` })],
+          ["write", (text: string) => ({ filePath: "/tmp/a.txt", content: `see ${text} now` })],
+        ] as const) {
+          it(`refuses every changed or removed separator form on ${tool}`, async () => {
+            const { hook } = await arm();
+            const T = await mintToken(hook, KEY);
+            for (const text of forms(T)) await refusedUnchanged(hook, tool, make(text), NEAR);
+          });
+          it(`refuses a stripped token followed by short words on ${tool}`, async () => {
+            const { hook } = await arm();
+            const T = await mintToken(hook, KEY);
+            const { cat, a, b, c } = parts(T);
+            const stripped = `SGP2:${cat}-${a}-${b}-${c}`;
+            for (const text of [`${stripped}' http://x`, `${stripped} then this word`]) {
+              await refusedUnchanged(hook, tool, make(text), NEAR);
+            }
+          });
+          it(`refuses a nda keyword placeholder with changed separators on ${tool}`, async () => {
+            const { hook } = await arm({ ...baseConfig, nda_keywords: ["a b c"] });
+            const T = await mintToken(hook, "a b c");
+            expect(T).toContain("NDA_KEYWORD");
+            for (const text of forms(T)) await refusedUnchanged(hook, tool, make(text), NEAR);
+          });
+          it(`passes partial masks, foreign tokens and a bare prefix on ${tool}`, async () => {
+            const { hook } = await arm();
+            await mintToken(hook, KEY);
+            for (const text of [
+              "SGP2:API_KEY-****-efgh-ijkl",
+              "SGP2:API_KEY-ab-efgh-ijkl",
+              "SGP2 API KEY abcd efgh",
+              "SGP2:API_KEY-zzzz-zzzz-zzzz",
+              "SGP2:",
+              "SGP2",
+            ]) {
+              const input = make(text);
+              await expect(run(hook, tool, input)).resolves.toBeUndefined();
+            }
+          });
+        }
+      });
+
       it("passes partial masks, foreign stripped tokens, a bare prefix and canonical tokens", async () => {
         const { hook } = await arm();
         const T = await mintToken(hook, KEY);
@@ -1231,6 +1289,140 @@ describe("transparent tool execution gate", () => {
         await run(hook, "openchamber_render", input).catch(() => undefined);
         expect(called).toBe(false);
       });
+    });
+  });
+
+  describe("embedded placeholders for HTTP clients", () => {
+    type Hook = (name: string) => (event: unknown) => Promise<unknown> | unknown;
+    const run = (hook: Hook, input: unknown) =>
+      hook("tool:execute.before")({ tool: "shell", sessionID: "session-1", input });
+    const SPACED = "a b c";
+    const originals = [
+      ["KEY", KEY, baseConfig],
+      ["spaced nda keyword", SPACED, { ...baseConfig, nda_keywords: [SPACED] } as GuardConfig],
+    ] as const;
+
+    const allowed = async (original: string, config: GuardConfig, template: string) => {
+      const { hook } = await arm(config);
+      const T = await mintToken(hook, original);
+      const input = { command: template.replaceAll("T", T) };
+      await expect(run(hook, input)).resolves.toBeUndefined();
+      return input.command;
+    };
+    const refused = async (original: string, config: GuardConfig, template: string) => {
+      const { hook } = await arm(config);
+      const T = await mintToken(hook, original);
+      const command = template.replaceAll("T", T);
+      const input = { command };
+      await expect(run(hook, input)).rejects.toThrow(TOOL_REFUSED);
+      expect(input.command).toBe(command);
+    };
+
+    it.skipIf(process.platform === "win32").each([
+      "curl -H 'x-api-key: T' https://x",
+      'curl -H "x-api-key: T" https://x',
+      "curl -H x-api-key:T https://x",
+      "curl -u user:T https://x",
+      "curl --header=x:T https://x",
+      "wget --header 'x: T' https://x",
+      "wget --header=x:T https://x",
+      "http https://x x-api-key:T",
+      "curl -u T:T https://x",
+    ])("restores an embedded token: %s", async (template) => {
+      expect(await allowed(KEY, baseConfig, template)).toBe(template.replaceAll("T", KEY));
+    });
+
+    it.skipIf(process.platform === "win32").each([
+      "curl -H 'x-api-key: T' https://x",
+      "curl -H x-api-key:T https://x",
+    ])("restores a spaced-free nda keyword the same way: %s", async (template) => {
+      const original = "abc";
+      expect(await allowed(original, { ...baseConfig, nda_keywords: [original] }, template))
+        .toBe(template.replaceAll("T", original));
+    });
+
+    // Documents current behaviour: the lexer requires quotes to enclose a whole
+    // word, so a quote opening mid-word (`--header='x: T'`) is unsupported
+    // syntax regardless of the command. Not changed here.
+    it.skipIf(process.platform === "win32")("documents current behaviour: wget --header='x: T' is refused by the lexer", async () => {
+      await refused(KEY, baseConfig, "wget --header='x: T' https://x");
+    });
+
+    it.skipIf(process.platform === "win32")("restores a spaced original inside single quotes for curl -H", async () => {
+      const restored = await allowed(SPACED, { ...baseConfig, nda_keywords: [SPACED] }, "curl -H 'x: T' https://x");
+      expect(restored).toBe(`curl -H 'x: ${SPACED}' https://x`);
+    });
+
+    it.skipIf(process.platform === "win32")("refuses a spaced original unquoted in curl -H x:T", async () => {
+      await refused(SPACED, { ...baseConfig, nda_keywords: [SPACED] }, "curl -H x:T https://x");
+    });
+
+    it.skipIf(process.platform === "win32")("refuses an original containing a quote inside single quotes", async () => {
+      const original = "ab'cd";
+      await refused(original, { ...baseConfig, nda_keywords: [original] }, "curl -H 'x: T' https://x");
+    });
+
+    it.skipIf(process.platform === "win32")("refuses an original starting with a dash", async () => {
+      const original = "-secretvalue";
+      await refused(original, { ...baseConfig, nda_keywords: [original] }, "curl -H x:T https://x");
+    });
+
+    for (const [label, original, config] of originals) {
+      it.skipIf(process.platform === "win32").each([
+        `sh -c 'curl -H "x: T" u'`,
+        `bash -c 'echo T'`,
+        `sh -c T`,
+        `python -c 'print("T")'`,
+        `python3 -c T`,
+        `ssh host 'echo a:T'`,
+        `eval "a:T"`,
+        `env curl -H x:T u`,
+        `sudo curl -H x:T u`,
+        `FOO=1 curl -H x:T u`,
+        `/usr/bin/curl -H x:T u`,
+        `./curl -H x:T u`,
+        `'curl' -H x:T u`,
+        `curl -H x:T u; echo`,
+        `curl -H x:T u | cat`,
+        `curl -H x:T u && echo`,
+        `curl "$(echo T)"`,
+        `echo a:T`,
+        `git -c x:T`,
+        `curl u > a:T`,
+      ])(`refuses (${label}): %s`, async (template) => {
+        await refused(original, config, template);
+      });
+    }
+
+    // Documents current behaviour only; no extra rules were added for these.
+    it.skipIf(process.platform === "win32")("documents current behaviour: curl -K T", async () => {
+      expect(await allowed(KEY, baseConfig, "curl -K T")).toBe(`curl -K ${KEY}`);
+    });
+    it.skipIf(process.platform === "win32")("documents current behaviour: curl -K a:T", async () => {
+      expect(await allowed(KEY, baseConfig, "curl -K a:T")).toBe(`curl -K a:${KEY}`);
+    });
+    it.skipIf(process.platform === "win32")("documents current behaviour: curl --config=a:T", async () => {
+      expect(await allowed(KEY, baseConfig, "curl --config=a:T")).toBe(`curl --config=a:${KEY}`);
+    });
+    it.skipIf(process.platform === "win32").each([
+      "curl -T u", "curl --T u", "curl -sT u", "curl --fooT u", "curl '-T' u", 'curl "--T" u',
+      "wget -T u", "http -T u", "curl -HT u",
+    ])("refuses a token that extends an option name: %s", async (template) => {
+      await refused(KEY, baseConfig, template);
+    });
+
+    it.skipIf(process.platform === "win32").each([
+      "wget -e T u", "wget -e a=T u", "wget -e 'a = T' u", "wget -qe a=T u", "wget -ea=T u",
+      "wget --execute=a=T u", "wget --execute a=T u",
+    ])("refuses wget -e/--execute, whose value is parsed again: %s", async (template) => {
+      await refused(KEY, baseConfig, template);
+    });
+
+    it.skipIf(process.platform === "win32").each([
+      "curl --header=x:T u", "curl --header=T u", "curl -Hx:T u", "curl -uuser:T u",
+      "curl -H T u", "curl T u", "wget --header=x:T u", "curl -e a:T u",
+    ])("still restores an option value or whole word: %s", async (template) => {
+      expect(await allowed(KEY, baseConfig, template)).toBe(template.replaceAll("T", KEY));
     });
   });
 

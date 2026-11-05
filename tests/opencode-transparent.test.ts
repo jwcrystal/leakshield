@@ -845,21 +845,17 @@ describe("transparent tool execution gate", () => {
     expect(input.command).toBe("echo 機密資料");
   });
 
-  it("treats an unrecognized tool as shell-like (fail-closed)", async () => {
+  it("treats an unrecognized tool as non-shell and restores the placeholder verbatim", async () => {
     const { hook } = await arm(phoneConfig);
     const phone = "0912 345 678";
     const token = await mintToken(hook, phone);
 
-    // Unknown tool name, no `command` field: still checked, so the unsafe
-    // original is refused.
-    await expect(
-      hook("tool:execute.before")({ tool: "mystery_tool", sessionID: "session-1", input: { value: token } }),
-    ).rejects.toThrow(TOOL_REFUSED);
-
-    // The same value restores normally for a known non-executing tool.
+    // Positive shell identification: a tool name the guard does not know is
+    // not parsed as a shell command, so a value that is unsafe as a shell word
+    // restores as an ordinary string instead of refusing the call.
     const input = { value: token };
     await expect(
-      hook("tool:execute.before")({ tool: "read", sessionID: "session-1", input }),
+      hook("tool:execute.before")({ tool: "mystery_tool", sessionID: "session-1", input }),
     ).resolves.toBeUndefined();
     expect(input.value).toBe(phone);
   });
@@ -956,6 +952,293 @@ describe("transparent tool execution gate", () => {
         input: { filePath: `/x/${FOREIGN_TOKEN}`, content: "data" },
       }),
     ).rejects.toThrow("placeholder has no mapping in this session");
+  });
+
+  it("restores a placeholder in a display-only tool without shell quoting rules", async () => {
+    const { hook } = await arm();
+    const token = await mintToken(hook, KEY);
+    // A rendered string is not a shell command: plain prose around a
+    // placeholder must not be parsed as shell syntax.
+    const input = { ui: `prefix ${token} suffix` };
+    await expect(
+      hook("tool:execute.before")({ tool: "openchamber_render", sessionID: "session-1", input }),
+    ).resolves.toBeUndefined();
+    expect(input.ui).toBe(`prefix ${KEY} suffix`);
+  });
+
+  it("restores a mapped placeholder in an unregistered tool without shell quoting rules", async () => {
+    const { hook } = await arm(phoneConfig);
+    // A space-containing original is unsafe as a shell word but harmless as a
+    // plain string: an unregistered tool is not parsed as a shell command.
+    const phone = "0912 345 678";
+    const token = await mintToken(hook, phone);
+    const input = { value: token };
+    await expect(
+      hook("tool:execute.before")({ tool: "mystery_tool", sessionID: "session-1", input }),
+    ).resolves.toBeUndefined();
+    expect(input.value).toBe(phone);
+  });
+
+  it("reports an unmapped literal in an unknown tool as a mapping failure, not shell quoting", async () => {
+    const { hook } = await arm();
+    // Nothing would be substituted, so the shell parser is not the right
+    // refusal: name the real problem (no mapping in this session).
+    await expect(
+      hook("tool:execute.before")({ tool: "mystery_tool", sessionID: "session-1", input: { value: FOREIGN_TOKEN } }),
+    ).rejects.toThrow("placeholder has no mapping in this session");
+  });
+
+  describe("per-field restore policy", () => {
+    const UNSAFE = "abc'; touch /tmp/pwn; echo 'x";
+    const unsafeConfig: GuardConfig = { ...baseConfig, nda_keywords: [UNSAFE] };
+    const run = (hook: (name: string) => (event: unknown) => Promise<unknown> | unknown, tool: string, input: unknown) =>
+      hook("tool:execute.before")({ tool, sessionID: "session-1", input });
+
+    it("refuses an unsafe original in executing fields and leaves the input unchanged", async () => {
+      const { hook } = await arm(unsafeConfig);
+      const T = await mintToken(hook, UNSAFE);
+      const cases: Array<[string, () => unknown]> = [
+        ["ctx_batch_execute", () => ({ commands: [{ label: "a", command: `echo '${T}'` }] })],
+        ["ctx_execute", () => ({ language: "shell", code: `echo '${T}'` })],
+        ["context-mode_ctx_execute", () => ({ language: "python", code: `print("${T}")` })],
+        ["interactive_bash", () => ({ tmux_command: `echo '${T}'` })],
+        ["run_command", () => ({ cmd: `echo '${T}'` })],
+        ["execute_command", () => ({ args: { command: `echo '${T}'` } })],
+        ["mystery", () => ({ command: ["sh", "-c", `echo '${T}'`] })],
+        ["mystery", () => ({ script: `echo '${T}'` })],
+        ["runShell", () => ({ input: `echo '${T}'` })],
+      ];
+      for (const [tool, make] of cases) {
+        const input = make();
+        const before = JSON.stringify(input);
+        await expect(run(hook, tool, input)).rejects.toThrow(TOOL_REFUSED);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+    });
+
+    it("restores a safe token in multi-line code and metadata, leaving commands alone", async () => {
+      const { hook } = await arm(unsafeConfig);
+      const KT = await mintToken(hook, KEY);
+      const code = { language: "python", code: `import os\nvalue = "${KT}"\nprint(value)\n` };
+      await run(hook, "ctx_execute", code);
+      expect(code.code).toBe(`import os\nvalue = "${KEY}"\nprint(value)\n`);
+
+      const batch = { commands: [{ label: KT, command: "ls" }] };
+      await run(hook, "ctx_batch_execute", batch);
+      expect(batch.commands[0]).toEqual({ label: KEY, command: "ls" });
+
+      const bash = { command: "ls", description: `check ${KT} now` };
+      await run(hook, "bash", bash);
+      expect(bash).toEqual({ command: "ls", description: `check ${KEY} now` });
+    });
+
+    it("keeps restoring unsafe originals verbatim in prose fields of unknown tools", async () => {
+      const { hook } = await arm(unsafeConfig);
+      const T = await mintToken(hook, UNSAFE);
+      const a = { value: T };
+      await run(hook, "mystery", a);
+      expect(a.value).toBe(UNSAFE);
+      const b = { ui: `prefix ${T} suffix` };
+      await run(hook, "openchamber_render", b);
+      expect(b.ui).toBe(`prefix ${UNSAFE} suffix`);
+    });
+
+    it("refuses an original with spaces in a code field (documented cost)", async () => {
+      const { hook } = await arm(phoneConfig);
+      const token = await mintToken(hook, "0912 345 678");
+      const input = { code: `call("${token}")` };
+      const before = JSON.stringify(input);
+      await expect(run(hook, "mystery", input)).rejects.toThrow(TOOL_REFUSED);
+      expect(JSON.stringify(input)).toBe(before);
+    });
+
+    it("keeps an unmapped token in a code field a mapping failure and does not degrade a read tool with command", async () => {
+      const { hook } = await arm(unsafeConfig);
+      await expect(run(hook, "mystery", { code: FOREIGN_TOKEN })).rejects.toThrow(
+        "placeholder has no mapping in this session",
+      );
+      await expect(run(hook, "read", { command: FOREIGN_TOKEN })).rejects.toThrow(
+        "placeholder has no mapping in this session",
+      );
+    });
+
+    describe("inert code position rule", () => {
+      const POSITION = "outside any multi-line string";
+      const CONTEXT = "cannot be safely inserted into code";
+      const SLASHES = "7//2";
+      const BARE_SLASHES = "0//";
+      const SPACED = "has some spaces";
+      const posConfig: GuardConfig = { ...baseConfig, nda_keywords: [SLASHES, BARE_SLASHES, SPACED] };
+      const allowed: string[] = [
+        "x = 'T'",
+        '"Bearer T"',
+        '"https://x/?k=T"',
+        'f"Bearer T"',
+        '"a\\"b" + "T"',
+        '"it\'s T"',
+        '"T T"',
+        "x = 'T'\nprint(x)",
+        "import os\r\nx = 'T'\r\nprint(x)\r\n",
+      ];
+      const refused: string[] = [
+        "const value = T;",
+        "'a' + T + 'b'",
+        'f"{T}"',
+        "f\"{'T'}\"",
+        "`${T}`",
+        "`T`",
+        'echo "$(T)"',
+        '"\\(T)"',
+        '"#{T}"',
+        '$"{T}"',
+        "# don't T",
+        "x = 1 # it's 'T'",
+        "/* don't */ T",
+        "// it's T",
+        '"a\\" T"',
+        "'T' + T",
+        '"T',
+        '"""\nT\n"""',
+        "cat <<EOF\nT\nEOF",
+        'f"{x} T"',
+        'a//2 + "T"',
+        // Multi-line / continuation forms (crossesLineBoundary).
+        '"""T"""',
+        'end""" + T + "',
+        '"""doc\nend""" + T + "',
+        'x = "abc\\\n" + T + "',
+        'x = "abc\\\r\n" + T + "',
+        '"""\nk = "T"\n"""',
+        "'''\nk = 'T'\n'''",
+        '\'\'\'a\'\'\' + "T"',
+        "/* it's\n*/ T",
+        // String-end boundary.
+        '"T\\"',
+        '"T',
+        // One safe, one unsafe, across lines in one leaf.
+        "k = 'T'\nbare U",
+      ];
+      // Second token placeholder is U (a different original).
+      const allowedMore: string[] = [
+        '"""doc"""\nk = \'T\'',
+        '"""\ndoc\n"""\nk = \'T\'',
+        "'''doc'''\nk = 'T'",
+        "'''\ndoc\n'''\nk = 'T'",
+        "x = 1\nk = 'T'",
+        '"T\\" more"',
+        '"T ${x}"',
+        '"T U"',
+        "'T' + \"U\"",
+      ];
+
+      it.each([...allowed, ...allowedMore])("restores inside a plain string: %j", async (template) => {
+        const { hook } = await arm(posConfig);
+        const T = await mintToken(hook, KEY);
+        const U = await mintToken(hook, SLASHES);
+        const input = { code: template.replaceAll("T", T).replaceAll("U", U) };
+        await run(hook, "ctx_execute", input);
+        expect(input.code).toBe(template.replaceAll("T", KEY).replaceAll("U", SLASHES));
+      });
+
+      it.each(refused)("refuses outside a plain string: %j", async (template) => {
+        const { hook } = await arm(posConfig);
+        const T = await mintToken(hook, KEY);
+        const U = await mintToken(hook, SLASHES);
+        const input = { code: template.replaceAll("T", T).replaceAll("U", U) };
+        const before = JSON.stringify(input);
+        await expect(run(hook, "ctx_execute", input)).rejects.toThrow(POSITION);
+        expect(JSON.stringify(input)).toBe(before);
+      });
+
+      it("applies the same rule to a script field", async () => {
+        const { hook } = await arm(posConfig);
+        const T = await mintToken(hook, KEY);
+        const ok = { script: `x = '${T}'` };
+        await run(hook, "mystery", ok);
+        expect(ok.script).toBe(`x = '${KEY}'`);
+        const bad = { script: `x = ${T}` };
+        const before = JSON.stringify(bad);
+        await expect(run(hook, "mystery", bad)).rejects.toThrow(POSITION);
+        expect(JSON.stringify(bad)).toBe(before);
+      });
+
+      it("treats an original containing // by the same rule", async () => {
+        const { hook } = await arm(posConfig);
+        const slashes = await mintToken(hook, SLASHES);
+        const bare = await mintToken(hook, BARE_SLASHES);
+        for (const [token, original] of [
+          [slashes, SLASHES],
+          [bare, BARE_SLASHES],
+        ] as const) {
+          const bad = { code: `f"{${token}}"` };
+          const before = JSON.stringify(bad);
+          await expect(run(hook, "ctx_execute", bad)).rejects.toThrow(POSITION);
+          expect(JSON.stringify(bad)).toBe(before);
+          const ok = { code: `x = '${token}'` };
+          await run(hook, "ctx_execute", ok);
+          expect(ok.code).toBe(`x = '${original}'`);
+        }
+        const bareUse = { code: `x = ${bare}` };
+        await expect(run(hook, "ctx_execute", bareUse)).rejects.toThrow(POSITION);
+      });
+
+      it("reports a shell-unsafe original with the context error, not the position error", async () => {
+        const { hook } = await arm(posConfig);
+        const T = await mintToken(hook, SPACED);
+        const input = { code: `x = '${T}'` };
+        const before = JSON.stringify(input);
+        const error = await run(hook, "ctx_execute", input).then(
+          () => null,
+          (e: Error) => e,
+        );
+        expect(error?.message).toContain(CONTEXT);
+        expect(error?.message).not.toContain(POSITION);
+        expect(JSON.stringify(input)).toBe(before);
+      });
+
+      it("is atomic across fields and across tokens in one leaf", async () => {
+        const { hook } = await arm(posConfig);
+        const T1 = await mintToken(hook, KEY);
+        const T2 = await mintToken(hook, SLASHES);
+        const across = { a: `x = '${T1}'`, code: `bare ${T2}` };
+        const beforeAcross = JSON.stringify(across);
+        await expect(run(hook, "ctx_execute", across)).rejects.toThrow(POSITION);
+        expect(JSON.stringify(across)).toBe(beforeAcross);
+        const within = { code: `x = '${T1}'\ny = ${T2}` };
+        const beforeWithin = JSON.stringify(within);
+        await expect(run(hook, "ctx_execute", within)).rejects.toThrow(POSITION);
+        expect(JSON.stringify(within)).toBe(beforeWithin);
+      });
+
+      it("keeps a foreign token a mapping failure and leaves token-free code untouched", async () => {
+        const { hook } = await arm(posConfig);
+        await expect(run(hook, "ctx_execute", { code: `x = ${FOREIGN_TOKEN}` })).rejects.toThrow(
+          "placeholder has no mapping in this session",
+        );
+        const plain = { code: "print('hello')" };
+        await run(hook, "ctx_execute", plain);
+        expect(plain.code).toBe("print('hello')");
+      });
+
+      it("PINNED LIMITATION: a heredoc body line that looks like a quoted string is still allowed", async () => {
+        const { hook } = await arm(posConfig);
+        const T = await mintToken(hook, KEY);
+        // The heuristic knows no heredoc syntax; the body line reads as a plain string.
+        const input = { code: `cat <<EOF\nk = '${T}'\nEOF` };
+        await run(hook, "ctx_execute", input);
+        expect(input.code).toBe(`cat <<EOF\nk = '${KEY}'\nEOF`);
+      });
+
+      it("still applies shell rules to code under bash", async () => {
+        const { hook } = await arm(posConfig);
+        const T = await mintToken(hook, KEY);
+        const ok = { command: `echo ${T}` };
+        await run(hook, "bash", ok);
+        expect(ok.command).toBe(`echo ${KEY}`);
+        const bad = { command: `echo x${T}$(id)` };
+        await expect(run(hook, "bash", bad)).rejects.toThrow(TOOL_REFUSED);
+      });
+    });
   });
 
   it("refuses tokens hidden in object keys as well as values", async () => {

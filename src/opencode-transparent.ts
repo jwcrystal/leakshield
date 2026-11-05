@@ -92,6 +92,10 @@ const TOOL_RESTORE_LIMIT_ERROR =
   "LeakShield blocked this tool call because its arguments are too large to restore safely. Use smaller arguments and try again.";
 const TOOL_SHELL_CONTEXT_ERROR =
   "LeakShield blocked this tool call because the shell command's quoting is not supported. Use a simple command with plain arguments, or a different tool.";
+const TOOL_CODE_CONTEXT_ERROR =
+  "LeakShield blocked this tool call because a protected value cannot be safely inserted into code. Pass the value through a plain argument or a file instead, or ask the user.";
+const TOOL_CODE_POSITION_ERROR =
+  "LeakShield blocked this tool call: the tool did not run. The placeholder is kept and nothing was substituted. A placeholder in a code field is restored only in a plain quoted string with no interpolation, written on a single line that is outside any multi-line string and does not follow a line continuation. Rewrite it that way, for example value = '<placeholder>', then reference the variable. Do not ask for or write the real value. If it is refused again, stop retrying and ask the user.";
 const TOOL_INPUT_SHAPE_ERROR =
   "LeakShield blocked this tool call because its argument structure cannot be safely restored. Use plain JSON values and try again.";
 const STRUCTURAL_SENSITIVE_ERROR =
@@ -240,37 +244,63 @@ function parseSupportedShellArguments(text: string): LiteralShellWord[] | null {
 /** Characters forbidden inside restored shell argument words. */
 const SHELL_UNSAFE = /[\s'"`\\$;|&<>(){}*?\[\]!~#\x00-\x1F\x7F]/;
 /**
- * Conservative allowlist of non-executing tools. Any tool not listed here is
- * treated as potentially shell-like and requires shell-safe originals, so an
- * unrecognized (or newly added) executing tool fails closed rather than
- * receiving a value that could change its meaning.
+ * Restore policy is decided per field, not per tool. A tool name that is in
+ * SHELL_TOOLS or has a shell-interpreter segment (bash, shell, sh, zsh, pwsh,
+ * powershell) makes every field "shell". Otherwise a field named like a
+ * command (command, cmd, commands, argv, ...) is "shell", a field named like
+ * code (code, script, ...) is "inert" (no parsing; originals with
+ * shell-unsafe characters are refused), and any other field restores
+ * verbatim. The list is built into the source, not configurable; an executing
+ * tool using other field names is not detected.
  */
-const NON_SHELL_TOOLS = new Set([
-  "read",
-  "read_file",
-  "view",
-  "write",
-  "write_file",
-  "create_file",
-  "edit",
-  "edit_file",
-  "multiedit",
-  "patch",
-  "apply_patch",
-  "str_replace",
-  "str_replace_editor",
-  "grep",
-  "glob",
-  "list",
-  "ls",
-  "find",
-  "webfetch",
-  "websearch",
-  "fetch",
-  "todowrite",
-  "todoread",
-  "notebookedit",
+const SHELL_TOOLS = new Set([
+  "bash",
+  "shell",
+  "sh",
+  "zsh",
+  "exec",
+  "command",
+  "run",
+  "pwsh",
+  "powershell",
 ]);
+type ToolLeafPolicy = "verbatim" | "shell" | "inert";
+
+/** Splits on non-alphanumerics and camelCase boundaries; lowercase segments. */
+const nameSegments = (raw: string): string[] =>
+  raw
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/)
+    .filter((segment) => segment.length > 0)
+    .map((segment) => segment.toLowerCase());
+
+const SHELL_TOOL_SEGMENTS = new Set(["bash", "shell", "sh", "zsh", "pwsh", "powershell"]);
+const METADATA_KEYS = new Set(["description", "title", "label"]);
+const SHELL_KEY_LAST_SEGMENTS = new Set(["command", "commands", "cmd", "cmds"]);
+const SHELL_KEYS_JOINED = new Set(["shell", "commandline", "cmdline", "argv"]);
+const CODE_KEYS_JOINED = new Set(["code", "script", "scripts", "sourcecode", "codesnippet", "inlinescript"]);
+
+const isShellTool = (rawTool: string): boolean =>
+  SHELL_TOOLS.has(rawTool.toLowerCase()) || nameSegments(rawTool).some((segment) => SHELL_TOOL_SEGMENTS.has(segment));
+
+const isShellKey = (key: string): boolean => {
+  const segments = nameSegments(key);
+  return (
+    (segments.length > 0 && SHELL_KEY_LAST_SEGMENTS.has(segments[segments.length - 1] as string)) ||
+    SHELL_KEYS_JOINED.has(segments.join(""))
+  );
+};
+const isCodeKey = (key: string): boolean => CODE_KEYS_JOINED.has(nameSegments(key).join(""));
+
+const keyPolicy = (key: string, inherited: ToolLeafPolicy): ToolLeafPolicy => {
+  const segments = nameSegments(key);
+  if (segments.length === 1 && METADATA_KEYS.has(segments[0] as string)) return "verbatim";
+  if (isShellKey(key)) return "shell";
+  if (isCodeKey(key)) return inherited === "shell" ? "shell" : "inert";
+  return inherited;
+};
+
 /**
  * Tools whose calls are observably read-only: an unresolved placeholder in
  * their arguments reads/greps/lists against a literal string and matches
@@ -310,6 +340,68 @@ function isShellSafeOriginal(text: string, quote: ShellQuote): boolean {
 /** Matches a fully formed reserved token (either version), for per-token shell safety checks. */
 const TOKEN_SCAN =
   /\[SGP1:[0-9a-f]{32}-\d{8,12}\]|\[SGP2:[A-Z][A-Z_]{0,31}-[a-z]{4}-[a-z]{4}-[a-z]{4}\]/g;
+
+/**
+ * True when [start, end) of `line` looks like it sits inside an ordinary
+ * quoted string that opens and closes on this line, with no interpolation or
+ * escape introducer between the opening quote and the match.
+ *
+ * Conservative, language-agnostic, line-based heuristic; it is not a parser
+ * and does not confirm the match is in a string. It can both over-refuse and
+ * miss. Callers must first rule out multi-line context with
+ * `crossesLineBoundary`. It guards the restoration context only and is not
+ * egress protection: code can still print, send or re-interpret the restored
+ * value.
+ */
+function isInPlainStringLiteral(line: string, start: number, end: number): boolean {
+  let q: string | null = null;
+  let seg = 0;
+  for (let i = 0; i < start; i++) {
+    const c = line[i];
+    if (q === null) {
+      if (c === "'" || c === '"') {
+        q = c;
+        seg = i + 1;
+        continue;
+      }
+      if (c === "`" || c === "#" || line.startsWith("//", i) || line.startsWith("/*", i) || line.startsWith("--", i)) return false;
+    } else {
+      if (c === "\\") {
+        i++;
+        continue;
+      }
+      if (c === q) q = null;
+    }
+  }
+  if (q === null) return false;
+  if (/[{$`\\]/.test(line.slice(seg, start))) return false;
+  for (let i = end; i < line.length; i++) {
+    if (line[i] === "\\") {
+      i++;
+      continue;
+    }
+    if (line[i] === q) return true;
+  }
+  return false;
+}
+
+/**
+ * True when the token's line may belong to a multi-line construct, so the
+ * line-based string check cannot be trusted: the line holds a triple quote,
+ * an odd number of non-overlapping triple quotes precedes the line (inside an
+ * open multi-line string), or the previous line ends in a backslash
+ * (continuation; doubled backslashes are not distinguished, so refuse).
+ *
+ * Conservative heuristic; deliberately not a whole-field ban, so a script with
+ * a balanced docstring above the assignment still works.
+ */
+function crossesLineBoundary(text: string, lineStart: number, line: string): boolean {
+  if (line.includes('"""') || line.includes("'''")) return true;
+  const before = text.slice(0, lineStart);
+  if ((before.match(/"""/g)?.length ?? 0) % 2 === 1) return true;
+  if ((before.match(/'''/g)?.length ?? 0) % 2 === 1) return true;
+  return /\\(?:\r\n|[\n\r\u2028\u2029])$/.test(before);
+}
 
 /**
  * Bound on distinct session identities retained for disposal. The core already
@@ -1244,27 +1336,65 @@ export function createTransparentSessionGuard(
   };
 
   /**
-   * Restores registered tokens in a tool input leaf. For shell-like tools the
-   * token must occupy a complete argument word AND its original must be safe
-   * in that word's existing quote context. Command/assignment/redirect tokens,
-   * expansion, quote-breaking and option injection refuse the whole call.
+   * True when at least one placeholder in `text` belongs to this session.
+   * Shell quoting rules only matter when a placeholder is actually replaced;
+   * an unmapped literal must fall through to the mapping policy instead of
+   * being reported as an unsupported shell construct.
+   */
+  const containsMappedToken = (sessionID: string, text: string): boolean => {
+    for (const match of text.matchAll(TOKEN_SCAN)) {
+      if (transportService.restoreText(sessionID, match[0]).ok) return true;
+    }
+    return false;
+  };
+
+  /**
+   * Restores registered tokens in a tool input leaf according to its policy.
+   * "shell": the token must occupy a complete argument word AND its original
+   * must be safe in that word's quote context; command/assignment/redirect
+   * tokens, expansion, quote-breaking and option injection refuse the call.
+   * "inert" (code/script fields): every restorable token's original must be
+   * free of shell-unsafe characters (spaces included), and the token must sit
+   * look like it sits in an ordinary single-line quoted string without
+   * interpolation, outside any multi-line string or line continuation
+   * (conservative heuristic, not a parser: it can over-refuse and miss, and
+   * does not confirm the token is in a string; it guards the restoration
+   * context, not egress). Otherwise the call is refused. "verbatim": plain restore.
    *
    * P1 (2026-10-06b) limited best-effort: when `allowDegraded` is set (the
-   * call is a proven read-only tool, not shell-like) a mapping failure
-   * (unknown/malformed marker) keeps the leaf literal and records a
-   * degradation instead of refusing — the placeholder reads as a literal
-   * that matches nothing, the tool's own output is the in-band signal, and a
-   * content-free WARN line is logged. Every other failure kind still refuses.
+   * call is a proven read-only tool with no shell/code fields) and the leaf is
+   * "verbatim", a mapping failure (unknown/malformed marker) keeps the leaf
+   * literal and records a degradation instead of refusing. Every other
+   * failure kind still refuses.
    */
   const restoreLeaf = (
     sessionID: string,
     text: string,
-    shellLike: boolean,
+    policy: ToolLeafPolicy,
     allowDegraded: boolean,
     degraded: { count: number },
   ): string => {
     if (!containsTokenPrefix(text)) return text;
-    if (shellLike) {
+    if (policy === "inert" && containsMappedToken(sessionID, text)) {
+      for (const match of text.matchAll(TOKEN_SCAN)) {
+        const restoredToken = transportService.restoreText(sessionID, match[0]);
+        if (!restoredToken.ok) continue;
+        if (!isShellSafeOriginal(restoredToken.text, "none")) throw new Error(TOOL_CODE_CONTEXT_ERROR);
+        const lineStart = Math.max(
+          text.lastIndexOf("\n", match.index),
+          text.lastIndexOf("\r", match.index),
+          text.lastIndexOf("\u2028", match.index),
+          text.lastIndexOf("\u2029", match.index),
+        ) + 1;
+        const tail = text.slice(match.index + match[0].length).search(/[\n\r\u2028\u2029]/);
+        const lineEnd = tail === -1 ? text.length : match.index + match[0].length + tail;
+        const line = text.slice(lineStart, lineEnd);
+        const from = match.index - lineStart;
+        if (crossesLineBoundary(text, lineStart, line)) throw new Error(TOOL_CODE_POSITION_ERROR);
+        if (!isInPlainStringLiteral(line, from, from + match[0].length)) throw new Error(TOOL_CODE_POSITION_ERROR);
+      }
+    }
+    if (policy === "shell" && containsMappedToken(sessionID, text)) {
       const argumentsOnly = parseSupportedShellArguments(text);
       if (argumentsOnly === null) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
       for (const match of text.matchAll(TOKEN_SCAN)) {
@@ -1280,6 +1410,7 @@ export function createTransparentSessionGuard(
     if (restored.ok) return restored.text;
     if (
       allowDegraded &&
+      policy === "verbatim" &&
       (restored.reason === "unknown_token" || restored.reason === "malformed_token")
     ) {
       degraded.count += 1;
@@ -1298,7 +1429,7 @@ export function createTransparentSessionGuard(
   const planToolInput = (
     value: unknown,
     sessionID: string,
-    shellLike: boolean,
+    policy: ToolLeafPolicy,
     seen: WeakSet<object>,
     out: ToolAssignment[],
     allowDegraded: boolean,
@@ -1320,10 +1451,10 @@ export function createTransparentSessionGuard(
         if (!("value" in descriptor)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
         const item = descriptor.value;
         if (typeof item === "string") {
-          const next = restoreLeaf(sessionID, item, shellLike, allowDegraded, degraded);
+          const next = restoreLeaf(sessionID, item, policy, allowDegraded, degraded);
           if (next !== item) out.push({ container: value, key: index, value: next });
         } else {
-          planToolInput(item, sessionID, shellLike, seen, out, allowDegraded, degraded);
+          planToolInput(item, sessionID, policy, seen, out, allowDegraded, degraded);
         }
       }
       return;
@@ -1336,11 +1467,12 @@ export function createTransparentSessionGuard(
       const descriptor = Object.getOwnPropertyDescriptor(record, key);
       if (descriptor === undefined || !("value" in descriptor)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
       const item = descriptor.value;
+      const itemPolicy = keyPolicy(key, policy);
       if (typeof item === "string") {
-        const next = restoreLeaf(sessionID, item, shellLike, allowDegraded, degraded);
+        const next = restoreLeaf(sessionID, item, itemPolicy, allowDegraded, degraded);
         if (next !== item) out.push({ container: record, key, value: next });
       } else {
-        planToolInput(item, sessionID, shellLike, seen, out, allowDegraded, degraded);
+        planToolInput(item, sessionID, itemPolicy, seen, out, allowDegraded, degraded);
       }
     }
   };
@@ -1368,24 +1500,32 @@ export function createTransparentSessionGuard(
     if (!inputCarriesToken(event.input, new WeakSet())) return;
     const sessionID = requireSessionID(event);
     ensureSeeded(sessionID);
-    const tool = typeof event.tool === "string" ? event.tool.toLowerCase() : "";
-    const shellLike =
-      !NON_SHELL_TOOLS.has(tool) ||
-      (isRecordLike(event.input) && typeof (event.input as RecordLike).command === "string");
-    // P1 (2026-10-06b): only proven read-only, non-shell tools may degrade to
-    // literal placeholders; writes/deletes/outbound/unknown tools keep
-    // refusing the affected invocation when restoration is incomplete.
-    const allowDegraded = READ_ONLY_TOOLS.has(tool) && !shellLike;
+    const rawTool = typeof event.tool === "string" ? event.tool : "";
+    const tool = rawTool.toLowerCase();
+    // Field-level model: the root policy is "shell" for shell tools and
+    // "verbatim" otherwise; each key may then switch the policy for its value
+    // (shell/command-like keys -> "shell", code/script keys -> "inert",
+    // description/title/label -> "verbatim").
+    const shellTool = isShellTool(rawTool);
+    const rootPolicy: ToolLeafPolicy = shellTool ? "shell" : "verbatim";
+    // P1 (2026-10-06b): only proven read-only tools without shell/code fields
+    // may degrade to literal placeholders; everything else refuses the
+    // affected invocation when restoration is incomplete.
+    const allowDegraded =
+      READ_ONLY_TOOLS.has(tool) &&
+      !shellTool &&
+      !(isRecordLike(event.input) &&
+        Object.keys(event.input as RecordLike).some((key) => isShellKey(key) || isCodeKey(key)));
     const degraded = { count: 0 };
     if (typeof event.input === "string") {
       const descriptor = Object.getOwnPropertyDescriptor(event, "input");
       if (descriptor === undefined || !("value" in descriptor) || descriptor.writable !== true) {
         throw new Error(TOOL_INPUT_SHAPE_ERROR);
       }
-      event.input = restoreLeaf(sessionID, event.input, shellLike, allowDegraded, degraded);
+      event.input = restoreLeaf(sessionID, event.input, rootPolicy, allowDegraded, degraded);
     } else {
       const plan: ToolAssignment[] = [];
-      planToolInput(event.input, sessionID, shellLike, new WeakSet(), plan, allowDegraded, degraded);
+      planToolInput(event.input, sessionID, rootPolicy, new WeakSet(), plan, allowDegraded, degraded);
       assertToolPlanWritable(plan);
       applyToolPlan(plan);
     }

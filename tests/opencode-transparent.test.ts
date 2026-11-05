@@ -1238,6 +1238,48 @@ describe("transparent tool execution gate", () => {
         const bad = { command: `echo x${T}$(id)` };
         await expect(run(hook, "bash", bad)).rejects.toThrow(TOOL_REFUSED);
       });
+
+      describe("several tokens on one line", () => {
+        // Each token resumes the line's quote scan where the previous one stopped.
+        const fill = (template: string, values: Record<string, string>) =>
+          template.replace(/[TUF]/g, (name) => values[name]);
+
+        it.each([
+          '"T U T"',
+          "'T' + 'U' + \"T\"",
+          "'T U' + \"T\"",
+          '"{" + "T"',
+          '"T" + "$" + "U"',
+          "'T'\r\n'U'\n\"T U\"",
+        ])("restores each token in its own plain string: %j", async (template) => {
+          const { hook } = await arm(posConfig);
+          const T = await mintToken(hook, KEY);
+          const U = await mintToken(hook, SLASHES);
+          const input = { code: fill(template, { T, U }) };
+          await run(hook, "ctx_execute", input);
+          expect(input.code).toBe(fill(template, { T: KEY, U: SLASHES }));
+        });
+
+        it.each([
+          "'T' + \"U",
+          '"T" + U',
+          '"T ${x} U"',
+          '"T \\" U"',
+          "'T' # 'U'",
+          "'T' // 'U'",
+          "'T' + 'U' + T",
+          "'T'\n'U\n'T'",
+          "'T F' + U",
+        ])("judges a later token by its own string: %j", async (template) => {
+          const { hook } = await arm(posConfig);
+          const T = await mintToken(hook, KEY);
+          const U = await mintToken(hook, SLASHES);
+          const input = { code: fill(template, { T, U, F: FOREIGN_TOKEN }) };
+          const before = JSON.stringify(input);
+          await expect(run(hook, "ctx_execute", input)).rejects.toThrow(POSITION);
+          expect(JSON.stringify(input)).toBe(before);
+        });
+      });
     });
   });
 

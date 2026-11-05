@@ -342,65 +342,113 @@ const TOKEN_SCAN =
   /\[SGP1:[0-9a-f]{32}-\d{8,12}\]|\[SGP2:[A-Z][A-Z_]{0,31}-[a-z]{4}-[a-z]{4}-[a-z]{4}\]/g;
 
 /**
- * True when [start, end) of `line` looks like it sits inside an ordinary
- * quoted string that opens and closes on this line, with no interpolation or
- * escape introducer between the opening quote and the match.
+ * Builds the position check for the placeholders of one code/script field.
+ * Call the result with each token's [start, end) in increasing order; it keeps
+ * its state between calls, so the whole field costs one forward pass however
+ * many tokens it holds, and a false result ends the field's check. A token's
+ * position passes unless `crossesLineBoundary` or `isInPlainStringLiteral`
+ * rejects it.
  *
  * Conservative, language-agnostic, line-based heuristic; it is not a parser
  * and does not confirm the match is in a string. It can both over-refuse and
- * miss. Callers must first rule out multi-line context with
- * `crossesLineBoundary`. It guards the restoration context only and is not
- * egress protection: code can still print, send or re-interpret the restored
- * value.
+ * miss. It guards the restoration context only and is not egress protection:
+ * code can still print, send or re-interpret the restored value.
  */
-function isInPlainStringLiteral(line: string, start: number, end: number): boolean {
-  let q: string | null = null;
-  let seg = 0;
-  for (let i = 0; i < start; i++) {
-    const c = line[i];
-    if (q === null) {
-      if (c === "'" || c === '"') {
-        q = c;
-        seg = i + 1;
-        continue;
+function createInertPositionCheck(text: string): (start: number, end: number) => boolean {
+  const lineBreak = /[\n\r\u2028\u2029]/g;
+  // Current line is [lineStart, lineEnd); lineEnd sits on its separator.
+  let lineStart = 0;
+  let lineEnd = -1;
+  // Triple quotes in text[0, countedTo). A separator ends any run of quotes, so
+  // per-line counts add up to the non-overlapping count over the whole prefix.
+  let countedTo = 0;
+  let doubleTriples = 0;
+  let singleTriples = 0;
+  let crossesLineBoundary = false;
+  // Quote scan of the current line, resumed from `cursor` for each token.
+  let cursor = 0;
+  let quote: string | null = null;
+  let introducerInString = false;
+  let closingQuote = -1;
+
+  const enterLineOf = (index: number): void => {
+    while (lineEnd < index) {
+      lineStart = lineEnd + 1;
+      lineBreak.lastIndex = lineStart;
+      lineEnd = lineBreak.exec(text)?.index ?? text.length;
+    }
+    const uncounted = text.slice(countedTo, lineStart);
+    doubleTriples += uncounted.match(/"""/g)?.length ?? 0;
+    singleTriples += uncounted.match(/'''/g)?.length ?? 0;
+    countedTo = lineStart;
+    const line = text.slice(lineStart, lineEnd);
+    // True when the line may belong to a multi-line construct, so the
+    // line-based string check cannot be trusted: the line holds a triple quote,
+    // an odd number of non-overlapping triple quotes precedes the line (inside
+    // an open multi-line string), or the previous line ends in a backslash
+    // (continuation; doubled backslashes are not distinguished, so refuse).
+    // Deliberately not a whole-field ban, so a script with a balanced docstring
+    // above the assignment still works.
+    crossesLineBoundary =
+      line.includes('"""') ||
+      line.includes("'''") ||
+      doubleTriples % 2 === 1 ||
+      singleTriples % 2 === 1 ||
+      /\\(?:\r\n|[\n\r\u2028\u2029])$/.test(text.slice(Math.max(0, lineStart - 3), lineStart));
+    cursor = lineStart;
+    quote = null;
+    introducerInString = false;
+  };
+
+  /**
+   * True when [start, end) looks like it sits inside an ordinary quoted string
+   * that opens and closes on the current line, with no interpolation or escape
+   * introducer between the opening quote and the token.
+   */
+  const isInPlainStringLiteral = (start: number, end: number): boolean => {
+    while (cursor < start) {
+      const c = text[cursor];
+      if (quote === null) {
+        if (c === "'" || c === '"') {
+          quote = c;
+          introducerInString = false;
+        } else if (
+          c === "`" || c === "#" || text.startsWith("//", cursor) || text.startsWith("/*", cursor) || text.startsWith("--", cursor)
+        ) {
+          return false;
+        }
+      } else if (c === "\\") {
+        introducerInString = true;
+        cursor++;
+      } else if (c === quote) {
+        quote = null;
+      } else if (c === "{" || c === "$" || c === "`") {
+        introducerInString = true;
       }
-      if (c === "`" || c === "#" || line.startsWith("//", i) || line.startsWith("/*", i) || line.startsWith("--", i)) return false;
-    } else {
-      if (c === "\\") {
+      cursor++;
+    }
+    if (quote === null || introducerInString) return false;
+    // A token holds no quote or backslash, so a search from an earlier token
+    // in this string walked through this one: its answer still holds, and each
+    // string on the line is searched once.
+    if (closingQuote >= end) return true;
+    for (let i = end; i < lineEnd; i++) {
+      if (text[i] === "\\") {
         i++;
         continue;
       }
-      if (c === q) q = null;
+      if (text[i] === quote) {
+        closingQuote = i;
+        return true;
+      }
     }
-  }
-  if (q === null) return false;
-  if (/[{$`\\]/.test(line.slice(seg, start))) return false;
-  for (let i = end; i < line.length; i++) {
-    if (line[i] === "\\") {
-      i++;
-      continue;
-    }
-    if (line[i] === q) return true;
-  }
-  return false;
-}
+    return false;
+  };
 
-/**
- * True when the token's line may belong to a multi-line construct, so the
- * line-based string check cannot be trusted: the line holds a triple quote,
- * an odd number of non-overlapping triple quotes precedes the line (inside an
- * open multi-line string), or the previous line ends in a backslash
- * (continuation; doubled backslashes are not distinguished, so refuse).
- *
- * Conservative heuristic; deliberately not a whole-field ban, so a script with
- * a balanced docstring above the assignment still works.
- */
-function crossesLineBoundary(text: string, lineStart: number, line: string): boolean {
-  if (line.includes('"""') || line.includes("'''")) return true;
-  const before = text.slice(0, lineStart);
-  if ((before.match(/"""/g)?.length ?? 0) % 2 === 1) return true;
-  if ((before.match(/'''/g)?.length ?? 0) % 2 === 1) return true;
-  return /\\(?:\r\n|[\n\r\u2028\u2029])$/.test(before);
+  return (start, end) => {
+    if (start > lineEnd) enterLineOf(start);
+    return !crossesLineBoundary && isInPlainStringLiteral(start, end);
+  };
 }
 
 /**
@@ -1376,22 +1424,12 @@ export function createTransparentSessionGuard(
   ): string => {
     if (!containsTokenPrefix(text)) return text;
     if (policy === "inert" && containsMappedToken(sessionID, text)) {
+      const isAllowedPosition = createInertPositionCheck(text);
       for (const match of text.matchAll(TOKEN_SCAN)) {
         const restoredToken = transportService.restoreText(sessionID, match[0]);
         if (!restoredToken.ok) continue;
         if (!isShellSafeOriginal(restoredToken.text, "none")) throw new Error(TOOL_CODE_CONTEXT_ERROR);
-        const lineStart = Math.max(
-          text.lastIndexOf("\n", match.index),
-          text.lastIndexOf("\r", match.index),
-          text.lastIndexOf("\u2028", match.index),
-          text.lastIndexOf("\u2029", match.index),
-        ) + 1;
-        const tail = text.slice(match.index + match[0].length).search(/[\n\r\u2028\u2029]/);
-        const lineEnd = tail === -1 ? text.length : match.index + match[0].length + tail;
-        const line = text.slice(lineStart, lineEnd);
-        const from = match.index - lineStart;
-        if (crossesLineBoundary(text, lineStart, line)) throw new Error(TOOL_CODE_POSITION_ERROR);
-        if (!isInPlainStringLiteral(line, from, from + match[0].length)) throw new Error(TOOL_CODE_POSITION_ERROR);
+        if (!isAllowedPosition(match.index, match.index + match[0].length)) throw new Error(TOOL_CODE_POSITION_ERROR);
       }
     }
     if (policy === "shell" && containsMappedToken(sessionID, text)) {

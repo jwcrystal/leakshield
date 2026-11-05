@@ -1259,7 +1259,7 @@ describe("transparent tool execution gate", () => {
       it("passes partial masks, foreign stripped tokens, a bare prefix and canonical tokens", async () => {
         const { hook } = await arm();
         const T = await mintToken(hook, KEY);
-        // The current minter never issues SGP1, so a stripped SGP1 form can only be foreign here.
+        // Near-miss covers SGP2 only: nothing mints SGP1, so a changed SGP1 form passes.
         for (const text of ["SGP2:API_KEY-••••-vxpu", strip(FOREIGN_TOKEN), spaced(FOREIGN_TOKEN), "the SGP2: format is documented", "SGP1 and SGP2"]) {
           const input = { ui: `x ${text}` };
           await expect(run(hook, "openchamber_render", input)).resolves.toBeUndefined();

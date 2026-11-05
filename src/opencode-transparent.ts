@@ -390,7 +390,7 @@ const TOKEN_SCAN =
 
 /**
  * Relaxed (brackets optional, separators up to 4 non-alphanumerics, any case)
- * forms of the two placeholder versions, used only to spot a placeholder the
+ * forms of the SGP2 placeholder, used only to spot a placeholder the
  * model reformatted. Every quantifier is bounded and there is no nested
  * unbounded group. A candidate counts only if its canonical form restores in
  * the session, so no token enumeration is needed.
@@ -403,7 +403,6 @@ const TOKEN_SCAN =
  * text after a stripped token is often more short words, which this ignores
  * because only exactly 12 letters follow the category.
  */
-const NEAR_SEP = "[^A-Za-z0-9]{1,4}";
 const NEAR_MISS_V2_HEAD = /(?<![A-Za-z0-9])SGP2/gi;
 const NEAR_MISS_V2_MAX_SEPARATOR = 4;
 const NEAR_MISS_V2_MAX_LETTERS = 80;
@@ -431,10 +430,6 @@ function collectNearMissLetters(text: string, from: number): string {
   }
   return letters;
 }
-const NEAR_MISS_V1 = new RegExp(
-  `(?<![A-Za-z0-9])SGP1${NEAR_SEP}([0-9a-f]{32})${NEAR_SEP}(\\d{8,12})(?!\\d)`,
-  "gi",
-);
 
 /**
  * Builds the position check for the placeholders of one code/script field.
@@ -1498,7 +1493,7 @@ export function createTransparentSessionGuard(
    * and tokens unknown to the session never qualify.
    */
   const textHasNearMiss = (sessionID: string, text: string): boolean => {
-    if (!/sgp[12]/i.test(text)) return false;
+    if (!/sgp2/i.test(text)) return false;
     const rest = text.replace(TOKEN_SCAN, " ");
     for (const head of rest.matchAll(NEAR_MISS_V2_HEAD)) {
       const letters = collectNearMissLetters(rest, head.index + head[0].length);
@@ -1510,11 +1505,6 @@ export function createTransparentSessionGuard(
         ensureSeeded(sessionID);
         if (transportService.restoreText(sessionID, canonical).ok) return true;
       }
-    }
-    for (const match of rest.matchAll(NEAR_MISS_V1)) {
-      const canonical = `[SGP1:${match[1].toLowerCase()}-${match[2]}]`;
-      ensureSeeded(sessionID);
-      if (transportService.restoreText(sessionID, canonical).ok) return true;
     }
     return false;
   };

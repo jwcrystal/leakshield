@@ -1347,6 +1347,30 @@ describe("transparent tool execution gate", () => {
       await refused(KEY, baseConfig, template);
     });
 
+    // rtk is a wrapper judged by the command it runs; its runner subcommands are refused.
+    it.skipIf(process.platform === "win32").each([
+      "rtk sh -c T", "rtk bash -c 'echo T'", "rtk python3 -c T", "rtk eval T", "rtk env T", "rtk sudo T",
+      "rtk err sh -c T", "rtk err T", "rtk test T", "rtk summary T", "rtk run T", "rtk run -c T",
+      "rtk bypass T", "rtk proxy sh -c T", "rtk proxy T", "rtk pipe T", "rtk --version T", "rtk T",
+      "rtk wget -e T u", "rtk wget --exec a=T u", "rtk curl -H x:T u", "rtk curl -H 'x: T' u",
+      "FOO=1 rtk sh -c T", "/opt/homebrew/bin/rtk sh -c T", "./rtk sh -c T", "RTK sh -c T", "'rtk' sh -c T", "/x/rtk err sh -c T", "'rtk' 'err' T",
+    ])("refuses a token under rtk: %s", async (template) => {
+      await refused(KEY, baseConfig, template);
+    });
+
+    it.skipIf(process.platform === "win32").each([
+      "rtk git log T", "rtk grep T f", "rtk ls T", "rtk read T", "rtk curl T", "rtk wget T u",
+    ])("restores a whole-word token under rtk: %s", async (template) => {
+      expect(await allowed(KEY, baseConfig, template)).toBe(template.replaceAll("T", KEY));
+    });
+
+    it.skipIf(process.platform === "win32")("leaves a token-free rtk sh -c untouched", async () => {
+      const { hook } = await arm(baseConfig);
+      const input = { command: "rtk sh -c 'echo x'" };
+      await expect(run(hook, input)).resolves.toBeUndefined();
+      expect(input.command).toBe("rtk sh -c 'echo x'");
+    });
+
     it.skipIf(process.platform === "win32")("restores a spaced original inside single quotes for curl -H", async () => {
       const restored = await allowed(SPACED, { ...baseConfig, nda_keywords: [SPACED] }, "curl -H 'x: T' https://x");
       expect(restored).toBe(`curl -H 'x: ${SPACED}' https://x`);
@@ -1728,12 +1752,196 @@ describe("transparent tool execution gate", () => {
     });
   });
 
+  describe("frozen nested tool input (the host freezes nested values, not the root)", () => {
+    const UNSAFE = "abc'; touch /tmp/pwn; echo 'x";
+    const unsafeConfig: GuardConfig = { ...baseConfig, nda_keywords: [UNSAFE] };
+    type AnyHook = (name: string) => (event: unknown) => Promise<unknown> | unknown;
+    const run = (hook: AnyHook, tool: string, input: unknown) =>
+      hook("tool:execute.before")({ tool, sessionID: "session-1", input });
+    // Freezes every nested level but not the root, as the real host does.
+    const freezeNested = <T extends Record<string, unknown> | unknown[]>(root: T): T => {
+      const walk = (value: unknown): void => {
+        if (value === null || typeof value !== "object" || Object.isFrozen(value)) return;
+        for (const item of Object.values(value)) walk(item);
+        Object.freeze(value);
+      };
+      for (const item of Object.values(root)) walk(item);
+      return root;
+    };
+
+    it("restores html and ui under a frozen parameters object by replacing it with a copy", async () => {
+      const { hook } = await arm();
+      const T = await mintToken(hook, KEY);
+      for (const field of ["html", "ui"]) {
+        const parameters = { [field]: `<p>${T}</p>` };
+        const input = freezeNested({ action: "render", parameters });
+        await run(hook, "openchamber_render", input);
+        expect((input.parameters as Record<string, string>)[field]).toBe(`<p>${KEY}</p>`);
+        expect(input.parameters).not.toBe(parameters);
+        expect(parameters[field]).toBe(`<p>${T}</p>`);
+        expect(Object.isFrozen(parameters)).toBe(true);
+        expect(Object.isFrozen(input)).toBe(false);
+        expect(Object.keys(input)).toEqual(["action", "parameters"]);
+      }
+    });
+
+    it("rebuilds nested objects and arrays, keeps order, and leaves an unchanged sibling identical", async () => {
+      const { hook } = await arm();
+      const T = await mintToken(hook, KEY);
+      const keep = { d: "keep" };
+      const input = freezeNested({ z: 1, a: { x: 0, b: [{ c: `v ${T}` }, keep] } });
+      const oldA = input.a;
+      await run(hook, "mystery", input);
+      expect(input.a).not.toBe(oldA);
+      expect(Object.keys(input.a)).toEqual(["x", "b"]);
+      expect(input.a.b).toEqual([{ c: `v ${KEY}` }, { d: "keep" }]);
+      expect(input.a.b[1]).toBe(keep);
+      expect(Object.isFrozen(keep)).toBe(true);
+      expect(oldA.b[0]).toEqual({ c: `v ${T}` });
+    });
+
+    it("restores tokens in different branches and a frozen object inside an unfrozen one", async () => {
+      const { hook } = await arm();
+      const T = await mintToken(hook, KEY);
+      const frozenInner = Object.freeze({ note: `n ${T}`, other: "o" });
+      const input = {
+        left: freezeNested({ p: { q: `l ${T}` } }),
+        right: freezeNested({ list: [`r ${T}`, "same"] }),
+        mixed: { inner: frozenInner, plain: `m ${T}` },
+      };
+      await run(hook, "mystery", input);
+      expect(input.left.p.q).toBe(`l ${KEY}`);
+      expect(input.right.list).toEqual([`r ${KEY}`, "same"]);
+      expect(input.mixed.inner).toEqual({ note: `n ${KEY}`, other: "o" });
+      expect(input.mixed.inner).not.toBe(frozenInner);
+      expect(input.mixed.plain).toBe(`m ${KEY}`);
+    });
+
+    it("restores label and a safe command in frozen ctx_batch_execute commands", async () => {
+      const { hook } = await arm();
+      const T = await mintToken(hook, KEY);
+      const input = freezeNested({ commands: [{ label: T, command: `printf ${T}` }] });
+      await run(hook, "ctx_batch_execute", input);
+      expect(input.commands).toEqual([{ label: KEY, command: `printf ${KEY}` }]);
+    });
+
+    it("keeps shell rules for a frozen command: substitution and unsafe originals refuse unchanged", async () => {
+      const { hook } = await arm(unsafeConfig);
+      const KT = await mintToken(hook, UNSAFE);
+      for (const command of [`echo $(printf ${KT})`, `echo '${KT}'`]) {
+        const commands = [{ label: "a", command }];
+        const input = freezeNested({ commands });
+        const first = input.commands[0];
+        await expect(run(hook, "ctx_batch_execute", input)).rejects.toThrow(TOOL_REFUSED);
+        expect(input.commands).toBe(commands);
+        expect(input.commands[0]).toBe(first);
+        expect(first.command).toBe(command);
+      }
+    });
+
+    it("applies the inert code rules through a frozen parameters object", async () => {
+      const { hook } = await arm();
+      const T = await mintToken(hook, KEY);
+      const ok = freezeNested({ parameters: { code: `x = "${T}"` } });
+      await run(hook, "ctx_execute", ok);
+      expect(ok.parameters.code).toBe(`x = "${KEY}"`);
+      const parameters = { code: `f"{${T}}"` };
+      const bad = freezeNested({ parameters });
+      await expect(run(hook, "ctx_execute", bad)).rejects.toThrow(TOOL_REFUSED);
+      expect(bad.parameters).toBe(parameters);
+      expect(parameters.code).toBe(`f"{${T}}"`);
+    });
+
+    it("still refuses a near-miss in a frozen subtree and leaves execute {code} untouched", async () => {
+      const { hook } = await arm();
+      const T = await mintToken(hook, KEY);
+      const parameters = { html: `${T.slice(0, -1)}` };
+      const bad = freezeNested({ parameters });
+      await expect(run(hook, "openchamber_render", bad)).rejects.toThrow("format was changed");
+      expect(bad.parameters).toBe(parameters);
+      const code = { code: `const s = "${T}";` };
+      await run(hook, "execute", code);
+      expect(code.code).toBe(`const s = "${T}";`);
+    });
+
+    it("restores question options nested in frozen arrays", async () => {
+      const { hook } = await arm();
+      const T = await mintToken(hook, KEY);
+      const input = freezeNested({
+        questions: [{ question: `use ${T}?`, options: [{ label: "a", description: T }] }],
+      });
+      await run(hook, "question", input);
+      expect(input.questions).toEqual([
+        { question: `use ${KEY}?`, options: [{ label: "a", description: KEY }] },
+      ]);
+    });
+
+    it("keeps a frozen subtree with no token as the identical object", async () => {
+      const { hook } = await arm();
+      const T = await mintToken(hook, KEY);
+      const quiet = { deep: [{ v: "plain" }] };
+      const input = freezeNested({ quiet, text: T });
+      const oldQuiet = input.quiet;
+      await run(hook, "mystery", input);
+      expect(input.text).toBe(KEY);
+      expect(input.quiet).toBe(oldQuiet);
+      const untouched = freezeNested({ parameters: { html: "<p>none</p>" } });
+      const parameters = untouched.parameters;
+      await run(hook, "openchamber_render", untouched);
+      expect(untouched.parameters).toBe(parameters);
+    });
+
+    it("refuses with nothing replaced when one branch is valid and another holds a foreign token", async () => {
+      const { hook } = await arm();
+      const T = await mintToken(hook, KEY);
+      const good = { html: `<p>${T}</p>` };
+      const badBranch = { list: [FOREIGN_TOKEN] };
+      const input = freezeNested({ good, bad: badBranch });
+      const goodRef = input.good;
+      await expect(run(hook, "mystery", input)).rejects.toThrow(TOOL_REFUSED);
+      expect(input.good).toBe(goodRef);
+      expect(input.bad).toBe(badBranch);
+      expect(good.html).toBe(`<p>${T}</p>`);
+    });
+
+    it("refuses with nothing replaced for a proxy, accessor, or symbol key inside a frozen subtree", async () => {
+      const { hook } = await arm();
+      const T = await mintToken(hook, KEY);
+      const hostile: Array<() => unknown> = [
+        () => new Proxy({ z: "1" }, {}),
+        () => Object.defineProperty({}, "g", { enumerable: true, get: () => "x" }),
+        () => ({ [Symbol("s")]: 1, k: "v" }),
+      ];
+      for (const make of hostile) {
+        const good = { html: `<p>${T}</p>` };
+        const input = { good, nested: Object.freeze({ inner: Object.freeze(make()) }) } as Record<string, unknown>;
+        Object.freeze(good);
+        await expect(run(hook, "mystery", input)).rejects.toThrow(TOOL_REFUSED);
+        expect(input.good).toBe(good);
+        expect(good.html).toBe(`<p>${T}</p>`);
+      }
+    });
+
+    it("refuses a frozen root and a shared reference inside frozen input, unchanged", async () => {
+      const { hook } = await arm();
+      const T = await mintToken(hook, KEY);
+      const root = Object.freeze({ html: `<p>${T}</p>` });
+      await expect(run(hook, "mystery", root)).rejects.toThrow(TOOL_REFUSED);
+      expect(root.html).toBe(`<p>${T}</p>`);
+      const shared = Object.freeze({ s: `<p>${T}</p>` });
+      const input = freezeNested({ a: shared, b: shared, c: T }) as Record<string, unknown>;
+      await expect(run(hook, "mystery", input)).rejects.toThrow(TOOL_REFUSED);
+      expect(input.c).toBe(T);
+      expect(input.a).toBe(shared);
+    });
+  });
+
   it("refuses tokens hidden in object keys as well as values", async () => {
     const { hook } = await arm();
     const token = await mintToken(hook, KEY);
     await expect(
       hook("tool:execute.before")({ tool: "read", sessionID: "session-1", input: { [token]: "x" } }),
-    ).rejects.toThrow("argument structure cannot be safely restored");
+    ).rejects.toThrow("structure of one argument could not be restored");
     await expect(
       hook("tool:execute.before")({
         tool: "read",

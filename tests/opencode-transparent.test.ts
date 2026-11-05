@@ -1404,6 +1404,7 @@ describe("transparent tool execution gate", () => {
       expect(await allowed(KEY, baseConfig, "curl --config=a:T")).toBe(`curl --config=a:${KEY}`);
     });
     it.skipIf(process.platform === "win32").each([
+      "curl -#T u", "curl '-#T' u", "curl -:T u", "curl -Hx:T u", "curl -uuser:T u", "http -a:T u",
       "curl -T u", "curl --T u", "curl -sT u", "curl --fooT u", "curl '-T' u", 'curl "--T" u',
       "http -T u", "curl -HT u",
     ])("refuses a token that extends an option name: %s", async (template) => {
@@ -1424,7 +1425,7 @@ describe("transparent tool execution gate", () => {
     });
 
     it.skipIf(process.platform === "win32").each([
-      "curl --header=x:T u", "curl --header=T u", "curl -Hx:T u", "curl -uuser:T u",
+      "curl --header=x:T u", "curl --header=T u", "curl -H x:T u", "curl -u user:T u",
       "curl -H T u", "curl T u", "curl -e a:T u",
       "wget T u", "wget --header T u", "wget -4 T u", "wget --exclude-domains T u",
     ])("still restores an option value or whole word: %s", async (template) => {

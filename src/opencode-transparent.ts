@@ -1613,11 +1613,12 @@ export function createTransparentSessionGuard(
           (word) => (embedded || word.value === match[0]) && word.start <= match.index && word.end >= end,
         );
         if (argument === undefined) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
-        // A token may not extend an option name (`-TOKEN`, `-sTOKEN`, `--TOKEN`):
-        // the restored text would change which option the word is. Option
-        // values (`--header=x:T`, `-Hx:T`) have a non-option character before it.
+        // In a word starting with `-`, only `--name=value` may hold a token. Short
+        // options cluster, with punctuation flags too (`-#`, `-:`), so restored
+        // text could become an option and its value (`-#T/tmp/x` uploads a file).
         const valueStart = argument.start + (argument.quote === "none" ? 0 : 1);
-        if (/^-[A-Za-z0-9-]*$/.test(text.slice(valueStart, match.index))) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
+        const before = text.slice(valueStart, match.index);
+        if (before.startsWith("-") && !/^--[A-Za-z0-9-]+=/.test(before)) throw new Error(TOOL_SHELL_CONTEXT_ERROR);
         const restoredToken = transportService.restoreText(sessionID, match[0]);
         if (!restoredToken.ok) throw new Error(toolRestoreError(restoredToken.reason));
         if (!isShellSafeOriginal(restoredToken.text, argument.quote)) throw new Error(TOOL_SHELL_CONTEXT_ERROR);

@@ -387,7 +387,7 @@ function isWgetExecuteCommand(text: string): boolean {
   return words.slice(1).some((word) => {
     if (word.redirect) return false;
     const optionName = word.value.split("=", 1)[0] as string;
-    return /^-[A-Za-z]*e/.test(word.value) || (optionName.length >= 3 && "--execute".startsWith(optionName));
+    return /^-[A-Za-z0-9]*e/.test(word.value) || (optionName.length >= 3 && "--execute".startsWith(optionName));
   });
 }
 /** Matches a fully formed reserved token (either version), for per-token shell safety checks. */

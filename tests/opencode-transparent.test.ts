@@ -1414,6 +1414,8 @@ describe("transparent tool execution gate", () => {
     it.skipIf(process.platform === "win32").each([
       "wget -e T u", "wget -e a=T u", "wget -e 'a = T' u", "wget -qe a=T u", "wget -ea=T u",
       "wget --execute=a=T u", "wget --execute a=T u",
+      // Short flags cluster, digits included.
+      "wget -4e a=T u", "wget -6e 'a = T' u", "wget -q4e a=T u", "wget -4ea=T u",
       // GNU long options accept unique abbreviations.
       "wget --exe a=T u", "wget --exec a=T u", "wget --execu=a=T u", "wget --execut 'a = T' u",
     ])("refuses wget -e/--execute, whose value is parsed again: %s", async (template) => {
@@ -1424,6 +1426,7 @@ describe("transparent tool execution gate", () => {
       "curl --header=x:T u", "curl --header=T u", "curl -Hx:T u", "curl -uuser:T u",
       "curl -H T u", "curl T u", "wget --header=x:T u", "curl -e a:T u",
       "wget --exclude-domains a:T u", "wget --egd-file=a:T u",
+      "wget -4 --header=x:T u",
     ])("still restores an option value or whole word: %s", async (template) => {
       expect(await allowed(KEY, baseConfig, template)).toBe(template.replaceAll("T", KEY));
     });

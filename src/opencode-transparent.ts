@@ -378,11 +378,17 @@ function commandAllowsEmbeddedTokens(text: string): boolean {
  * parse that `isShellSafeOriginal` does not cover (the value can set
  * `output_document`, `post_file` and the like). The command must be literally
  * `wget`; `curl -e` is a referer and `curl -K`/`--config` only name a file.
+ * GNU long options accept unique abbreviations (`--exec`), so any prefix of
+ * `--execute` counts; the shorter ambiguous ones make wget exit with an error.
  */
 function isWgetExecuteCommand(text: string): boolean {
   const words = parseLiteralShellWords(text);
   if (words === null || !commandAllowsEmbeddedTokens(text) || words[0].value !== "wget") return false;
-  return words.slice(1).some((word) => !word.redirect && (/^-[A-Za-z]*e/.test(word.value) || /^--execute(=|$)/.test(word.value)));
+  return words.slice(1).some((word) => {
+    if (word.redirect) return false;
+    const optionName = word.value.split("=", 1)[0] as string;
+    return /^-[A-Za-z]*e/.test(word.value) || (optionName.length >= 3 && "--execute".startsWith(optionName));
+  });
 }
 /** Matches a fully formed reserved token (either version), for per-token shell safety checks. */
 const TOKEN_SCAN =

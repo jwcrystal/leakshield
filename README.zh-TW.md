@@ -26,7 +26,7 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 
 **實驗性，`0.x` 版本。** 已發佈到 npm（`leakshield`）：可用 `npx leakshield --help` 查看指令，或在本機建置（`npm ci && npm run build`）再讓 OpenCode 指向 `dist` 目錄。沒有參數也沒有輸入時，CLI 會等待 stdin。
 
-- Transparent 模式已在 OpenCode v2.0.28 搭配本機替身 provider 驗證，並用真實 OpenAI 模型驗證過一次。它**不保證**敏感內容絕不會送到模型：建議的 hook-first 設定在 `--doctor` 顯示為 `PARTIAL`，hook 之後才加入的內容，以及被允許的工具外送（curl、遠端 MCP），都不在保護範圍內。
+- Transparent 模式已在 OpenCode v2.0.28 搭配本機替身 provider 驗證，並用真實 OpenAI 模型驗證過一次。0.3.0 的工具還原另在 OpenCode v2.2.5 用本機替身 provider、OpenChamber 的 render 工具與 `rtk` 重新驗證（[紀錄](docs/evidence/2026-11-06-opencode-2.2.5-tool-restoration.md)）。它**不保證**敏感內容絕不會送到模型：建議的 hook-first 設定在 `--doctor` 顯示為 `PARTIAL`，hook 之後才加入的內容，以及被允許的工具外送（curl、遠端 MCP），都不在保護範圍內。
 - 尚未驗證：Windows 與 Linux 的 OS keychain 持久化（macOS 已於 2026-10-20 驗證）、真實 Anthropic provider、其他 provider 的長對話、長時間使用（[#26](https://github.com/jwcrystal/leakshield/issues/26)）。
 - `0.x` 期間預設值仍可能調整，變更見 [CHANGELOG](CHANGELOG.md)。
 - 驗證紀錄：[docs/evidence](docs/evidence/README.md)。漏洞請私下回報：[SECURITY.md](SECURITY.md)。授權：[MIT](LICENSE)。
@@ -278,7 +278,7 @@ LeakShield 只支援 OpenCode v2：v2 載入套件的 `id` + `setup(ctx)` 定義
 
 #### 詳細說明
 
-- [Transparent 模式](docs/plugin/transparent-mode.zh-TW.md): 佔位符、支援的協定、Shell 參數還原、重啟限制
+- [Transparent 模式](docs/plugin/transparent-mode.zh-TW.md): 佔位符、支援的協定、工具參數還原（依欄位判斷、`code`／`script` 欄位、Code Mode、`curl`、`rtk`）、重啟限制
 - [Wire 保護](docs/plugin/wire-protection.zh-TW.md): hook-only 與 final wire 兩種層級、AI SDK provider、拒絕、回覆端復原
 - [Native WebSocket](docs/plugin/websocket.zh-TW.md): 實驗性的 Responses-family 支援與限制
 - [映射持久化](docs/plugin/persistence.zh-TW.md): 選擇性開啟的加密儲存、金鑰保管、清除
@@ -341,7 +341,7 @@ Doctor 是在 host 之外執行的安裝層檢查，看不到執行中的 sessio
 
 ### 保護範圍與不保護的部分
 
-LeakShield 保護送往模型的對話內容：prompt、重播的歷史、工具輸出，以及（transparent 模式下）可解析其結構的 provider 請求 body。它**不是**工具對外連線的防火牆：被允許的本機工具仍可透過 `curl`、遠端 MCP server 或任何其他管道把原文傳出去。要管控工具的目的地，需要此 plugin 之外的權限層。
+LeakShield 保護送往模型的對話內容：prompt、重播的歷史、工具輸出，以及（transparent 模式下）可解析其結構的 provider 請求 body。它**不是**工具對外連線的防火牆：被允許的本機工具仍可透過 `curl`、遠端 MCP server 或任何其他管道把原文傳出去。要管控工具的目的地，需要此 plugin 之外的權限層。從 0.3.0 起，`curl` 與 `http` 的參數內也可以放 placeholder，讓工具帶著受保護的值呼叫 API；這時原文會依設計離開本機。
 
 偵測也有已知缺口：街道／郵遞地址、日期、IPv6，以及關鍵字清單之外或短於 8 字元的一般賦值都不會被偵測。信用卡與 IBAN 只有在檢查碼驗證通過時才會命中；IP 偵測只涵蓋公開 IPv4（超過四段的點分數字會整段回報，避免內嵌位址漏遮；`2026.10.21.14.32.59` 這類點分日期也會回報）；URL 偵測存在但需手動開啟，見[偵測範圍](#偵測範圍)。
 

@@ -26,7 +26,7 @@ MCP server mode has been removed. It depended on the model voluntarily calling a
 
 **Experimental, `0.x`.** Published to npm as `leakshield`: run `npx leakshield --help` to see the commands, or build locally (`npm ci && npm run build`) and point OpenCode at the `dist` directory. Without arguments or input, the CLI waits on stdin.
 
-- Transparent mode has been verified on OpenCode v2.0.28 with local loopback providers, and once against a real OpenAI model. It is **not** a guarantee that nothing sensitive reaches a model: the recommended hook-first setup is reported as `PARTIAL` by `--doctor`, and content added after the plugin's hooks or sent by permitted tools (curl, remote MCP) is outside its coverage.
+- Transparent mode has been verified on OpenCode v2.0.28 with local loopback providers, and once against a real OpenAI model. The 0.3.0 tool restoration was rechecked on OpenCode v2.2.5 with a loopback provider, the OpenChamber render tool and `rtk` ([record](docs/evidence/2026-11-06-opencode-2.2.5-tool-restoration.md)). It is **not** a guarantee that nothing sensitive reaches a model: the recommended hook-first setup is reported as `PARTIAL` by `--doctor`, and content added after the plugin's hooks or sent by permitted tools (curl, remote MCP) is outside its coverage.
 - Not yet verified: OS-keychain custody on Windows and Linux (macOS verified 2026-10-20), a real Anthropic provider, long histories on other providers, long-running use ([#26](https://github.com/jwcrystal/leakshield/issues/26)).
 - Defaults may still change during `0.x`; see the [changelog](CHANGELOG.md).
 - Verification records: [docs/evidence](docs/evidence/README.md). Report vulnerabilities privately: [SECURITY.md](SECURITY.md). License: [MIT](LICENSE).
@@ -282,7 +282,7 @@ See [Wire protection](docs/plugin/wire-protection.md) for both levels.
 
 #### Detailed guides
 
-- [Transparent mode](docs/plugin/transparent-mode.md): placeholders, supported protocols, shell argument restoration, restart limitation
+- [Transparent mode](docs/plugin/transparent-mode.md): placeholders, supported protocols, tool argument restoration (per field, `code`/`script` fields, Code Mode, `curl`, `rtk`), restart limitation
 - [Wire protection](docs/plugin/wire-protection.md): hook-only and final wire levels, AI SDK providers, refusals, reply-side recovery
 - [Native WebSocket](docs/plugin/websocket.md): experimental Responses-family support and its limits
 - [Mapping persistence](docs/plugin/persistence.md): opt-in encrypted storage, key custody, erasure
@@ -345,7 +345,7 @@ Doctor is an install-level check that runs outside the host — it cannot see in
 
 ### What this protects — and what it does not
 
-LeakShield protects model-conversation content: prompts, replayed history, tool outputs, and (in transparent mode) provider-bound request bodies whose shape it can parse. It is **not** a tool-egress firewall: a permitted local tool can still transmit originals over the network via `curl`, a remote MCP server, or any other channel. Controlling tool destinations requires a separate permission layer outside this plugin.
+LeakShield protects model-conversation content: prompts, replayed history, tool outputs, and (in transparent mode) provider-bound request bodies whose shape it can parse. It is **not** a tool-egress firewall: a permitted local tool can still transmit originals over the network via `curl`, a remote MCP server, or any other channel. Controlling tool destinations requires a separate permission layer outside this plugin. Since 0.3.0, `curl` and `http` may also hold a placeholder inside an argument, so a tool can call an API with the protected value; the original then leaves the machine by design.
 
 Detection also has known gaps: street/postal addresses, dates, IPv6, and generic assignments outside the keyword list or below the 8-character minimum pass through undetected. Credit card and IBAN numbers are detected only when the checksum validates; IP detection covers public IPv4 only; URL detection exists but is opt-in — see [Detection Coverage](#detection-coverage).
 

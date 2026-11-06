@@ -34,6 +34,7 @@
 
 | 日期 | 檔案 | 狀態 |
 |---|---|---|
+| 11-06 | [0.3.0 工具還原：OpenCode v2.2.5 實機驗證](2026-11-06-opencode-2.2.5-tool-restoration.md) | 現行 |
 | 10-14 | [容量修正驗證](2026-10-14-transparent-capacity-verification.md) | 現行 |
 | 10-14 | [容量與刪除回收重測](2026-10-14-live-capacity-and-lifecycle-retest.md) | 現行 |
 | 10-11 | [純 hook-only 驗證](2026-10-11-pure-hook-only-verification.md) | 現行 |

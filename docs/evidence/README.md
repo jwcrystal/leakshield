@@ -16,6 +16,7 @@
 | `wireProtection: false` 目前的契約（純 hook-only） | [純 hook-only 驗證 2026-10-11](2026-10-11-pure-hook-only-verification.md) |
 | 官方 `@rehydra/opencode` 的實際行為（原始碼） | [官方發布來源稽核 2026-10-11](2026-10-11-rehydra-current-source-audit.md) |
 | 各 transport 是否支援（Responses WS、AI SDK） | [Responses WS](2026-10-11-responses-ws-verification.md)、[AI SDK HTTP](2026-10-11-aisdk-http-verification.md) |
+| 真實 OS keychain 能否保管持久化金鑰（macOS） | [keychain 保管驗證 2026-10-20](2026-10-20-keychain-custody.md) |
 
 ## 比較
 
@@ -34,6 +35,7 @@
 
 | 日期 | 檔案 | 狀態 |
 |---|---|---|
+| 10-20 | [OS keychain 金鑰保管（macOS）](2026-10-20-keychain-custody.md) | 待重跑（restart 子程序改為唯讀後；僅 macOS） |
 | 10-14 | [容量修正驗證](2026-10-14-transparent-capacity-verification.md) | 現行 |
 | 10-14 | [容量與刪除回收重測](2026-10-14-live-capacity-and-lifecycle-retest.md) | 現行 |
 | 10-11 | [純 hook-only 驗證](2026-10-11-pure-hook-only-verification.md) | 現行 |

@@ -13,6 +13,9 @@ Everything here is **verification tooling only** — no product code is touched.
 |---|---|
 | `capture-server.mjs` | Node-stdlib OpenAI-compatible mock provider. Records every `/v1/chat/completions` body to `out/captured/`, answers with a minimal completion (plain or SSE stream). `POST /control` lets the orchestrator arm a one-shot `read` tool_call (case C3) and set the reply label. |
 | `run-boundary.mjs` | Orchestrator. Boots the capture server, runs each case in a fresh isolated workdir, attributes captures to cases by time window, scans storage/logs, writes `out/evidence.json` + prints a summary table. |
+| `lib/real-harness.mjs` | Issue-#26 plumbing: isolated HOME/XDG, private server, content-free egress observer, API/CLI spawn helpers. |
+| `run-real-provider.mjs` | Issue-#26 real-provider run (Anthropic / OpenAI). `E2E_PROVIDER=capture` is a credential-free harness self-test, not evidence. |
+| `run-soak.mjs` | Issue-#26 soak: create → one tiny turn → delete → GET-after-DELETE, sampling server RSS. |
 | `fixtures/second-plugin/` | `canary-injector` — a second OpenCode v2 plugin whose `session.prompt` hook appends `SECOND-PLUGIN-MARKER contact carol.injector@example-test.invalid` to the prompt (mutated in place, same duck-typed style as leakshield). Used for the plugin-ordering cases C4a/C4b. |
 | `out/` | Generated artifacts: `captured/` request envelopes, `work/<case>/` isolated run dirs, `logs/` per-case stdout/stderr, `evidence.json`. Safe to delete anytime. |
 
@@ -141,6 +144,33 @@ Each launch starts a loopback-only capture provider and an interactive OpenCode 
 Use synthetic input only. After exiting the TUI, the launcher reports whether the injector ran and whether its synthetic canary reached the provider; capture files are retained under `scripts/e2e/out/manual-tui/`. Running `run-boundary.mjs` clears the generated `out/` directory, including these manual profiles and captures.
 
 This tests interactive TUI hook ordering against the capture provider, not a real external provider.
+
+## Issue #26: real providers
+
+The harness above is loopback-only. Two scripts cover the gaps that need a real
+account, and one covers real OS-keychain custody:
+
+```bash
+npm run build
+
+# 1. harness self-test, no credentials
+E2E_PROVIDER=capture node scripts/e2e/run-real-provider.mjs
+E2E_SOAK=1 E2E_SOAK_MS=10000 node scripts/e2e/run-soak.mjs
+node scripts/diagnostics/verify-keychain-persistence.mjs --simulated
+
+# 2. real runs (spend credits / touch the real keychain)
+E2E_REAL=1 E2E_PROVIDER=anthropic node scripts/e2e/run-real-provider.mjs
+E2E_REAL=1 E2E_PROVIDER=openai E2E_OPENAI_MODEL=<model> E2E_TURNS=20 node scripts/e2e/run-real-provider.mjs
+E2E_SOAK=1 E2E_REAL=1 E2E_PROVIDER=anthropic E2E_SOAK_MS=3600000 node scripts/e2e/run-soak.mjs
+node scripts/diagnostics/verify-keychain-persistence.mjs --real-keychain
+```
+
+Only booleans, counts, bytes, RSS and short placeholder hashes are recorded. The
+stand-in provider runs with `CAPTURE_RECORD=0`, so no request body is written to
+disk even in self-test mode (it is still parsed in memory to build a reply). Full checklist, cost/time
+estimates, per-check pass conditions and the record template live in
+`docs/plans/2026-10-20-issue-26-verification-runbook.md`. A capture-mode PASS
+proves the harness works, not that #26 is verified.
 
 ## Safety notes
 

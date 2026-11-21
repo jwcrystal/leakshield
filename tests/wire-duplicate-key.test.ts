@@ -5,7 +5,8 @@
  * http.response hooks (component under test: src/core/wire.ts via
  * session-guard). A duplicate-key body parses to its LAST occurrence, so a
  * secret in an earlier occurrence is invisible to the scanner; forwarding the
- * original bytes would leak it. Secrets are synthetic.
+ * original bytes would leak it. The identity, attribution and tool-argument
+ * cases lock behaviour that already held before the fix. Secrets are synthetic.
  */
 
 import { describe, expect, it } from "vitest";
@@ -155,7 +156,7 @@ describe.each(routes)("$name remasker forwards the scanned value", (route) => {
     expect(event.request).not.toBe(original);
     const forwarded = new Uint8Array(await (event.request as Request).clone().arrayBuffer());
     expect(forwarded.includes(0xff)).toBe(false);
-    expect(new TextDecoder().decode(forwarded)).toBe(route.single("hel�lo"));
+    expect(new TextDecoder().decode(forwarded)).toBe(route.single("hel\uFFFDlo"));
   });
 
   it("keeps request identity for a canonical unchanged body", async () => {

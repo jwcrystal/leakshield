@@ -668,18 +668,6 @@ function collectWireStructuralStrings(body: Record<string, unknown>): string[] {
   return out;
 }
 
-/**
- * Remasks an OpenAI-compatible Chat Completions JSON request body.
- *
- * Every check that can reject runs FIRST (route, transport metadata, dialect,
- * message shapes, structural identifiers, numeric values); only then is the
- * whole body protected in a SINGLE transaction, so a rejected request commits
- * no mapping or session capacity. The original request is consumed only through
- * `clone()` and, when nothing changed, the ORIGINAL request object is returned
- * untouched. A rebuilt request inherits every transport control (method, url,
- * mode, credentials, cache, redirect, referrer, integrity, keepalive, signal,
- * authentication headers) and recomputes body headers.
- */
 /** Forwards exactly the value that was scanned. The original bytes are kept
  * only when they already are that serialization: a body that parses to
  * something else (a duplicate key keeps only its last occurrence, invalid
@@ -693,6 +681,18 @@ function forwardSerialized(request: Request, raw: string, serialized: string): R
   return new Request(request, { body: serialized, headers });
 }
 
+/**
+ * Remasks an OpenAI-compatible Chat Completions JSON request body.
+ *
+ * Every check that can reject runs FIRST (route, transport metadata, dialect,
+ * message shapes, structural identifiers, numeric values); only then is the
+ * whole body protected in a SINGLE transaction, so a rejected request commits
+ * no mapping or session capacity. The original request is consumed only through
+ * `clone()`; the ORIGINAL request object is returned only when its body already
+ * is the canonical serialization of what was scanned. A rebuilt request inherits every transport control (method, url,
+ * mode, credentials, cache, redirect, referrer, integrity, keepalive, signal,
+ * authentication headers) and recomputes body headers.
+ */
 export async function remaskChatCompletionsRequest(
   service: TransportMaskingService,
   sessionID: string,

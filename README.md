@@ -27,6 +27,7 @@ MCP server mode has been removed. It depended on the model voluntarily calling a
 **Experimental, `0.x`.** Published to npm as `leakshield`: run `npx leakshield --help` to see the commands, or build locally (`npm ci && npm run build`) and point OpenCode at the `dist` directory. Without arguments or input, the CLI waits on stdin.
 
 - Transparent mode has been verified on OpenCode v2.0.28 with local loopback providers, and once against a real OpenAI model. The 0.3.0 tool restoration was rechecked on OpenCode v2.2.5 with a loopback provider, the OpenChamber render tool and `rtk` ([record](docs/evidence/2026-11-06-opencode-2.2.5-tool-restoration.md)). It is **not** a guarantee that nothing sensitive reaches a model: the recommended hook-first setup is reported as `PARTIAL` by `--doctor`, and content added after the plugin's hooks or sent by permitted tools (curl, remote MCP) is outside its coverage.
+- Claude Code is supported through a local proxy (`leakshield --claude-code-proxy`, then `ANTHROPIC_BASE_URL`), verified with Claude Code 2.1.321 against a loopback stub upstream ([record](docs/evidence/2026-11-21-claude-code-proxy.md)). It masks model requests and restores assistant text, but does not restore placeholders at tool execution yet: see [Claude Code](docs/claude-code.md).
 - Not yet verified: OS-keychain custody on Windows and Linux (macOS verified 2026-10-20), a real Anthropic provider, long histories on other providers, long-running use ([#26](https://github.com/jwcrystal/leakshield/issues/26)).
 - Defaults may still change during `0.x`; see the [changelog](CHANGELOG.md).
 - Verification records: [docs/evidence](docs/evidence/README.md). Report vulnerabilities privately: [SECURITY.md](SECURITY.md). License: [Apache-2.0](LICENSE).
@@ -339,7 +340,7 @@ To test the published package, use `"leakshield"` instead of the local `dist` pa
 npm run scan -- --doctor     # or: leakshield --doctor after global install
 ```
 
-The doctor verifies the install without sending anything anywhere: it checks the OpenCode host version, reads the `opencode.json` or `opencode.jsonc` files OpenCode applies (`.opencode/`, the project root and one global directory), combines their `plugins` arrays the way the host does, confirms LeakShield is registered with options that the plugin itself would accept, verifies a local `dist` entry point actually exists (a missing one makes OpenCode silently log-and-skip the plugin — sessions look normal but are unprotected), loads the guard config, and runs the synthetic-canary smoke scan locally. Exit code 0 means `PROTECTED` or `PARTIAL` (`wireProtection: false`: final outbound HTTP bodies are not inspected); a v1 host is reported `BROKEN` with a fix that says to upgrade to OpenCode v2; any other status prints the failing check with a concrete fix, including a copy-paste registration snippet when the plugin is missing.
+The doctor verifies the install without sending anything anywhere: it checks the OpenCode host version, reads the `opencode.json` or `opencode.jsonc` files OpenCode applies (`.opencode/`, the project root and one global directory), combines their `plugins` arrays the way the host does, confirms LeakShield is registered with options that the plugin itself would accept, verifies a local `dist` entry point actually exists (a missing one makes OpenCode silently log-and-skip the plugin — sessions look normal but are unprotected), loads the guard config, and runs the synthetic-canary smoke scan locally. Exit code 0 means `PROTECTED` or `PARTIAL` (`wireProtection: false`: final outbound HTTP bodies are not inspected); a v1 host is reported `BROKEN` with a fix that says to upgrade to OpenCode v2; any other status prints the failing check with a concrete fix, including a copy-paste registration snippet when the plugin is missing. A separate `Claude Code:` section checks the [Claude Code proxy](docs/claude-code.md) wiring; the exit code is also 0 when Claude Code is behind a running LeakShield proxy, even without OpenCode.
 
 Doctor is an install-level check that runs outside the host — it cannot see inside a live session. Runtime proof comes from the smoke test above or `scripts/e2e/run-boundary.mjs`.
 
@@ -350,6 +351,18 @@ LeakShield protects model-conversation content: prompts, replayed history, tool 
 Detection also has known gaps: street/postal addresses, dates, IPv6, and generic assignments outside the keyword list or below the 8-character minimum pass through undetected. Credit card and IBAN numbers are detected only when the checksum validates; IP detection covers public IPv4 only; URL detection exists but is opt-in — see [Detection Coverage](#detection-coverage).
 
 Local originals may remain in history, logs, and generated files — this protects the model boundary, not your disk.
+
+---
+
+### Claude Code (local proxy)
+
+```bash
+leakshield --claude-code-proxy                     # listens on 127.0.0.1:8787
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8787    # or the "env" block of ~/.claude/settings.json
+leakshield --doctor                                # the "Claude Code:" section checks the wiring
+```
+
+The proxy masks every Anthropic Messages request Claude Code sends (and `count_tokens`), restores placeholders in the assistant's JSON or streamed text, and blocks anything it cannot mask instead of forwarding it. It is verified with an API key; Claude Code documents that the base URL also applies to a claude.ai login, which has not been tested here. It does not restore placeholders inside tool calls, and it cannot see traffic that bypasses the base URL, such as WebFetch's domain check, which sends the hostname to Anthropic. Setup and the full list of gaps: [docs/claude-code.md](docs/claude-code.md).
 
 ---
 

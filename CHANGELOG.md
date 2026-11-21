@@ -2,6 +2,14 @@
 
 All notable changes are listed here.
 
+## Unreleased
+
+### Added
+
+- Claude Code support through a local proxy: `leakshield --claude-code-proxy` listens on `127.0.0.1:8787`, and Claude Code reaches it through `ANTHROPIC_BASE_URL`. It masks Anthropic Messages and `count_tokens` requests and restores placeholders in assistant text, JSON and SSE. A request it cannot mask is answered with a 400 and not forwarded. Placeholders in tool calls are not restored yet, and traffic that bypasses the base URL (WebFetch's domain check, telemetry, Bedrock/Vertex) is not covered; see [docs/claude-code.md](docs/claude-code.md). ([#86](https://github.com/jwcrystal/leakshield/issues/86))
+- `leakshield --doctor` has a `Claude Code:` section: where `ANTHROPIC_BASE_URL` comes from, whether the LeakShield proxy answers there, and providers that bypass it. On a machine without OpenCode, the doctor now exits 0 when Claude Code is behind a running LeakShield proxy; every OpenCode status keeps its exit code, and a base URL pointing at a proxy that is not running exits 1.
+- The Anthropic masker can accept `thinking` and `redacted_thinking` history blocks, masking the thinking text and passing `signature` and redacted data through unchanged. Only the Claude Code proxy turns this on; the OpenCode plugin still refuses those blocks.
+
 ## 0.3.1 — 2026-11-21
 
 OpenCode sessions no longer stop after a server-side compaction.

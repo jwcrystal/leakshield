@@ -27,6 +27,7 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 **實驗性，`0.x` 版本。** 已發佈到 npm（`leakshield`）：可用 `npx leakshield --help` 查看指令，或在本機建置（`npm ci && npm run build`）再讓 OpenCode 指向 `dist` 目錄。沒有參數也沒有輸入時，CLI 會等待 stdin。
 
 - Transparent 模式已在 OpenCode v2.0.28 搭配本機替身 provider 驗證，並用真實 OpenAI 模型驗證過一次。0.3.0 的工具還原另在 OpenCode v2.2.5 用本機替身 provider、OpenChamber 的 render 工具與 `rtk` 重新驗證（[紀錄](docs/evidence/2026-11-06-opencode-2.2.5-tool-restoration.md)）。它**不保證**敏感內容絕不會送到模型：建議的 hook-first 設定在 `--doctor` 顯示為 `PARTIAL`，hook 之後才加入的內容，以及被允許的工具外送（curl、遠端 MCP），都不在保護範圍內。
+- Claude Code 透過本機 proxy 支援（`leakshield --claude-code-proxy`，再設定 `ANTHROPIC_BASE_URL`），已用 Claude Code 2.1.321 搭配本機替身上游驗證（[紀錄](docs/evidence/2026-11-21-claude-code-proxy.md)）。它會遮罩模型請求並還原助理文字，但還不會在工具執行時還原 placeholder，詳見 [Claude Code](docs/claude-code.zh-TW.md)。
 - 尚未驗證：Windows 與 Linux 的 OS keychain 持久化（macOS 已於 2026-10-20 驗證）、真實 Anthropic provider、其他 provider 的長對話、長時間使用（[#26](https://github.com/jwcrystal/leakshield/issues/26)）。
 - `0.x` 期間預設值仍可能調整，變更見 [CHANGELOG](CHANGELOG.md)。
 - 驗證紀錄：[docs/evidence](docs/evidence/README.md)。漏洞請私下回報：[SECURITY.md](SECURITY.md)。授權：[Apache-2.0](LICENSE)。
@@ -335,7 +336,7 @@ rm -rf "$SMOKE_DIR"
 leakshield --doctor     # 全域安裝或 npm link 後；在 repo 內可用 npm run scan -- --doctor
 ```
 
-Doctor 不會把任何內容送出去。它會檢查 OpenCode host 版本、讀取 OpenCode 會套用的 `opencode.json` 或 `opencode.jsonc`（`.opencode/`、專案根目錄和一個全域目錄）、依 host 的方式合併其中的 `plugins` 陣列、確認 LeakShield 已用 plugin 本身接受的選項註冊、確認本機 `dist` 進入點真的存在（缺少時 OpenCode 會靜默記錄並跳過 plugin：session 看起來正常但沒有保護）、載入 guard 設定，並在本機跑合成 canary 的 smoke scan。Exit code 0 代表 `PROTECTED` 或 `PARTIAL`（`wireProtection: false`：不檢查最終出站 HTTP body）；v1 host 會回報 `BROKEN`，修正方式是升級到 OpenCode v2；其他狀態會印出失敗的檢查項與具體修正方式，plugin 未註冊時還會附上可直接複製的註冊片段。
+Doctor 不會把任何內容送出去。它會檢查 OpenCode host 版本、讀取 OpenCode 會套用的 `opencode.json` 或 `opencode.jsonc`（`.opencode/`、專案根目錄和一個全域目錄）、依 host 的方式合併其中的 `plugins` 陣列、確認 LeakShield 已用 plugin 本身接受的選項註冊、確認本機 `dist` 進入點真的存在（缺少時 OpenCode 會靜默記錄並跳過 plugin：session 看起來正常但沒有保護）、載入 guard 設定，並在本機跑合成 canary 的 smoke scan。Exit code 0 代表 `PROTECTED` 或 `PARTIAL`（`wireProtection: false`：不檢查最終出站 HTTP body）；v1 host 會回報 `BROKEN`，修正方式是升級到 OpenCode v2；其他狀態會印出失敗的檢查項與具體修正方式，plugin 未註冊時還會附上可直接複製的註冊片段。另有 `Claude Code:` 區段檢查 [Claude Code proxy](docs/claude-code.zh-TW.md) 的設定；即使沒有 OpenCode，只要 Claude Code 經過執行中的 LeakShield proxy，結束碼也是 0。
 
 Doctor 是在 host 之外執行的安裝層檢查，看不到執行中的 session。執行期的證明來自上面的 smoke test 或 `scripts/e2e/run-boundary.mjs`。
 
@@ -346,6 +347,18 @@ LeakShield 保護送往模型的對話內容：prompt、重播的歷史、工具
 偵測也有已知缺口：街道／郵遞地址、日期、IPv6，以及關鍵字清單之外或短於 8 字元的一般賦值都不會被偵測。信用卡與 IBAN 只有在檢查碼驗證通過時才會命中；IP 偵測只涵蓋公開 IPv4（超過四段的點分數字會整段回報，避免內嵌位址漏遮；`2026.10.21.14.32.59` 這類點分日期也會回報）；URL 偵測存在但需手動開啟，見[偵測範圍](#偵測範圍)。
 
 本機歷史、日誌與產生的檔案可能仍含原文——這裡保護的是模型邊界，不是磁碟。
+
+---
+
+### Claude Code（本機 proxy）
+
+```bash
+leakshield --claude-code-proxy                     # 監聽 127.0.0.1:8787
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8787    # 或寫進 ~/.claude/settings.json 的 "env"
+leakshield --doctor                                # "Claude Code:" 區段會檢查設定
+```
+
+Proxy 會遮罩 Claude Code 送出的每個 Anthropic Messages 請求（含 `count_tokens`），還原助理 JSON 或串流文字中的 placeholder，無法遮罩的請求直接擋下，不會轉送。已用 API key 驗證；Claude Code 文件說 base URL 也適用於 claude.ai 登入，這裡尚未測試。它不會還原工具呼叫裡的 placeholder，也看不到繞過 base URL 的流量，例如 WebFetch 的網域檢查會把 hostname 送給 Anthropic。設定方式與完整的缺口清單見 [docs/claude-code.zh-TW.md](docs/claude-code.zh-TW.md)。
 
 ---
 

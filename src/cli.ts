@@ -62,11 +62,16 @@ if (isHelpRequest(args)) {
     session: valueOf("--session"),
     storePath: valueOf("--path") ?? defaultStorePath(),
   });
+} else if (args.includes("--claude-code-proxy")) {
+  const { runClaudeCodeProxy } = await import("./claude-code/cli.js");
+  process.exitCode = await runClaudeCodeProxy(args);
 } else if (isDoctorMode) {
-  const { runDoctor, createDoctorDeps, formatDoctorReport } = await import("./doctor.js");
+  const { runDoctor, createDoctorDeps, formatDoctorReport, doctorExitCode } = await import("./doctor.js");
+  const { runClaudeCodeDoctor, createClaudeCodeDoctorDeps } = await import("./claude-code/doctor.js");
   const report = await runDoctor(createDoctorDeps());
+  report.claudeCode = await runClaudeCodeDoctor(createClaudeCodeDoctorDeps());
   console.log(formatDoctorReport(report));
-  process.exitCode = report.status === "PROTECTED" || report.status === "PARTIAL" ? 0 : 1;
+  process.exitCode = doctorExitCode(report);
 } else if (isWebMode) {
   const portIdx = args.indexOf("--port");
   const port = portIdx !== -1 ? parseInt(args[portIdx + 1], 10) || 3000 : 3000;

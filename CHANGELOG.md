@@ -4,6 +4,12 @@ All notable changes are listed here.
 
 ## Unreleased
 
+### Added
+
+- Claude Code support through a local proxy: `leakshield --claude-code-proxy` listens on `127.0.0.1:8787`, and Claude Code reaches it through `ANTHROPIC_BASE_URL`. It masks Anthropic Messages and `count_tokens` requests and restores placeholders in assistant text, JSON and SSE. A request it cannot mask is answered with a 400 and not forwarded. Placeholders in tool calls are not restored yet, and traffic that bypasses the base URL (WebFetch's domain check, telemetry, Bedrock/Vertex) is not covered; see [docs/claude-code.md](docs/claude-code.md). ([#86](https://github.com/jwcrystal/leakshield/issues/86))
+- `leakshield --doctor` has a `Claude Code:` section: where `ANTHROPIC_BASE_URL` comes from, whether the LeakShield proxy answers there, and providers that bypass it. On a machine without OpenCode, the doctor now exits 0 when Claude Code is behind a running LeakShield proxy and no Bedrock/Vertex/host-managed setting bypasses it; every OpenCode status keeps its exit code, and a base URL pointing at a proxy that is not running exits 1.
+- The Anthropic masker can accept `thinking` and `redacted_thinking` history blocks, masking the thinking text and passing `signature` and redacted data through unchanged. Only the Claude Code proxy turns this on; the OpenCode plugin still refuses those blocks.
+
 ### Fixed
 
 - Transparent mode no longer forwards original request bytes that parse to something other than what was scanned. A Chat Completions, Anthropic Messages or Responses body with a duplicate key (only the last occurrence survives `JSON.parse`) or invalid UTF-8 was forwarded byte-for-byte when masking changed nothing, so a secret in an earlier occurrence reached the provider unscanned. Any body that is not already its canonical `JSON.stringify` serialization is now forwarded as that serialization, even when nothing was masked: whitespace and `\u` escapes are normalized, and numbers are re-emitted as parsed (`1.0` becomes `1`, integers beyond 2^53 lose precision, which also closes the gap where such digits were scanned rounded but forwarded exact). A body that already is canonical keeps its original request. ([#93](https://github.com/jwcrystal/leakshield/pull/93))

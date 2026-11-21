@@ -16,6 +16,7 @@
 | `wireProtection: false` 目前的契約（純 hook-only） | [純 hook-only 驗證 2026-10-11](2026-10-11-pure-hook-only-verification.md) |
 | 官方 `@rehydra/opencode` 的實際行為（原始碼） | [官方發布來源稽核 2026-10-11](2026-10-11-rehydra-current-source-audit.md) |
 | 各 transport 是否支援（Responses WS、AI SDK） | [Responses WS](2026-10-11-responses-ws-verification.md)、[AI SDK HTTP](2026-10-11-aisdk-http-verification.md) |
+| Claude Code 經本機 proxy 是否遮罩與還原 | [Claude Code proxy 驗證 2026-11-21](2026-11-21-claude-code-proxy.md) |
 
 ## 比較
 
@@ -28,12 +29,13 @@
 | [2026-10-11 EightDoor 可用性實測](2026-10-11-rehydra-v2-usability-comparison.md) | 歷史 |
 | [2026-10-05 三家差異（VibeGuard／opencode-vibeguard／Rehydra）](2026-10-05-three-way-comparison.md) | 已被取代（VibeGuard 兩家為原始碼研究，從未實測） |
 | [2026-10-05 Provider／transport 參考研究](2026-10-05-provider-transport-reference-research.md) | 歷史（固定 SHA 的原始碼研究） |
-| [2026-10-15 Coding agent 攔截能力調查](2026-10-15-agent-interception-capabilities.md) | 研究（尚未實作；hook／local proxy adapter 的選型依據，只讀文件與原始碼） |
+| [2026-10-15 Coding agent 攔截能力調查](2026-10-15-agent-interception-capabilities.md) | 研究（hook／local proxy adapter 的選型依據，只讀文件與原始碼；Claude Code proxy 已於 [2026-11-21](2026-11-21-claude-code-proxy.md) 實作） |
 
 ## 驗證與重測（依時間）
 
 | 日期 | 檔案 | 狀態 |
 |---|---|---|
+| 11-21 | [Claude Code 本機 proxy：Claude Code 2.1.321 實機驗證（#86）](2026-11-21-claude-code-proxy.md) | 現行 |
 | 11-06 | [0.3.0 工具還原：OpenCode v2.2.5 實機驗證](2026-11-06-opencode-2.2.5-tool-restoration.md) | 現行 |
 | 10-14 | [容量修正驗證](2026-10-14-transparent-capacity-verification.md) | 現行 |
 | 10-14 | [容量與刪除回收重測](2026-10-14-live-capacity-and-lifecycle-retest.md) | 現行 |

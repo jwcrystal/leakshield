@@ -79,6 +79,14 @@ export interface TransportMaskingService {
    * so binary payloads are neither scanned nor altered.
    */
   readonly attachmentsPolicy?: "block" | "allow";
+  /**
+   * Anthropic extended-thinking history blocks. "refuse" (default) keeps the
+   * original contract: any `thinking` / `redacted_thinking` block refuses the
+   * request. "mask" accepts them: thinking text is masked like other text,
+   * while `signature` and `redacted_thinking.data` cross verbatim as opaque
+   * provider state (never scanned, never altered).
+   */
+  readonly anthropicThinking?: "refuse" | "mask";
 }
 
 // ─── Static failure messages (no content ever included) ─────────────────────
@@ -822,7 +830,8 @@ export async function remaskChatCompletionsRequest(
  * Validates an Anthropic Messages request body: top-level `system` (string or
  * text blocks), `messages` with content blocks (text | tool_use |
  * tool_result), flat `tools` ({name, description?, input_schema}). Images,
- * documents, thinking blocks, and any unknown block type refuse — never pass
+ * documents, thinking blocks (unless the service sets anthropicThinking
+ * "mask"), and any unknown block type refuse — never pass
  * tokenized or unscanned content through the wire boundary.
  */
 function validateAnthropicSystem(system: unknown): void {
@@ -835,12 +844,22 @@ function validateAnthropicSystem(system: unknown): void {
   }
 }
 
-function validateAnthropicContent(content: unknown, allowAttachments: boolean): void {
+function validateAnthropicContent(content: unknown, allowAttachments: boolean, allowThinking = false): void {
   if (content === undefined || content === null || typeof content === "string") return;
   if (!Array.isArray(content)) throw new Error(refusal("anthropic-content-shape"));
   for (const block of content) {
     if (!isRecord(block)) throw new Error(refusal("anthropic-content-block"));
     if (allowAttachments && isAttachmentRecord(block)) continue;
+    if (allowThinking && block.type === "thinking") {
+      if (typeof block.thinking !== "string" || (block.signature !== undefined && typeof block.signature !== "string")) {
+        throw new Error(refusal("anthropic-thinking-block"));
+      }
+      continue;
+    }
+    if (allowThinking && block.type === "redacted_thinking") {
+      if (typeof block.data !== "string") throw new Error(refusal("anthropic-thinking-block"));
+      continue;
+    }
     switch (block.type) {
       case "text":
         if (typeof block.text !== "string") throw new Error(refusal("anthropic-text-block"));
@@ -877,7 +896,7 @@ function validateAnthropicContent(content: unknown, allowAttachments: boolean): 
   }
 }
 
-function validateAnthropicDialect(body: Record<string, unknown>, allowAttachments: boolean): void {
+function validateAnthropicDialect(body: Record<string, unknown>, allowAttachments: boolean, allowThinking = false): void {
   validateAnthropicSystem(body.system);
   if (body.tools !== undefined) {
     if (!Array.isArray(body.tools)) throw new Error(refusal("anthropic-tools-shape"));
@@ -893,8 +912,54 @@ function validateAnthropicDialect(body: Record<string, unknown>, allowAttachment
     if (!isRecord(message) || typeof message.role !== "string") {
       throw new Error(refusal("anthropic-message-shape"));
     }
-    validateAnthropicContent(message.content, allowAttachments);
+    validateAnthropicContent(message.content, allowAttachments, allowThinking);
   }
+}
+
+const OPAQUE_THINKING_SENTINEL = "__sg_opaque_thinking";
+
+/**
+ * Stashes thinking `signature` and `redacted_thinking.data` strings around the
+ * masking transaction. Both are provider-verified blobs over earlier masked
+ * traffic: a false-positive detector hit inside the base64 would corrupt them
+ * and the provider would reject the whole history. Same sentinel contract as
+ * withOpaqueReasoningContent: substitute, protect, restore, verify counts.
+ */
+function withOpaqueThinkingState(
+  body: Record<string, unknown>,
+  fn: (input: Record<string, unknown>) => Record<string, unknown>,
+): Record<string, unknown> {
+  const opaqueField = (block: Record<string, unknown>): "signature" | "data" | null => {
+    if (block.type === "thinking" && typeof block.signature === "string") return "signature";
+    if (block.type === "redacted_thinking" && typeof block.data === "string") return "data";
+    return null;
+  };
+  const blocksOf = (value: Record<string, unknown>): Record<string, unknown>[] => {
+    if (!Array.isArray(value.messages)) return [];
+    return value.messages.flatMap((message) =>
+      isRecord(message) && Array.isArray(message.content) ? message.content.filter(isRecord) : [],
+    );
+  };
+  const originals: string[] = [];
+  for (const block of blocksOf(body)) {
+    const field = opaqueField(block);
+    if (field === null) continue;
+    originals.push(block[field] as string);
+    block[field] = `${OPAQUE_THINKING_SENTINEL}_${originals.length - 1}`;
+  }
+  if (originals.length === 0) return fn(body);
+  const result = fn(body);
+  const sentinelRe = new RegExp(`^${OPAQUE_THINKING_SENTINEL}_(\\d+)$`);
+  let restored = 0;
+  for (const block of blocksOf(result)) {
+    const field = opaqueField(block);
+    if (field === null) continue;
+    const match = sentinelRe.exec(block[field] as string);
+    if (match === null || Number(match[1]) !== restored) throw new Error(MASK_FAILURE);
+    block[field] = originals[restored++];
+  }
+  if (restored !== originals.length) throw new Error(MASK_FAILURE);
+  return result;
 }
 
 /** Structural identifiers that must survive masking verbatim (Anthropic shape). */
@@ -965,7 +1030,8 @@ export async function remaskAnthropicMessagesRequest(
   }
   if (!isRecord(body)) throw new Error(refusal("body-shape"));
 
-  validateAnthropicDialect(body, attachmentsAllowed(service));
+  const allowThinking = service.anthropicThinking === "mask";
+  validateAnthropicDialect(body, attachmentsAllowed(service), allowThinking);
 
   const structuralBefore = collectAnthropicStructuralStrings(body);
   for (const identifier of structuralBefore) {
@@ -979,13 +1045,16 @@ export async function remaskAnthropicMessagesRequest(
   });
   if (unsafeNumber) throw new Error(refusal("number-sensitive"));
 
-  const next = withOpaqueAttachments(service.attachmentsPolicy ?? "block", body, (input) => {
+  const protect = (input: Record<string, unknown>): Record<string, unknown> => {
     const masked = service.protectJsonForModel(sessionID, input);
     if (!masked.ok) throw new Error(MASK_FAILURE);
     const value = masked.value;
     if (!isRecord(value)) throw new Error(MASK_FAILURE);
     return value as Record<string, unknown>;
-  });
+  };
+  const next = withOpaqueAttachments(service.attachmentsPolicy ?? "block", body, (input) =>
+    allowThinking ? withOpaqueThinkingState(input, protect) : protect(input),
+  );
 
   const structuralAfter = collectAnthropicStructuralStrings(next);
   if (
@@ -1681,13 +1750,13 @@ function allowAnthropicField(fields: AnthropicAllowedFields, record: Record<stri
   fields.set(record, allowed);
 }
 
-function anthropicStrayTokenIn(value: unknown, fields?: AnthropicAllowedFields): boolean {
+function anthropicStrayTokenIn(value: unknown, fields?: AnthropicAllowedFields, tokenizedThinking = false): boolean {
   if (typeof value === "string") {
     return containsTokenPrefix(value);
   }
   if (value === null || typeof value !== "object") return false;
   if (Array.isArray(value)) {
-    return value.some((item) => anthropicStrayTokenIn(item, fields));
+    return value.some((item) => anthropicStrayTokenIn(item, fields, tokenizedThinking));
   }
   const record = value as Record<string, unknown>;
   for (const key of Object.keys(record)) {
@@ -1702,12 +1771,19 @@ function anthropicStrayTokenIn(value: unknown, fields?: AnthropicAllowedFields):
           if (typeof block.id === "string" && containsTokenPrefix(block.id)) return true;
           continue; // input stays tokenized by design
         }
-        if (anthropicStrayTokenIn(block, fields)) return true;
+        if (tokenizedThinking && block.type === "thinking") {
+          // Thinking text is signed: restoring it would break the signature
+          // when Claude Code resends it, so its placeholders stay as sent.
+          const { thinking: _signed, ...rest } = block;
+          if (anthropicStrayTokenIn(rest, fields, tokenizedThinking)) return true;
+          continue;
+        }
+        if (anthropicStrayTokenIn(block, fields, tokenizedThinking)) return true;
       }
       continue;
     }
     if (fields?.get(record)?.has(key)) continue;
-    if (anthropicStrayTokenIn(value, fields)) return true;
+    if (anthropicStrayTokenIn(value, fields, tokenizedThinking)) return true;
   }
   return false;
 }
@@ -1750,7 +1826,7 @@ async function restoreAnthropicJsonResponse(
     }
     // tool_use / other blocks: input stays tokenized until the typed tool gate.
   }
-  if (anthropicStrayTokenIn(body, fields)) throw new Error(UNSUPPORTED_RESPONSE);
+  if (anthropicStrayTokenIn(body, fields, service.anthropicThinking === "mask")) throw new Error(UNSUPPORTED_RESPONSE);
   if (!changed) return response;
   const next = JSON.stringify(body);
   const headers = new Headers(response.headers);

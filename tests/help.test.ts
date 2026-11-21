@@ -14,6 +14,7 @@ describe("CLI help", () => {
       "--text", "--file", "--dir", "--ext", "--stdin", "--allow-outside",
       "--format", "--min-severity", "--enable-encoding-detection",
       "--redact", "--out", "--dry-run",
+      "--claude-code-proxy", "--upstream", "--config", "--attachments",
     ];
     for (const flag of flags) expect(HELP_TEXT).toContain(flag);
   });

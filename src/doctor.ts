@@ -51,6 +51,8 @@ export interface DoctorReport {
   checks: DoctorCheck[];
   /** Copy-paste registration snippet for the OpenCode v2 config. */
   snippet?: string;
+  /** Claude Code proxy checks; reported separately from the OpenCode status. */
+  claudeCode?: DoctorCheck[];
 }
 
 export interface DoctorDeps {
@@ -989,7 +991,33 @@ export function formatDoctorReport(report: DoctorReport): string {
             ? "NOT REGISTERED — LeakShield is not in the OpenCode config; sessions are unprotected."
             : "HOST MISSING — no OpenCode binary found.";
   lines.push(verdict);
+  if (report.claudeCode && report.claudeCode.length > 0) {
+    lines.push("");
+    lines.push("Claude Code:");
+    for (const check of report.claudeCode) {
+      lines.push(`${icon[check.state]} ${check.id}: ${check.detail}`);
+      if (check.fix) lines.push(`       fix: ${check.fix}`);
+    }
+  }
   lines.push("");
   lines.push("Scope: model-conversation leak protection. This is NOT a tool-egress firewall: permitted local tools (curl, remote MCP, …) can still transmit originals. See README.");
   return lines.join("\n");
+}
+
+/**
+ * The OpenCode status decides as before. Only when OpenCode is absent
+ * (HOST_MISSING) can Claude Code behind a running LeakShield proxy make the
+ * run pass, unless a provider or host setting bypasses it; a failed Claude Code check (base URL pointing at a dead
+ * proxy) fails the run whatever OpenCode reports.
+ */
+export function doctorExitCode(report: DoctorReport): number {
+  const claudeCode = report.claudeCode ?? [];
+  if (claudeCode.some((check) => check.state === "fail")) return 1;
+  if (report.status === "PROTECTED" || report.status === "PARTIAL") return 0;
+  if (report.status !== "HOST_MISSING") return 1;
+  // A bypassing provider or host-managed endpoint means requests may not reach
+  // the proxy even though it answers at the configured base URL.
+  const bypassed = claudeCode.some((check) => check.id === "claude-code-provider" || check.id === "claude-code-host-managed");
+  if (bypassed) return 1;
+  return claudeCode.some((check) => check.id === "claude-code-proxy" && check.state === "ok") ? 0 : 1;
 }

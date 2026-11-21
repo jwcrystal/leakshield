@@ -1007,7 +1007,7 @@ export function formatDoctorReport(report: DoctorReport): string {
 /**
  * The OpenCode status decides as before. Only when OpenCode is absent
  * (HOST_MISSING) can Claude Code behind a running LeakShield proxy make the
- * run pass, and a failed Claude Code check (base URL pointing at a dead
+ * run pass, unless a provider or host setting bypasses it; a failed Claude Code check (base URL pointing at a dead
  * proxy) fails the run whatever OpenCode reports.
  */
 export function doctorExitCode(report: DoctorReport): number {
@@ -1015,5 +1015,9 @@ export function doctorExitCode(report: DoctorReport): number {
   if (claudeCode.some((check) => check.state === "fail")) return 1;
   if (report.status === "PROTECTED" || report.status === "PARTIAL") return 0;
   if (report.status !== "HOST_MISSING") return 1;
+  // A bypassing provider or host-managed endpoint means requests may not reach
+  // the proxy even though it answers at the configured base URL.
+  const bypassed = claudeCode.some((check) => check.id === "claude-code-provider" || check.id === "claude-code-host-managed");
+  if (bypassed) return 1;
   return claudeCode.some((check) => check.id === "claude-code-proxy" && check.state === "ok") ? 0 : 1;
 }

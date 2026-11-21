@@ -206,6 +206,59 @@ describe("Claude Code proxy: fail closed", () => {
     proxy.dispose();
   });
 
+  it("blocks a bodyless probe whose headers carry a finding", async () => {
+    const { sent, fetchImpl } = fakeUpstream(() => new Response(null, { status: 200 }));
+    const proxy = createClaudeCodeProxy({ config, fetch: fetchImpl, log: quiet });
+    const response = await proxy.handle(new Request("http://127.0.0.1:8787/api/hello", {
+      method: "HEAD", headers: { "x-custom": CANARY, "x-api-key": "sk-ant-api03-synthetic" },
+    }));
+    expect(response.status).toBe(400);
+    expect(sent).toHaveLength(0);
+    proxy.dispose();
+  });
+
+  it("blocks a Messages request whose path carries a finding, without logging the path", async () => {
+    const { sent, fetchImpl } = fakeUpstream(echoTokenStream);
+    const lines: string[] = [];
+    const proxy = createClaudeCodeProxy({ config, fetch: fetchImpl, log: (line) => lines.push(line) });
+    const response = await proxy.handle(messagesRequest(userTurn("hello"), "s", `/${CANARY}/v1/messages`));
+    expect(response.status).toBe(400);
+    expect(sent).toHaveLength(0);
+    expect(lines.join("\n")).not.toContain(CANARY);
+    proxy.dispose();
+  });
+
+  it("forwards the bytes it scanned, not bytes that parse differently", async () => {
+    const { sent, fetchImpl } = fakeUpstream(echoTokenStream);
+    const proxy = createClaudeCodeProxy({ config, fetch: fetchImpl, log: quiet });
+    const clean = JSON.stringify(userTurn("hello"));
+    const raw = `{"messages":[{"role":"user","content":"${CANARY}"}],${clean.slice(1)}`;
+    const response = await proxy.handle(new Request("http://127.0.0.1:8787/v1/messages", {
+      method: "POST", headers: { "content-type": "application/json" }, body: raw,
+    }));
+    await response.text();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].body).not.toContain(CANARY);
+    proxy.dispose();
+  });
+
+  it("does not follow upstream redirects and keeps every set-cookie", async () => {
+    let init: RequestInit | undefined;
+    const fetchImpl = (async (_input: Request, options?: RequestInit) => {
+      init = options;
+      const headers = new Headers({ location: "https://elsewhere.example/" });
+      headers.append("set-cookie", "a=1");
+      headers.append("set-cookie", "b=2");
+      return new Response(null, { status: 307, headers });
+    }) as unknown as typeof fetch;
+    const proxy = createClaudeCodeProxy({ config, fetch: fetchImpl, log: quiet });
+    const response = await proxy.handle(new Request("http://127.0.0.1:8787/api/hello"));
+    expect(init?.redirect).toBe("manual");
+    expect(response.status).toBe(307);
+    expect(response.headers.getSetCookie()).toEqual(["a=1", "b=2"]);
+    proxy.dispose();
+  });
+
   it("answers its health probe locally", async () => {
     const { sent, fetchImpl } = fakeUpstream(echoTokenStream);
     const proxy = createClaudeCodeProxy({ config, fetch: fetchImpl, log: quiet });

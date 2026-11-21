@@ -53,8 +53,17 @@ const UNSUPPORTED_ROUTE =
   "LeakShield blocked a request on a route the Claude Code proxy cannot mask. [proxy-route]";
 const UNSAFE_URL =
   "LeakShield blocked a request whose URL carries sensitive content. [proxy-url]";
+const UNSAFE_HEADER =
+  "LeakShield blocked a request whose headers carry sensitive content. [proxy-header]";
+const UNREADABLE_BODY =
+  "LeakShield blocked the request because its body is unsupported or could not be identified. [proxy-body]";
 const UPSTREAM_UNREACHABLE =
   "LeakShield could not reach the upstream API. [proxy-upstream]";
+
+// Mirrors the core's request cap so an oversized body is refused before the
+// proxy buffers more of it.
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
+const CREDENTIAL_HEADERS = new Set(["authorization", "x-api-key", "cookie", "proxy-authorization"]);
 
 export interface ClaudeCodeProxyOptions {
   config: GuardConfig;
@@ -107,8 +116,9 @@ function forwardHeaders(source: Headers): Headers {
 function relay(response: Response, method: string): Response {
   const headers = new Headers();
   response.headers.forEach((value, key) => {
-    if (!DROP_RESPONSE_HEADERS.has(key)) headers.set(key, value);
+    if (!DROP_RESPONSE_HEADERS.has(key) && key !== "set-cookie") headers.set(key, value);
   });
+  for (const cookie of response.headers.getSetCookie()) headers.append("set-cookie", cookie);
   return new Response(method === "HEAD" ? null : response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -123,7 +133,48 @@ function urlCarriesFinding(url: URL, config: GuardConfig): boolean {
   } catch {
     return true;
   }
+  return carriesFinding(text, config);
+}
+
+function carriesFinding(text: string, config: GuardConfig): boolean {
   return containsTokenPrefix(text) || scanText(text, config).findings.length > 0;
+}
+
+/** Credential headers are meant for the upstream and are not content. */
+function headersCarryFinding(headers: Headers, config: GuardConfig): boolean {
+  let found = false;
+  headers.forEach((value, key) => {
+    if (!found && !CREDENTIAL_HEADERS.has(key) && carriesFinding(value, config)) found = true;
+  });
+  return found;
+}
+
+/**
+ * The core forwards the original bytes when masking changes nothing, but it
+ * scans the parsed value. Bytes that parse to something else (a duplicate
+ * key, say) would then leave unscanned, so the core only ever sees the
+ * canonical serialization of what it scans.
+ */
+async function canonicalJsonBody(request: Request): Promise<string | null> {
+  if (request.body === null) return null;
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const step = await reader.read();
+    if (step.done) break;
+    total += step.value.byteLength;
+    if (total > MAX_BODY_BYTES) {
+      void reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(step.value);
+  }
+  try {
+    return JSON.stringify(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+  } catch {
+    return null;
+  }
 }
 
 /** Static refusal text only: native errors may embed a URL or header value. */
@@ -146,14 +197,17 @@ export function createClaudeCodeProxy(options: ClaudeCodeProxyOptions): ClaudeCo
     return target;
   };
 
-  const refuse = (method: string, path: string, message: string): Response => {
-    log(`[leakshield] blocked ${method} ${path}: ${message}`);
+  // The route label, not the path: a refused path may itself hold the value.
+  const refuse = (method: string, route: string, message: string): Response => {
+    log(`[leakshield] blocked ${method} ${route}: ${message}`);
     return anthropicError(400, message);
   };
 
   const send = async (request: Request, signal?: AbortSignal): Promise<Response | null> => {
     try {
-      return await fetchImpl(request, { signal });
+      // A redirect would resend the credentials and body to a host the user
+      // never configured; hand the 3xx back to Claude Code instead.
+      return await fetchImpl(request, { signal, redirect: "manual" });
     } catch {
       return null;
     }
@@ -170,25 +224,38 @@ export function createClaudeCodeProxy(options: ClaudeCodeProxyOptions): ClaudeCo
         headers: { "content-type": "application/json" },
       });
     }
-    if (core === null) return refuse(method, path, PROTECT_FAILED_ERROR);
+    const route = method === "POST" && COUNT_TOKENS_PATH.test(path) ? "count_tokens"
+      : method === "POST" && MESSAGES_PATH.test(path) ? "messages"
+        : (method === "GET" || method === "HEAD") && request.body === null ? "probe"
+          : "other";
+    if (core === null) return refuse(method, route, PROTECT_FAILED_ERROR);
+    if (route === "other") return refuse(method, route, UNSUPPORTED_ROUTE);
+    if (urlCarriesFinding(incoming, options.config)) return refuse(method, route, UNSAFE_URL);
 
     const headers = forwardHeaders(request.headers);
     const sessionID = sessionOf(request);
 
-    if (method === "POST" && COUNT_TOKENS_PATH.test(path)) {
+    if (route === "probe") {
+      if (headersCarryFinding(headers, options.config)) return refuse(method, route, UNSAFE_HEADER);
+      const response = await send(new Request(targetOf(incoming), { method, headers }), signal);
+      return response === null ? anthropicError(502, UPSTREAM_UNREACHABLE) : relay(response, method);
+    }
+
+    const body = await canonicalJsonBody(request).catch(() => null);
+    if (body === null) return refuse(method, route, UNREADABLE_BODY);
+
+    if (route === "count_tokens") {
       // count_tokens carries the whole conversation in Messages shape. The
       // core masks only a /messages URL, so it masks under that path and the
       // masked body is then sent to the real count_tokens route.
       const event: Record<string, unknown> = {
         sessionID,
-        request: new Request(targetOf(incoming, path.replace(/\/count_tokens\/?$/, "")), {
-          method, headers, body: request.body, duplex: "half",
-        } as RequestInit),
+        request: new Request(targetOf(incoming, path.replace(/\/count_tokens\/?$/, "")), { method, headers, body }),
       };
       try {
         await core.onHttpRequest(event);
       } catch (error) {
-        return refuse(method, path, refusalMessage(error));
+        return refuse(method, route, refusalMessage(error));
       }
       const masked = event.request as Request;
       const response = await send(new Request(targetOf(incoming), {
@@ -197,33 +264,20 @@ export function createClaudeCodeProxy(options: ClaudeCodeProxyOptions): ClaudeCo
       return response === null ? anthropicError(502, UPSTREAM_UNREACHABLE) : relay(response, method);
     }
 
-    if (method === "POST" && MESSAGES_PATH.test(path)) {
-      const event: Record<string, unknown> = {
-        sessionID,
-        request: new Request(targetOf(incoming), { method, headers, body: request.body, duplex: "half" } as RequestInit),
-      };
-      try {
-        await core.onHttpRequest(event);
-      } catch (error) {
-        return refuse(method, path, refusalMessage(error));
-      }
-      const sent = event.request as Request;
-      const response = await send(sent, signal);
-      if (response === null) return anthropicError(502, UPSTREAM_UNREACHABLE);
-      // Same request object and session as the masking call: the core only
-      // restores a reply it can attribute to a request it masked.
-      const reply: Record<string, unknown> = { sessionID, request: sent, response };
-      await core.onHttpResponse(reply);
-      return relay(reply.response as Response, method);
+    const event: Record<string, unknown> = { sessionID, request: new Request(targetOf(incoming), { method, headers, body }) };
+    try {
+      await core.onHttpRequest(event);
+    } catch (error) {
+      return refuse(method, route, refusalMessage(error));
     }
-
-    if ((method === "GET" || method === "HEAD") && request.body === null) {
-      if (urlCarriesFinding(incoming, options.config)) return refuse(method, path, UNSAFE_URL);
-      const response = await send(new Request(targetOf(incoming), { method, headers }), signal);
-      return response === null ? anthropicError(502, UPSTREAM_UNREACHABLE) : relay(response, method);
-    }
-
-    return refuse(method, path, UNSUPPORTED_ROUTE);
+    const sent = event.request as Request;
+    const response = await send(sent, signal);
+    if (response === null) return anthropicError(502, UPSTREAM_UNREACHABLE);
+    // Same request object and session as the masking call: the core only
+    // restores a reply it can attribute to a request it masked.
+    const reply: Record<string, unknown> = { sessionID, request: sent, response };
+    await core.onHttpResponse(reply);
+    return relay(reply.response as Response, method);
   };
 
   return {
@@ -275,10 +329,12 @@ export async function startClaudeCodeProxy(
       } catch {
         response = anthropicError(500, PROTECT_FAILED_ERROR);
       }
-      const headers: Record<string, string> = {};
+      const headers: Record<string, string | string[]> = {};
       response.headers.forEach((value, key) => {
-        headers[key] = value;
+        if (key !== "set-cookie") headers[key] = value;
       });
+      const cookies = response.headers.getSetCookie();
+      if (cookies.length > 0) headers["set-cookie"] = cookies;
       res.writeHead(response.status, headers);
       if (response.body === null) {
         res.end();

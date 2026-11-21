@@ -32,7 +32,7 @@ LeakShield 透過本機 proxy 保護 Claude Code。Claude Code 把模型請求�
    leakshield --doctor
    ```
 
-   `Claude Code:` 區段會說明 `ANTHROPIC_BASE_URL` 來自哪裡（設定檔優先於 shell；專案 local 優先於專案，再優先於使用者，依 Claude Code 2.1.321 實測），以及該位址是否有 LeakShield proxy 回應。啟用 Bedrock、Vertex 或 Foundry，或設定了 `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST` 時會警告，因為這時 Claude Code 不會使用設定檔裡的 base URL。OpenCode 或 Claude Code 任一受保護時，doctor 的結束碼為 0。
+   `Claude Code:` 區段會說明 `ANTHROPIC_BASE_URL` 來自哪裡（設定檔優先於 shell；專案 local 優先於專案，再優先於使用者，依 Claude Code 2.1.321 實測），以及該位址是否有 LeakShield proxy 回應。啟用 Bedrock、Vertex 或 Foundry，或設定了 `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST` 時會警告，因為這時 Claude Code 不會使用設定檔裡的 base URL。OpenCode 的各種結果維持原本的結束碼。沒有 OpenCode 的機器上，只有 Claude Code 指向執行中的 LeakShield proxy、且沒有 provider 或宿主設定繞過它時，結束碼才是 0；base URL 指向沒在執行的 proxy 時結束碼為 1。
 
 `ANTHROPIC_BASE_URL` 指向 proxy 但 proxy 沒在執行時，Claude Code 的請求會失敗，不會改成直連 Anthropic，doctor 的結束碼為 1。
 
@@ -44,11 +44,12 @@ LeakShield 透過本機 proxy 保護 Claude Code。Claude Code 把模型請求�
 - 回應（JSON 或 SSE）：還原助理文字中的 placeholder，跨串流事件切開的 placeholder 也會還原。
 - `POST /v1/messages/count_tokens`：同樣遮罩，因為它帶著整段對話。
 - Thinking 歷史：Claude Code 會重送先前的 `thinking` block。文字照一般文字遮罩；`signature` 與 `redacted_thinking` 的資料原樣通過，因為 Anthropic 會驗證它們。
-- 沒有 body 的 `GET`／`HEAD`（Claude Code 會送 `HEAD /api/hello`）：URL 沒有命中時轉送。
+- 沒有 body 的 `GET`／`HEAD`（Claude Code 會送 `HEAD /api/hello`）：URL 與非憑證 header 都沒有命中時才轉送。
+- 所有路由：請求路徑或 query 有命中就擋下。上游的 redirect 交回 Claude Code，不會跟隨。
 - 其他一律**擋下，不轉送**：其他路由上帶 body 的請求、遮罩器不認得的 Messages body、無法遮罩的 content block 類型、header 或結構欄位（模型名稱、工具名稱、工具 id）中的敏感值，以及遮罩錯誤。Claude Code 會顯示 `API Error: 400 LeakShield blocked …`，後面附上說明是哪項檢查的代碼。Claude Code 遇到任何 400 最多會嘗試六次，每次都會被擋。
 - `GET /__leakshield/health` 由 proxy 自己回應，doctor 用它檢查。
 
-對應關係只存在記憶體。重啟 proxy 後會產生新的 placeholder；這是安全的，因為 Claude Code 的歷史存的是還原後的原值，會再遮罩一次。
+對應關係只存在記憶體。重啟後，Claude Code 歷史中的助理文字（已還原的原值）會以新的 placeholder 再遮罩一次。Thinking 文字與 `tool_use` input 從不還原，所以重啟前的 placeholder 會留在歷史裡：它們原樣通過，模型可能看到同一個值對應兩個 placeholder，舊的也無法再還原。不會外洩，但一個 session 期間請保持 proxy 執行。
 
 ## 不涵蓋的部分
 

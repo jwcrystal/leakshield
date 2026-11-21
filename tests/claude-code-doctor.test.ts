@@ -116,6 +116,13 @@ describe("doctor report with Claude Code", () => {
     expect(doctorExitCode({ ...base, status: "PARTIAL", claudeCode: proxied })).toBe(0);
   });
 
+  it("does not count Claude Code as protected when a provider bypasses the proxy", () => {
+    const ok = { id: "claude-code-proxy", state: "ok" as const, detail: "x" };
+    for (const id of ["claude-code-provider", "claude-code-host-managed"]) {
+      expect(doctorExitCode({ ...base, claudeCode: [{ id, state: "warn", detail: "x" }, ok] })).toBe(1);
+    }
+  });
+
   it("fails when Claude Code points at a proxy that is not running", () => {
     const dead = [{ id: "claude-code-proxy", state: "fail" as const, detail: "x" }];
     expect(doctorExitCode({ ...base, status: "PROTECTED", claudeCode: dead })).toBe(1);

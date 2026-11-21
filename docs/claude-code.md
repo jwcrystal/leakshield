@@ -32,7 +32,7 @@ Status: experimental. Verified with Claude Code 2.1.321 against a loopback stub 
    leakshield --doctor
    ```
 
-   The `Claude Code:` section says where `ANTHROPIC_BASE_URL` comes from (settings files win over the shell; project-local over project over user, as observed with Claude Code 2.1.321) and whether the LeakShield proxy answers there. It also warns when Bedrock, Vertex or Foundry is enabled, or when `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST` is set, because then Claude Code does not use the base URL from settings. The doctor exits 0 when either OpenCode or Claude Code is protected.
+   The `Claude Code:` section says where `ANTHROPIC_BASE_URL` comes from (settings files win over the shell; project-local over project over user, as observed with Claude Code 2.1.321) and whether the LeakShield proxy answers there. It also warns when Bedrock, Vertex or Foundry is enabled, or when `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST` is set, because then Claude Code does not use the base URL from settings. Every OpenCode result keeps its exit code. On a machine without OpenCode, the doctor exits 0 only when Claude Code points at a running LeakShield proxy and no provider or host setting bypasses it; a base URL pointing at a proxy that is not running exits 1.
 
 If the proxy is not running while `ANTHROPIC_BASE_URL` points at it, Claude Code's requests fail instead of going to Anthropic directly, and the doctor exits 1.
 
@@ -44,11 +44,12 @@ Claude Code started by another app (the Claude desktop app, an Agent SDK host, o
 - Replies, JSON or SSE: placeholders in assistant text are restored, including a placeholder split across stream events.
 - `POST /v1/messages/count_tokens`: masked the same way, because it carries the whole conversation.
 - Thinking history: Claude Code resends earlier `thinking` blocks. Their text is masked like other text; the `signature` and `redacted_thinking` data cross unchanged, because Anthropic verifies them.
-- Bodyless `GET`/`HEAD` (Claude Code sends `HEAD /api/hello`): forwarded when the URL carries no finding.
+- Bodyless `GET`/`HEAD` (Claude Code sends `HEAD /api/hello`): forwarded when neither the URL nor a non-credential header carries a finding.
+- Every route: a finding in the request path or query blocks the request. Upstream redirects are returned to Claude Code, not followed.
 - Anything else is **blocked, not forwarded**: a body on another route, a Messages body the masker does not recognise, a content block type it cannot mask, a sensitive value in a header or a structural field (model name, tool name, tool id), or a masking error. Claude Code shows `API Error: 400 LeakShield blocked …` with a code naming the check. Claude Code makes up to six attempts on any 400; each one is blocked.
 - `GET /__leakshield/health` is answered by the proxy itself; the doctor uses it.
 
-The proxy keeps mappings in memory only. Restarting it starts new placeholders; that is safe because Claude Code's history holds the restored originals and is masked again.
+The proxy keeps mappings in memory only. After a restart, assistant text in Claude Code's history (restored originals) is masked again under new placeholders. Thinking text and `tool_use` input are never restored, so placeholders from before the restart stay in the history: they pass through unchanged, the model may see two placeholders for one value, and the old ones can no longer be restored. Nothing leaks, but keep the proxy running for the length of a session.
 
 ## What it does not cover
 

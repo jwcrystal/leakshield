@@ -460,6 +460,7 @@ export function createGuardCore(
   attachmentsPolicy: "block" | "allow" = "block",
   wireProtection = true,
   persistence?: GuardPersistenceOptions,
+  dialect: { anthropicThinking?: "refuse" | "mask" } = {},
 ): GuardCore | null {
   const created = createPseudonymizer(config, TRANSPARENT_LIMITS);
   if (!created.ok) return null;
@@ -751,6 +752,7 @@ export function createGuardCore(
     isTransportIdentifierSafe: (sid, text) =>
       pseudonymizer.isStructuralIdentifierSafe(sid, neutralizeTransportUrls(text)),
     attachmentsPolicy,
+    anthropicThinking: dialect.anthropicThinking ?? "refuse",
   };
   const webSocket = createResponsesWebSocketAdapter(transportService, wireProtection, hasProtectedContext);
   /** Release only an explicitly deleted session; persisted rows keep their TTL. */

@@ -176,3 +176,39 @@ describe.each(routes)("$name remasker forwards the scanned value", (route) => {
     expect(route.restored(await (resEvent.response as Response).json())).toBe(KEY);
   });
 });
+
+describe("tool-call arguments are forwarded as their scanned serialization", () => {
+  const args = `{"cmd":${JSON.stringify(`key ${KEY}`)},"cmd":"hello"}`;
+
+  it("chat completions tool_calls arguments", async () => {
+    const hook = await arm();
+    const raw = JSON.stringify({
+      model: "gpt-test",
+      messages: [
+        { role: "user", content: "hi" },
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [{ id: "call_1", type: "function", function: { name: "run", arguments: args } }],
+        },
+        { role: "tool", tool_call_id: "call_1", content: "ok" },
+      ],
+    });
+    const { forwarded } = await send(hook, routes[0].url, raw);
+    expect(forwarded).not.toContain(KEY);
+  });
+
+  it("openai responses function_call arguments", async () => {
+    const hook = await arm();
+    const raw = JSON.stringify({
+      model: "gpt-test",
+      input: [
+        { role: "user", content: "hi" },
+        { type: "function_call", call_id: "call_1", name: "run", arguments: args },
+        { type: "function_call_output", call_id: "call_1", output: "ok" },
+      ],
+    });
+    const { forwarded } = await send(hook, routes[2].url, raw);
+    expect(forwarded).not.toContain(KEY);
+  });
+});

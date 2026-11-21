@@ -2,7 +2,7 @@
 // The upstream is a fake fetch (or, in the last block, a loopback HTTP
 // server) that records exactly what would have reached Anthropic.
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { connect as netConnect, type AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { createClaudeCodeProxy, parseUpstream, startClaudeCodeProxy, HEALTH_PATH } from "../src/claude-code/proxy.js";
 import { loadConfig } from "../src/config/loader.js";
@@ -294,6 +294,23 @@ describe("Claude Code proxy over HTTP", () => {
     await new Promise<void>((resolve) => (upstream ? upstream.close(() => resolve()) : resolve()));
     upstream = undefined;
     close = undefined;
+  });
+
+  it("survives a malformed request target and keeps serving", async () => {
+    const running = await startClaudeCodeProxy({ config, port: 0, log: quiet });
+    close = running.close;
+    const port = Number(new URL(running.url).port);
+    const firstLine = await new Promise<string>((resolve) => {
+      const socket = netConnect(port, "127.0.0.1", () => socket.write("GET //[/ HTTP/1.1\r\nHost: x\r\n\r\n"));
+      let out = "";
+      socket.on("data", (d) => (out += d));
+      socket.on("close", () => resolve(out.split("\r\n")[0]));
+      socket.on("error", () => resolve(""));
+      setTimeout(() => socket.destroy(), 1000);
+    });
+    expect(firstLine).toContain("400");
+    const health = await fetch(`${running.url}${HEALTH_PATH}`);
+    expect(health.status).toBe(200);
   });
 
   it("streams a masked request out and a restored reply back", async () => {

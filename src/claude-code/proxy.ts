@@ -317,17 +317,19 @@ export async function startClaudeCodeProxy(
     void (async () => {
       const method = (req.method ?? "GET").toUpperCase();
       const hasBody = method !== "GET" && method !== "HEAD";
-      const request = new Request(new URL(req.url ?? "/", `http://${host}`), {
-        method,
-        headers: toHeaders(req.headers),
-        body: hasBody ? (Readable.toWeb(req) as ReadableStream<Uint8Array>) : null,
-        duplex: "half",
-      } as RequestInit);
+      // 400 rather than 5xx for every local failure: Claude Code retries 5xx,
+      // and a malformed target must not take the whole proxy down.
       let response: Response;
       try {
+        const request = new Request(new URL(req.url ?? "/", `http://${host}`), {
+          method,
+          headers: toHeaders(req.headers),
+          body: hasBody ? (Readable.toWeb(req) as ReadableStream<Uint8Array>) : null,
+          duplex: "half",
+        } as RequestInit);
         response = await proxy.handle(request, controller.signal);
       } catch {
-        response = anthropicError(500, PROTECT_FAILED_ERROR);
+        response = anthropicError(400, PROTECT_FAILED_ERROR);
       }
       const headers: Record<string, string | string[]> = {};
       response.headers.forEach((value, key) => {
@@ -345,7 +347,7 @@ export async function startClaudeCodeProxy(
       // cleanly: a clean end would look like a complete reply.
       body.on("error", () => res.destroy());
       body.pipe(res);
-    })();
+    })().catch(() => res.destroy());
   });
 
   await new Promise<void>((resolve, reject) => {

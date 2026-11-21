@@ -19,8 +19,7 @@ import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { createGuardCore, PROTECT_FAILED_ERROR, type GuardCore } from "../core/session-guard.js";
-import { containsTokenPrefix } from "../decision/pseudonymization.js";
-import { scanText } from "../scanner/engine.js";
+import { containsTokenPrefix, createPseudonymizer } from "../decision/pseudonymization.js";
 import type { GuardConfig } from "../types.js";
 
 export const DEFAULT_PROXY_HOST = "127.0.0.1";
@@ -128,31 +127,29 @@ function relay(response: Response, method: string): Response {
   });
 }
 
-function urlCarriesFinding(url: URL, config: GuardConfig): boolean {
+type Unsafe = (text: string) => boolean;
+
+function urlCarriesFinding(url: URL, unsafe: Unsafe): boolean {
   let text = url.pathname + url.search;
   try {
     text = decodeURIComponent(text);
   } catch {
     return true;
   }
-  if (carriesFinding(text, config)) return true;
+  if (unsafe(text)) return true;
   // decodeURIComponent leaves `+` as is; form decoding turns it into a space,
   // which a multi-word keyword needs to match.
   for (const [name, value] of url.searchParams) {
-    if (carriesFinding(name, config) || carriesFinding(value, config)) return true;
+    if (unsafe(name) || unsafe(value)) return true;
   }
   return false;
 }
 
-function carriesFinding(text: string, config: GuardConfig): boolean {
-  return containsTokenPrefix(text) || scanText(text, config).findings.length > 0;
-}
-
 /** Credential headers are meant for the upstream and are not content. */
-function headersCarryFinding(headers: Headers, config: GuardConfig): boolean {
+function headersCarryFinding(headers: Headers, unsafe: Unsafe): boolean {
   let found = false;
   headers.forEach((value, key) => {
-    if (!found && !CREDENTIAL_HEADERS.has(key) && (carriesFinding(key, config) || carriesFinding(value, config))) found = true;
+    if (!found && !CREDENTIAL_HEADERS.has(key) && (unsafe(key) || unsafe(value))) found = true;
   });
   return found;
 }
@@ -193,6 +190,12 @@ export function createClaudeCodeProxy(options: ClaudeCodeProxyOptions): ClaudeCo
   const upstream = parseUpstream(options.upstream ?? DEFAULT_UPSTREAM);
   const fetchImpl = options.fetch ?? fetch;
   const log = options.log ?? ((line: string) => console.error(line));
+  // The core's model-boundary scan, not a plain scanText: it ignores in-text
+  // ignore directives and treats a truncated scan as unsafe, so metadata
+  // cannot opt itself out or hide past the scan limit.
+  const boundary = createPseudonymizer(options.config);
+  const metadataUnsafe: Unsafe = (text) =>
+    !boundary.ok || containsTokenPrefix(text) || !boundary.isTextSafe(text);
   const core: GuardCore | null = createGuardCore(options.config, options.attachments ?? "block", true, undefined, {
     anthropicThinking: "mask",
   });
@@ -245,13 +248,13 @@ export function createClaudeCodeProxy(options: ClaudeCodeProxyOptions): ClaudeCo
           : "other";
     if (core === null) return refuse(method, route, PROTECT_FAILED_ERROR);
     if (route === "other") return refuse(method, route, UNSUPPORTED_ROUTE);
-    if (urlCarriesFinding(incoming, options.config)) return refuse(method, route, UNSAFE_URL);
+    if (urlCarriesFinding(incoming, metadataUnsafe)) return refuse(method, route, UNSAFE_URL);
 
     const headers = forwardHeaders(request.headers);
     const sessionID = sessionOf(request);
 
     if (route === "probe") {
-      if (headersCarryFinding(headers, options.config)) return refuse(method, route, UNSAFE_HEADER);
+      if (headersCarryFinding(headers, metadataUnsafe)) return refuse(method, route, UNSAFE_HEADER);
       const response = await send(new Request(targetOf(incoming), { method, headers }), signal);
       return response === null ? anthropicError(502, UPSTREAM_UNREACHABLE) : relay(response, method);
     }

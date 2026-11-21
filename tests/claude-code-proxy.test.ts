@@ -286,6 +286,32 @@ describe("Claude Code proxy: fail closed", () => {
     proxy.dispose();
   });
 
+  it("does not let metadata opt itself out with an ignore directive", async () => {
+    const { sent, fetchImpl } = fakeUpstream(echoTokenStream);
+    const proxy = createClaudeCodeProxy({ config, fetch: fetchImpl, log: quiet });
+    const probe = await proxy.handle(new Request("http://127.0.0.1:8787/api/hello", {
+      headers: { "x-note": `${CANARY} sg-ignore` },
+    }));
+    expect(probe.status).toBe(400);
+    const post = await proxy.handle(messagesRequest(userTurn("hello"), "s", `/${CANARY}/sg-ignore/v1/messages`));
+    expect(post.status).toBe(400);
+    expect(sent).toHaveLength(0);
+    proxy.dispose();
+  });
+
+  it("refuses metadata whose scan would be truncated", async () => {
+    const { sent, fetchImpl } = fakeUpstream(echoTokenStream);
+    const small = { ...config, settings: { ...config.settings, max_chars: 64 } };
+    const proxy = createClaudeCodeProxy({ config: small, fetch: fetchImpl, log: quiet });
+    const padding = "a".repeat(80);
+    const probe = await proxy.handle(new Request("http://127.0.0.1:8787/api/hello", { headers: { "x-note": `${padding} ${CANARY}` } }));
+    expect(probe.status).toBe(400);
+    const post = await proxy.handle(messagesRequest(userTurn("hi"), "s", `/${padding}/${CANARY}/v1/messages`));
+    expect(post.status).toBe(400);
+    expect(sent).toHaveLength(0);
+    proxy.dispose();
+  });
+
   it("scans form-decoded query parameters", async () => {
     const { sent, fetchImpl } = fakeUpstream(() => new Response(null, { status: 200 }));
     const proxy = createClaudeCodeProxy({

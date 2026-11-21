@@ -217,6 +217,17 @@ describe("Claude Code proxy: fail closed", () => {
     proxy.dispose();
   });
 
+  it("blocks a bodyless probe whose header name carries a finding", async () => {
+    const { sent, fetchImpl } = fakeUpstream(() => new Response(null, { status: 200 }));
+    const proxy = createClaudeCodeProxy({ config, fetch: fetchImpl, log: quiet });
+    const response = await proxy.handle(new Request("http://127.0.0.1:8787/api/hello", {
+      method: "HEAD", headers: { [CANARY]: "present" },
+    }));
+    expect(response.status).toBe(400);
+    expect(sent).toHaveLength(0);
+    proxy.dispose();
+  });
+
   it("blocks a Messages request whose path carries a finding, without logging the path", async () => {
     const { sent, fetchImpl } = fakeUpstream(echoTokenStream);
     const lines: string[] = [];

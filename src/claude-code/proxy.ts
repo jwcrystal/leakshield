@@ -144,7 +144,7 @@ function carriesFinding(text: string, config: GuardConfig): boolean {
 function headersCarryFinding(headers: Headers, config: GuardConfig): boolean {
   let found = false;
   headers.forEach((value, key) => {
-    if (!found && !CREDENTIAL_HEADERS.has(key) && carriesFinding(value, config)) found = true;
+    if (!found && !CREDENTIAL_HEADERS.has(key) && (carriesFinding(key, config) || carriesFinding(value, config))) found = true;
   });
   return found;
 }

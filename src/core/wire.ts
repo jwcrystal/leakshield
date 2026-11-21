@@ -43,9 +43,9 @@ import {
   PSEUDONYM_TOKEN_PREFIXES,
   type PseudonymJsonResult,
   type PseudonymTextResult,
-} from "./decision/pseudonymization.js";
-import { walkSchemaStrings } from "./decision/schema-strings.js";
-import { createRecoveringSseStream } from "./opencode-transparent-stream.js";
+} from "../decision/pseudonymization.js";
+import { walkSchemaStrings } from "../decision/schema-strings.js";
+import { createRecoveringSseStream } from "./sse-recovery.js";
 
 /** The masking/detection subset of the pseudonymization core this module needs. */
 export interface TransportMaskingService {

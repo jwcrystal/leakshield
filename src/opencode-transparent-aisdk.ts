@@ -4,7 +4,7 @@
  * This is NOT a network sandbox: SDKs that ignore options.fetch are outside
  * the supported contract (including any private sockets/global-fetch path). */
 import { types } from "node:util";
-import { classifyModelRoute } from "./opencode-transparent-http.js";
+import { classifyModelRoute } from "./core/wire.js";
 
 const ADMISSION_ERROR = "LeakShield blocked an unsupported route. The provider must use the fetch OpenCode injects.";
 const DISPOSED_ERROR = "LeakShield blocked a request on an inactive AI SDK transport.";

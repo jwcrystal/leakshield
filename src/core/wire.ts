@@ -1750,13 +1750,13 @@ function allowAnthropicField(fields: AnthropicAllowedFields, record: Record<stri
   fields.set(record, allowed);
 }
 
-function anthropicStrayTokenIn(value: unknown, fields?: AnthropicAllowedFields): boolean {
+function anthropicStrayTokenIn(value: unknown, fields?: AnthropicAllowedFields, tokenizedThinking = false): boolean {
   if (typeof value === "string") {
     return containsTokenPrefix(value);
   }
   if (value === null || typeof value !== "object") return false;
   if (Array.isArray(value)) {
-    return value.some((item) => anthropicStrayTokenIn(item, fields));
+    return value.some((item) => anthropicStrayTokenIn(item, fields, tokenizedThinking));
   }
   const record = value as Record<string, unknown>;
   for (const key of Object.keys(record)) {
@@ -1771,12 +1771,19 @@ function anthropicStrayTokenIn(value: unknown, fields?: AnthropicAllowedFields):
           if (typeof block.id === "string" && containsTokenPrefix(block.id)) return true;
           continue; // input stays tokenized by design
         }
-        if (anthropicStrayTokenIn(block, fields)) return true;
+        if (tokenizedThinking && block.type === "thinking") {
+          // Thinking text is signed: restoring it would break the signature
+          // when Claude Code resends it, so its placeholders stay as sent.
+          const { thinking: _signed, ...rest } = block;
+          if (anthropicStrayTokenIn(rest, fields, tokenizedThinking)) return true;
+          continue;
+        }
+        if (anthropicStrayTokenIn(block, fields, tokenizedThinking)) return true;
       }
       continue;
     }
     if (fields?.get(record)?.has(key)) continue;
-    if (anthropicStrayTokenIn(value, fields)) return true;
+    if (anthropicStrayTokenIn(value, fields, tokenizedThinking)) return true;
   }
   return false;
 }
@@ -1819,7 +1826,7 @@ async function restoreAnthropicJsonResponse(
     }
     // tool_use / other blocks: input stays tokenized until the typed tool gate.
   }
-  if (anthropicStrayTokenIn(body, fields)) throw new Error(UNSUPPORTED_RESPONSE);
+  if (anthropicStrayTokenIn(body, fields, service.anthropicThinking === "mask")) throw new Error(UNSUPPORTED_RESPONSE);
   if (!changed) return response;
   const next = JSON.stringify(body);
   const headers = new Headers(response.headers);

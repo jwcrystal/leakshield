@@ -73,4 +73,27 @@ describe("Anthropic thinking blocks at the wire", () => {
     };
     await expect(core("mask").onHttpRequest(event)).rejects.toThrow(/anthropic-content-block-type/);
   });
+
+  it("tolerates tokenized thinking in a JSON reply only when opted in", async () => {
+    const tokenRe = /\[SGP2:[A-Z_]+-[a-z]{4}-[a-z]{4}-[a-z]{4}\]/;
+    for (const [mode, restored] of [[undefined, false], ["mask", true]] as const) {
+      const guard = core(mode);
+      const event: Record<string, unknown> = { sessionID: "s", request: request([{ type: "text", text: "ok" }]) };
+      await guard.onHttpRequest(event);
+      const sent = event.request as Request;
+      const token = (await sent.clone().text()).match(tokenRe)?.[0];
+      const reply: Record<string, unknown> = {
+        sessionID: "s",
+        request: sent,
+        response: new Response(JSON.stringify({
+          type: "message", role: "assistant",
+          content: [{ type: "thinking", thinking: `k ${token}`, signature: "c2ln" }, { type: "text", text: `k ${token}` }],
+        }), { status: 200, headers: { "content-type": "application/json" } }),
+      };
+      await guard.onHttpResponse(reply);
+      const body = await (reply.response as Response).json();
+      expect(body.content[1].text === `k ${CANARY}`).toBe(restored);
+      expect(body.content[0].thinking).toMatch(tokenRe);
+    }
+  });
 });

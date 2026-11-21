@@ -102,6 +102,25 @@ describe("Claude Code proxy: masking", () => {
     proxy.dispose();
   });
 
+  it("restores JSON reply text while leaving tokenized thinking as signed", async () => {
+    const { fetchImpl } = fakeUpstream((sent) => {
+      const token = sent.body.match(TOKEN)?.[0];
+      return new Response(JSON.stringify({
+        id: "m", type: "message", role: "assistant", model: "c",
+        content: [
+          { type: "thinking", thinking: `the key is ${token}`, signature: "c2ln" },
+          { type: "text", text: `key ${token}` },
+        ],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    const proxy = createClaudeCodeProxy({ config, fetch: fetchImpl, log: quiet });
+    const body = await (await proxy.handle(messagesRequest(userTurn(`my key is ${CANARY}`)))).json();
+    expect(body.content[1].text).toBe(`key ${CANARY}`);
+    expect(body.content[0].thinking).toMatch(TOKEN);
+    expect(body.content[0].signature).toBe("c2ln");
+    proxy.dispose();
+  });
+
   it("keeps one placeholder per value across requests of the same session", async () => {
     const { sent, fetchImpl } = fakeUpstream(echoTokenStream);
     const proxy = createClaudeCodeProxy({ config, fetch: fetchImpl, log: quiet });

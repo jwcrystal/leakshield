@@ -236,7 +236,7 @@ export const WEB_UI_HTML = String.raw`<!DOCTYPE html>
 <main class="shell">
   <header class="topbar">
     <div class="brand">
-      <div class="mark" aria-hidden="true">SG</div>
+      <div class="mark" aria-hidden="true">LS</div>
       <div>
         <h1>LeakShield</h1>
         <p class="tagline"><span class="tagline-part">本機敏感內容檢查台</span> <span class="tagline-part" lang="en">/ Local redaction workbench</span></p>

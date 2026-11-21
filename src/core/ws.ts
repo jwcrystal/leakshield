@@ -13,7 +13,7 @@ import {
   restoreResponsesEventDisplay,
   splitRestorable,
   type TransportMaskingService,
-} from "./core/wire.js";
+} from "./wire.js";
 
 type Event = Record<string, unknown>;
 const ROUTE_ERROR = "LeakShield blocked a request on an unsupported route.";

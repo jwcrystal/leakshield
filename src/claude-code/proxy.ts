@@ -158,10 +158,9 @@ function headersCarryFinding(headers: Headers, config: GuardConfig): boolean {
 }
 
 /**
- * The core forwards the original bytes when masking changes nothing, but it
- * scans the parsed value. Bytes that parse to something else (a duplicate
- * key, say) would then leave unscanned, so the core only ever sees the
- * canonical serialization of what it scans.
+ * The core also forwards only what it scanned (#93); normalizing here as
+ * well keeps that guarantee independent of the core and lets an oversized or
+ * non-JSON body be refused before the core reads it.
  */
 async function canonicalJsonBody(request: Request): Promise<string | null> {
   if (request.body === null) return null;

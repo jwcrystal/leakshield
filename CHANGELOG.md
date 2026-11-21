@@ -2,6 +2,18 @@
 
 All notable changes are listed here.
 
+## 0.3.1 — 2026-11-21
+
+OpenCode sessions no longer stop after a server-side compaction. From this version LeakShield is licensed under Apache-2.0; 0.1.0 through 0.3.0 stay under MIT.
+
+### Fixed
+
+- OpenCode now replays four Responses input item types that the validator refused as unknown (`[responses-item-type]`), so a session that had been compacted on the server was blocked on every later request. `compaction` items cross verbatim and unscanned, like `reasoning.encrypted_content`; `custom_tool_call` input and `custom_tool_call_output` output are masked as text; `configuration_update` keeps `reasoning.effort` structural; and `function_call.namespace` is a structural identifier. On the restore side, `custom_tool_call` input stays tokenized over HTTP, SSE and WebSocket for the tool gate, without a degradation warning. ([#83](https://github.com/jwcrystal/leakshield/pull/83))
+
+### Changed
+
+- The license is Apache-2.0 instead of MIT, from this version on. Apache-2.0 adds a patent grant and a trademark clause; it does not restrict commercial use. The package now ships `NOTICE` alongside `LICENSE`. ([#83](https://github.com/jwcrystal/leakshield/pull/83))
+
 ## 0.3.0 — 2026-11-06
 
 Transparent-mode tool restoration is now decided per field instead of per tool. A string in an ordinary tool is restored verbatim, and `curl` and `http` may hold a placeholder inside an argument, so an API can be called with a protected value. Two kinds of call are still refused that a reader might expect to work: a placeholder in a multi-line or interpolated `code`/`script` string, and any command that parses its arguments again (`sh -c`, `wget -e`). Restoring a value still does not control where a permitted command sends it. Run `leakshield --doctor` after upgrading.

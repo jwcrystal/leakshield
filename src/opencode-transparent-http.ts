@@ -492,7 +492,11 @@ function withOpaqueReasoningContent(
   if (!Array.isArray(input)) return fn(body);
   const originals: string[] = [];
   for (const item of input) {
-    if (isRecord(item) && item.type === "reasoning" && typeof item.encrypted_content === "string") {
+    if (
+      isRecord(item) &&
+      (item.type === "reasoning" || item.type === "compaction") &&
+      typeof item.encrypted_content === "string"
+    ) {
       originals.push(item.encrypted_content);
       item.encrypted_content = `${OPAQUE_REASONING_SENTINEL}_${originals.length - 1}`;
     }
@@ -1001,10 +1005,11 @@ export async function remaskAnthropicMessagesRequest(
 /**
  * Validates an OpenAI Responses request body: `instructions` string, `input`
  * (string or item array: message | function_call | function_call_output |
- * reasoning), flat `tools` ({type:"function", name, parameters}). Reasoning
- * items pass with their encrypted payload opaque (unscanned, verbatim) and
- * their summary/content text masked; item references and unknown types
- * refuse.
+ * custom_tool_call | custom_tool_call_output | reasoning | compaction |
+ * configuration_update), flat `tools` ({type:"function", name, parameters}).
+ * Reasoning and compaction items pass with their encrypted payload opaque
+ * (unscanned, verbatim); reasoning summary/content text is masked; item
+ * references and unknown types refuse.
  */
 function validateResponsesContentParts(content: unknown, allowAttachments: boolean): void {
   if (content === undefined || content === null || typeof content === "string") return;
@@ -1063,7 +1068,13 @@ function validateResponsesInputItem(item: unknown, allowAttachments: boolean): v
         throw new Error(refusal("responses-function-call-shape"));
       }
       return;
+    case "custom_tool_call":
+      if (typeof item.name !== "string" || typeof item.input !== "string") {
+        throw new Error(refusal("responses-custom-tool-call-shape"));
+      }
+      return;
     case "function_call_output":
+    case "custom_tool_call_output":
       if (typeof item.output !== "string") {
         if (!Array.isArray(item.output)) throw new Error(refusal("responses-function-output"));
         validateResponsesContentParts(item.output, allowAttachments);
@@ -1084,6 +1095,21 @@ function validateResponsesInputItem(item: unknown, allowAttachments: boolean): v
       validateResponsesReasoningParts(item.content);
       return;
     }
+    case "compaction":
+      // Same opacity argument as reasoning.encrypted_content: a provider
+      // checkpoint of already-masked history, replayed to the same provider.
+      if (
+        typeof item.encrypted_content !== "string" ||
+        (item.id !== undefined && item.id !== null && typeof item.id !== "string")
+      ) {
+        throw new Error(refusal("responses-compaction-shape"));
+      }
+      return;
+    case "configuration_update":
+      if (!isRecord(item.reasoning) || typeof item.reasoning.effort !== "string") {
+        throw new Error(refusal("responses-configuration-update-shape"));
+      }
+      return;
     default:
       // item_reference / unknown: cannot verify or place.
       throw new Error(refusal("responses-item-type"));
@@ -1126,8 +1152,10 @@ function collectResponsesStructuralStrings(body: Record<string, unknown>): strin
       pushString(out, item.type);
       pushString(out, item.role);
       pushString(out, item.call_id);
-      if (item.type === "function_call") pushString(out, item.name);
-      if (item.type === "reasoning") pushString(out, item.id);
+      if (item.type === "function_call" || item.type === "custom_tool_call") pushString(out, item.name);
+      if (item.type === "function_call") pushString(out, item.namespace);
+      if (item.type === "reasoning" || item.type === "compaction") pushString(out, item.id);
+      if (item.type === "configuration_update" && isRecord(item.reasoning)) pushString(out, item.reasoning.effort);
     }
   }
   if (Array.isArray(body.tools)) {
@@ -2035,7 +2063,10 @@ function restoreResponsesItemText(
   if (item.type === "function_call" && typeof item.arguments === "string") {
     allowResponsesField(fields, item, "arguments");
   }
-  if (item.type === "function_call_output" && typeof item.output === "string") {
+  if (item.type === "custom_tool_call" && typeof item.input === "string") {
+    allowResponsesField(fields, item, "input");
+  }
+  if ((item.type === "function_call_output" || item.type === "custom_tool_call_output") && typeof item.output === "string") {
     allowResponsesField(fields, item, "output");
   }
   let changed = false;
@@ -2087,6 +2118,8 @@ export function restoreResponsesEventDisplay(
     }
   } else if (type === "response.function_call_arguments.delta" || type === "response.function_call_arguments.done") {
     allowResponsesField(fields, chunk, type.endsWith(".delta") ? "delta" : "arguments");
+  } else if (type === "response.custom_tool_call_input.delta" || type === "response.custom_tool_call_input.done") {
+    allowResponsesField(fields, chunk, type.endsWith(".delta") ? "delta" : "input");
   } else if (type === "response.output_item.added" || type === "response.output_item.done") {
     if (isRecord(chunk.item)) restoreResponsesItemText(service, sessionID, chunk.item, fields);
   } else if (
@@ -2324,6 +2357,9 @@ export function createResponsesSseRestoreStream(
           }
         } else if (eventType === "response.function_call_arguments.delta" || eventType === "response.function_call_arguments.done") {
           const field = eventType.endsWith(".delta") ? "delta" : "arguments";
+          if (typeof chunk[field] === "string") allowResponsesField(fields, chunk, field);
+        } else if (eventType === "response.custom_tool_call_input.delta" || eventType === "response.custom_tool_call_input.done") {
+          const field = eventType.endsWith(".delta") ? "delta" : "input";
           if (typeof chunk[field] === "string") allowResponsesField(fields, chunk, field);
         }
 

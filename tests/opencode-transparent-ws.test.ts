@@ -56,6 +56,41 @@ describe("Responses-family WebSocket hooks", () => {
     expect(terminal.response.output_text).toBe(EMAIL);
   });
 
+  it("admits a response.create replaying compaction, configuration and custom tool items", async () => {
+    const { handshake, send } = await arm();
+    await handshake();
+    const masked = await send({
+      type: "response.create",
+      model: "model-a",
+      input: [
+        { type: "compaction", id: "cmp_1", encrypted_content: "gAAAAopaque==" },
+        { type: "configuration_update", reasoning: { effort: "medium" } },
+        { type: "custom_tool_call", call_id: "call_p", name: "apply_patch", input: `to ${EMAIL}` },
+        { type: "custom_tool_call_output", call_id: "call_p", output: "ok" },
+      ],
+    });
+    expect(JSON.stringify(masked)).not.toContain(EMAIL);
+    expect(masked.input[0]).toEqual({ type: "compaction", id: "cmp_1", encrypted_content: "gAAAAopaque==" });
+    expect(masked.input[2].name).toBe("apply_patch");
+  });
+
+  it("keeps custom_tool_call input deltas tokenized on receive without degradation", async () => {
+    const { handshake, send, receive } = await arm();
+    await handshake();
+    const token = (await send({ type: "response.create", input: EMAIL })).input;
+    await receive({ type: "response.created", response: { id: "resp_c" } });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const delta = await receive({ type: "response.custom_tool_call_input.delta", item_id: "ctc_1", output_index: 0, delta: `to ${token}` });
+      const done = await receive({ type: "response.custom_tool_call_input.done", item_id: "ctc_1", output_index: 0, input: `to ${token}` });
+      expect(delta.delta).toBe(`to ${token}`);
+      expect(done.input).toBe(`to ${token}`);
+      expect(warn.mock.calls.flat().join("\n")).not.toContain("degraded");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it.each([false, true])("keeps hook-first restoration and makes final-frame masking optional (%s)", async (wireProtection) => {
     const { hooks, route, handshake, send, receive } = await arm(wireProtection);
     const context = { ...route, system: [{ type: "text", text: EMAIL }], messages: [], options: {} };

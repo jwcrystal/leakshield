@@ -1,4 +1,3 @@
-import { createResponsesWebSocketAdapter } from "./ws.js";
 import { types } from "node:util";
 import {
   containsTokenPrefix,
@@ -25,6 +24,7 @@ import {
   withOpaqueAttachments,
   type TransportMaskingService,
 } from "./wire.js";
+import { createResponsesWebSocketAdapter } from "./ws.js";
 import {
   parseSupportedShellArguments,
   ToolLeafPolicy,
@@ -415,7 +415,10 @@ function inputCarriesToken(value: unknown, seen: WeakSet<object>): boolean {
 
 // ─── Guard ───────────────────────────────────────────────────────────────────
 
-
+/** Persistence wiring options (W2/B4 + R-round), mapped from
+ * PluginOptions.persistence. `keyProvider` is a test/CI injection seam —
+ * production callers leave it unset and the OS keychain ladder resolves;
+ * an explicit null forces the ladder-bottom memory-only path deterministically. */
 export interface GuardPersistenceOptions {
   ttlDays: number;
   path: string;
@@ -423,16 +426,6 @@ export interface GuardPersistenceOptions {
   keyfilePath?: string;
   keyProvider?: MappingKeyProvider | null;
 }
-
-/**
- * Creates the transparent session guard for one plugin setup (= one OpenCode
- * process): a single bounded pseudonymizer, exact-session mapping, private
- * request attribution, and its own registrations. With persistence options
- * the guard additionally hydrates sessions from the encrypted store on
- * first touch and writes committed mappings back (decision §4: dispose
- * unloads hooks but never deletes persisted mappings — forget is the only
- * erasure path).
- */
 
 export interface GuardCore {
   readonly hasSession: (sessionID: string) => boolean;
@@ -453,6 +446,15 @@ export interface GuardCore {
   readonly dispose: () => void;
 }
 
+/**
+ * Creates the host-independent guard core for one plugin setup (= one OpenCode
+ * process): a single bounded pseudonymizer, exact-session mapping and private
+ * request attribution. The host layer registers hooks that call its handlers.
+ * With persistence options the core additionally hydrates sessions from the
+ * encrypted store on first touch and writes committed mappings back (decision
+ * §4: dispose unloads hooks but never deletes persisted mappings — forget is
+ * the only erasure path). Returns null when the pseudonymizer cannot be built.
+ */
 export function createGuardCore(
   config: GuardConfig,
   attachmentsPolicy: "block" | "allow" = "block",

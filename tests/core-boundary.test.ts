@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const SRC = join(__dirname, "..", "src");
 const CORE_PATHS = ["core", "decision", "scanner", "rules", "config", "types.ts"];
-const HOST_IMPORT = /from\s+["'](?:@opencode[^"']*|(?:\.{1,2}\/)+(?:[\w-]+\/)*opencode[^"']*)["']/;
+const HOST_IMPORT = /(?:\bfrom|\bimport|\brequire)\s*\(?\s*["'](?:@opencode[^"']*|(?:\.{1,2}\/)+(?:[\w-]+\/)*opencode[^"']*)["']/;
 
 function sourceFiles(path: string): string[] {
   if (!statSync(path).isDirectory()) return [path];

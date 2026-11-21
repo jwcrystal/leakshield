@@ -1,6 +1,6 @@
 /**
  * Structural-string collection for JSON Schema subtrees, shared by the
- * session-layer request guard (src/opencode-transparent.ts) and the wire-layer
+ * session-layer request guard (src/core/session-guard.ts) and the wire-layer
  * remaskers (src/core/wire.ts) so the pre-mask safety check
  * and the post-mask identity comparison can never drift apart.
  *

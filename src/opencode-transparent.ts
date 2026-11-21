@@ -119,11 +119,6 @@ export function createFailClosedTransparentGuard(wireProtection = true): Transpa
   };
 }
 
-/** Persistence wiring options (W2/B4 + R-round), mapped from
- * PluginOptions.persistence. `keyProvider` is a test/CI injection seam —
- * production callers leave it unset and the OS keychain ladder resolves;
- * an explicit null forces the ladder-bottom memory-only path deterministically. */
-
 /**
  * Creates the transparent session guard for one plugin setup (= one OpenCode
  * process): the host-independent core (`core/session-guard.ts`) plus this

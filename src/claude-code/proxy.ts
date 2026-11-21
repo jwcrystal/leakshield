@@ -57,6 +57,8 @@ const UNSAFE_HEADER =
   "LeakShield blocked a request whose headers carry sensitive content. [proxy-header]";
 const UNREADABLE_BODY =
   "LeakShield blocked the request because its body is unsupported or could not be identified. [proxy-body]";
+const UPSTREAM_REDIRECT =
+  "LeakShield blocked an upstream redirect; following it would resend the request outside the proxy. [proxy-redirect]";
 const UPSTREAM_UNREACHABLE =
   "LeakShield could not reach the upstream API. [proxy-upstream]";
 
@@ -133,7 +135,13 @@ function urlCarriesFinding(url: URL, config: GuardConfig): boolean {
   } catch {
     return true;
   }
-  return carriesFinding(text, config);
+  if (carriesFinding(text, config)) return true;
+  // decodeURIComponent leaves `+` as is; form decoding turns it into a space,
+  // which a multi-word keyword needs to match.
+  for (const [name, value] of url.searchParams) {
+    if (carriesFinding(name, config) || carriesFinding(value, config)) return true;
+  }
+  return false;
 }
 
 function carriesFinding(text: string, config: GuardConfig): boolean {
@@ -203,14 +211,22 @@ export function createClaudeCodeProxy(options: ClaudeCodeProxyOptions): ClaudeCo
     return anthropicError(400, message);
   };
 
+  // A redirect is neither followed here (it would resend the credentials and
+  // masked body to an unconfigured host) nor relayed: a client that follows
+  // a 307/308 itself resends its original, unmasked request to the target.
   const send = async (request: Request, signal?: AbortSignal): Promise<Response | null> => {
+    let response: Response;
     try {
-      // A redirect would resend the credentials and body to a host the user
-      // never configured; hand the 3xx back to Claude Code instead.
-      return await fetchImpl(request, { signal, redirect: "manual" });
+      response = await fetchImpl(request, { signal, redirect: "manual" });
     } catch {
       return null;
     }
+    if (response.status >= 300 && response.status < 400) {
+      void response.body?.cancel().catch(() => {});
+      log(`[leakshield] blocked ${request.method} upstream redirect: ${UPSTREAM_REDIRECT}`);
+      return anthropicError(400, UPSTREAM_REDIRECT);
+    }
+    return response;
   };
 
   const handle = async (request: Request, signal?: AbortSignal): Promise<Response> => {

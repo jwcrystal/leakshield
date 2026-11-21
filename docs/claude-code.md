@@ -45,7 +45,7 @@ Claude Code started by another app (the Claude desktop app, an Agent SDK host, o
 - `POST /v1/messages/count_tokens`: masked the same way, because it carries the whole conversation.
 - Thinking history: Claude Code resends earlier `thinking` blocks. Their text is masked like other text; the `signature` and `redacted_thinking` data cross unchanged, because Anthropic verifies them.
 - Bodyless `GET`/`HEAD` (Claude Code sends `HEAD /api/hello`): forwarded when neither the URL nor the name or value of a non-credential header carries a finding.
-- Every route: a finding in the request path or query blocks the request. Upstream redirects are returned to Claude Code, not followed.
+- Every route: a finding in the request path or query blocks the request. An upstream redirect is neither followed nor relayed: it is answered with a 400, so neither the proxy nor Claude Code resends the request to another host.
 - Anything else is **blocked, not forwarded**: a body on another route, a Messages body the masker does not recognise, a content block type it cannot mask, a sensitive value in a header or a structural field (model name, tool name, tool id), or a masking error. Claude Code shows `API Error: 400 LeakShield blocked …` with a code naming the check. Claude Code makes up to six attempts on any 400; each one is blocked.
 - `GET /__leakshield/health` is answered by the proxy itself; the doctor uses it.
 

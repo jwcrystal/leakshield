@@ -45,7 +45,7 @@ LeakShield 透過本機 proxy 保護 Claude Code。Claude Code 把模型請求�
 - `POST /v1/messages/count_tokens`：同樣遮罩，因為它帶著整段對話。
 - Thinking 歷史：Claude Code 會重送先前的 `thinking` block。文字照一般文字遮罩；`signature` 與 `redacted_thinking` 的資料原樣通過，因為 Anthropic 會驗證它們。
 - 沒有 body 的 `GET`／`HEAD`（Claude Code 會送 `HEAD /api/hello`）：URL 以及非憑證 header 的名稱與值都沒有命中時才轉送。
-- 所有路由：請求路徑或 query 有命中就擋下。上游的 redirect 交回 Claude Code，不會跟隨。
+- 所有路由：請求路徑或 query 有命中就擋下。上游的 redirect 既不跟隨也不轉交，直接回 400，proxy 和 Claude Code 都不會把請求重送到別的主機。
 - 其他一律**擋下，不轉送**：其他路由上帶 body 的請求、遮罩器不認得的 Messages body、無法遮罩的 content block 類型、header 或結構欄位（模型名稱、工具名稱、工具 id）中的敏感值，以及遮罩錯誤。Claude Code 會顯示 `API Error: 400 LeakShield blocked …`，後面附上說明是哪項檢查的代碼。Claude Code 遇到任何 400 最多會嘗試六次，每次都會被擋。
 - `GET /__leakshield/health` 由 proxy 自己回應，doctor 用它檢查。
 

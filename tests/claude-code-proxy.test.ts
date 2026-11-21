@@ -253,20 +253,49 @@ describe("Claude Code proxy: fail closed", () => {
     proxy.dispose();
   });
 
-  it("does not follow upstream redirects and keeps every set-cookie", async () => {
+  it("refuses an upstream redirect instead of relaying it", async () => {
     let init: RequestInit | undefined;
     const fetchImpl = (async (_input: Request, options?: RequestInit) => {
       init = options;
-      const headers = new Headers({ location: "https://elsewhere.example/" });
+      return new Response(null, { status: 307, headers: { location: "https://elsewhere.example/v1/messages" } });
+    }) as unknown as typeof fetch;
+    const proxy = createClaudeCodeProxy({ config, fetch: fetchImpl, log: quiet });
+    for (const request of [
+      new Request("http://127.0.0.1:8787/api/hello"),
+      messagesRequest(userTurn(`key ${CANARY}`)),
+    ]) {
+      const response = await proxy.handle(request);
+      expect(init?.redirect).toBe("manual");
+      expect(response.status).toBe(400);
+      expect(response.headers.get("location")).toBeNull();
+      expect((await response.json()).error.message).toContain("[proxy-redirect]");
+    }
+    proxy.dispose();
+  });
+
+  it("keeps every set-cookie", async () => {
+    const fetchImpl = (async () => {
+      const headers = new Headers();
       headers.append("set-cookie", "a=1");
       headers.append("set-cookie", "b=2");
-      return new Response(null, { status: 307, headers });
+      return new Response(null, { status: 200, headers });
     }) as unknown as typeof fetch;
     const proxy = createClaudeCodeProxy({ config, fetch: fetchImpl, log: quiet });
     const response = await proxy.handle(new Request("http://127.0.0.1:8787/api/hello"));
-    expect(init?.redirect).toBe("manual");
-    expect(response.status).toBe(307);
     expect(response.headers.getSetCookie()).toEqual(["a=1", "b=2"]);
+    proxy.dispose();
+  });
+
+  it("scans form-decoded query parameters", async () => {
+    const { sent, fetchImpl } = fakeUpstream(() => new Response(null, { status: 200 }));
+    const proxy = createClaudeCodeProxy({
+      config: { ...config, nda_keywords: ["Project Nightfall"] },
+      fetch: fetchImpl,
+      log: quiet,
+    });
+    const response = await proxy.handle(new Request("http://127.0.0.1:8787/api/hello?note=Project+Nightfall"));
+    expect(response.status).toBe(400);
+    expect(sent).toHaveLength(0);
     proxy.dispose();
   });
 

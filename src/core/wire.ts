@@ -680,6 +680,19 @@ function collectWireStructuralStrings(body: Record<string, unknown>): string[] {
  * mode, credentials, cache, redirect, referrer, integrity, keepalive, signal,
  * authentication headers) and recomputes body headers.
  */
+/** Forwards exactly the value that was scanned. The original bytes are kept
+ * only when they already are that serialization: a body that parses to
+ * something else (a duplicate key keeps only its last occurrence, invalid
+ * UTF-8 decodes to U+FFFD) would otherwise carry content the scanner never
+ * saw. Keeping the original Request otherwise preserves its identity. */
+function forwardSerialized(request: Request, raw: string, serialized: string): Request {
+  if (serialized === raw && !raw.includes("\uFFFD")) return request;
+  const headers = new Headers(request.headers);
+  headers.delete("content-encoding");
+  headers.set("content-length", String(byteLength(serialized)));
+  return new Request(request, { body: serialized, headers });
+}
+
 export async function remaskChatCompletionsRequest(
   service: TransportMaskingService,
   sessionID: string,
@@ -712,10 +725,6 @@ export async function remaskChatCompletionsRequest(
 
   validateDialect(body);
   validateMessages(body, attachmentsAllowed(service));
-
-  // Capture the original wire shape BEFORE transforming tool arguments, so a
-  // no-op protection still returns the ORIGINAL request untouched.
-  const originalSerialized = JSON.stringify(body);
 
   // Tool arguments are JSON-encoded strings. Protecting them as PARSED values
   // (a) keeps masking from invalidating the JSON — a numeric pin matched by the
@@ -804,11 +813,7 @@ export async function remaskChatCompletionsRequest(
   }
 
   const serialized = JSON.stringify(next);
-  if (serialized === originalSerialized) return request;
-  const headers = new Headers(request.headers);
-  headers.delete("content-encoding");
-  headers.set("content-length", String(byteLength(serialized)));
-  return new Request(request, { body: serialized, headers });
+  return forwardSerialized(request, raw, serialized);
 }
 
 // ─── Anthropic Messages request (wire dialect) ──────────────────────────────
@@ -962,8 +967,6 @@ export async function remaskAnthropicMessagesRequest(
 
   validateAnthropicDialect(body, attachmentsAllowed(service));
 
-  const originalSerialized = JSON.stringify(body);
-
   const structuralBefore = collectAnthropicStructuralStrings(body);
   for (const identifier of structuralBefore) {
     if (containsTokenPrefix(identifier) || service.detectSensitive(identifier)) {
@@ -993,11 +996,7 @@ export async function remaskAnthropicMessagesRequest(
   }
 
   const serialized = JSON.stringify(next);
-  if (serialized === originalSerialized) return request;
-  const headers = new Headers(request.headers);
-  headers.delete("content-encoding");
-  headers.set("content-length", String(byteLength(serialized)));
-  return new Request(request, { body: serialized, headers });
+  return forwardSerialized(request, raw, serialized);
 }
 
 // ─── OpenAI Responses request (wire dialect) ────────────────────────────────
@@ -1203,8 +1202,6 @@ export async function remaskResponsesRequest(
 
   validateResponsesDialect(body, attachmentsAllowed(service));
 
-  const originalSerialized = JSON.stringify(body);
-
   // function_call.arguments strings are parsed so masking cannot invalidate
   // the JSON; re-encoded after the atomic protect (chat-completions rule).
   const transformedArguments: number[] = [];
@@ -1261,11 +1258,7 @@ export async function remaskResponsesRequest(
   }
 
   const serialized = JSON.stringify(next);
-  if (serialized === originalSerialized) return request;
-  const headers = new Headers(request.headers);
-  headers.delete("content-encoding");
-  headers.set("content-length", String(byteLength(serialized)));
-  return new Request(request, { body: serialized, headers });
+  return forwardSerialized(request, raw, serialized);
 }
 
 function isRecordArgumentsString(item: Record<string, unknown>): boolean {

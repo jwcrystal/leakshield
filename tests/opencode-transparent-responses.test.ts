@@ -4,7 +4,7 @@
  * guard's http hooks with /responses-shaped bodies and SSE events.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createTransparentSessionGuard } from "../src/opencode-transparent.js";
 import type { GuardConfig } from "../src/types.js";
 
@@ -170,6 +170,90 @@ describe("openai responses http.request wire mask", () => {
     };
     await expect(hook("session:http.request")(mixed)).rejects.toThrow("[responses-mixed-dialect]");
   });
+
+  it("passes compaction checkpoints verbatim and keeps configuration updates", async () => {
+    const { hook } = await arm();
+    const ENCRYPTED = `gAAAA${KEY}compacted==`;
+    const event = {
+      sessionID: "s",
+      kind: "primary",
+      request: responsesRequest({
+        model: "gpt-response",
+        input: [
+          { type: "compaction", id: "cmp_1", encrypted_content: ENCRYPTED },
+          { type: "configuration_update", reasoning: { effort: "high" } },
+          { type: "compaction", id: null, encrypted_content: "gAAAAnullid==" },
+          { type: "message", role: "user", content: [{ type: "input_text", text: `mail ${EMAIL}` }] },
+        ],
+      }),
+    };
+    await hook("session:http.request")(event);
+    const body = JSON.parse(await (event.request as Request).clone().text());
+    expect(body.input[0]).toEqual({ type: "compaction", id: "cmp_1", encrypted_content: ENCRYPTED });
+    expect(body.input[1]).toEqual({ type: "configuration_update", reasoning: { effort: "high" } });
+    expect(body.input[2]).toEqual({ type: "compaction", id: null, encrypted_content: "gAAAAnullid==" });
+    expect(body.input[3].content[0].text).toMatch(TOKEN_RE);
+    expect(body.input[3].content[0].text).not.toContain(EMAIL);
+
+    const malformed = {
+      sessionID: "s",
+      kind: "primary",
+      request: responsesRequest({ model: "gpt-response", input: [{ type: "compaction", id: "cmp_2", encrypted_content: 7 }] }),
+    };
+    await expect(hook("session:http.request")(malformed)).rejects.toThrow("[responses-compaction-shape]");
+
+    const badConfig = {
+      sessionID: "s",
+      kind: "primary",
+      request: responsesRequest({ model: "gpt-response", input: [{ type: "configuration_update", reasoning: "high" }] }),
+    };
+    await expect(hook("session:http.request")(badConfig)).rejects.toThrow("[responses-configuration-update-shape]");
+  });
+
+  it("masks custom tool call input and output; identifiers survive", async () => {
+    const { hook } = await arm();
+    const event = {
+      sessionID: "s",
+      kind: "primary",
+      request: responsesRequest({
+        model: "gpt-response",
+        input: [
+          { type: "custom_tool_call", id: "ctc_1", call_id: "call_p", name: "apply_patch", input: `*** key ${KEY}` },
+          { type: "custom_tool_call_output", call_id: "call_p", output: `done ${EMAIL}` },
+          { type: "custom_tool_call_output", call_id: "call_q", output: [{ type: "input_text", text: `also ${EMAIL}` }] },
+        ],
+        tools: [{ type: "custom", name: "apply_patch", description: "patch", format: { type: "text" } }],
+      }),
+    };
+    await hook("session:http.request")(event);
+    const body = JSON.parse(await (event.request as Request).clone().text());
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain(KEY);
+    expect(serialized).not.toContain(EMAIL);
+    expect(body.input[0]).toMatchObject({ type: "custom_tool_call", id: "ctc_1", call_id: "call_p", name: "apply_patch" });
+    expect(body.input[0].input).toMatch(TOKEN_RE);
+    expect(body.input[1].call_id).toBe("call_p");
+    expect(body.input[1].output).toMatch(TOKEN_RE);
+    expect(body.input[2].output[0].text).toMatch(TOKEN_RE);
+    expect(body.tools[0].name).toBe("apply_patch");
+
+    const malformed = {
+      sessionID: "s",
+      kind: "primary",
+      request: responsesRequest({
+        model: "gpt-response",
+        input: [{ type: "custom_tool_call", call_id: "call_r", name: "apply_patch", input: { patch: "x" } }],
+      }),
+    };
+    await expect(hook("session:http.request")(malformed)).rejects.toThrow("[responses-custom-tool-call-shape]");
+
+    const badOutput = {
+      sessionID: "s",
+      kind: "primary",
+      request: responsesRequest({ model: "gpt-response", input: [{ type: "custom_tool_call_output", call_id: "call_s", output: 3 }] }),
+    };
+    await expect(hook("session:http.request")(badOutput)).rejects.toThrow("[responses-function-output]");
+  });
 });
 
 describe("openai responses http.response restore", () => {
@@ -235,6 +319,55 @@ describe("openai responses http.response restore", () => {
     const body = JSON.parse(await restored.text());
     expect(body.output[0].content[0].text).toBe(`the key is ${KEY} ok`);
     expect(JSON.parse(body.output[1].arguments).token).toBe(token);
+  });
+
+  it("keeps JSON custom_tool_call input tokenized instead of refusing it", async () => {
+    const { hook } = await arm();
+    const token = await mintToken(hook, KEY);
+    const restored = await dispatch(
+      hook,
+      new Response(
+        JSON.stringify({
+          id: "resp_2",
+          output: [{ type: "custom_tool_call", id: "ctc_1", call_id: "c", name: "apply_patch", input: `patch ${token}` }],
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+    const body = JSON.parse(await restored.text());
+    expect(body.output[0].input).toBe(`patch ${token}`);
+  });
+
+  it("restores a tokenized apply_patch input at tool execution", async () => {
+    const { hook } = await arm();
+    const token = await mintToken(hook, KEY);
+    const event = { sessionID: "session-1", tool: "apply_patch", callID: "c", args: {}, input: { patchText: `+key = "${token}"` } };
+    await hook("tool:execute.before")(event);
+    expect(event.input.patchText).toBe(`+key = "${KEY}"`);
+  });
+
+  it("streams custom_tool_call input deltas tokenized without a degradation warning", async () => {
+    const { hook } = await arm();
+    const token = await mintToken(hook, KEY);
+    const item = { type: "custom_tool_call", id: "ctc_1", call_id: "c", name: "apply_patch", input: `patch ${token}` };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const restored = await dispatch(hook, streamResponse([
+        { type: "response.created", response: { id: "resp_3", output: [] } },
+        { type: "response.output_item.added", output_index: 0, item: { ...item, input: "" } },
+        { type: "response.custom_tool_call_input.delta", item_id: "ctc_1", output_index: 0, delta: `patch ${token}` },
+        { type: "response.custom_tool_call_input.done", item_id: "ctc_1", output_index: 0, input: `patch ${token}` },
+        { type: "response.output_item.done", output_index: 0, item },
+        { type: "response.completed", response: { id: "resp_3", output: [item] } },
+      ]));
+      const events = (await restored.text()).split("\n").filter((line) => line.startsWith("data:")).map((line) => JSON.parse(line.slice(5)));
+      expect(events.find((event) => event.type === "response.custom_tool_call_input.delta").delta).toBe(`patch ${token}`);
+      expect(events.find((event) => event.type === "response.custom_tool_call_input.done").input).toBe(`patch ${token}`);
+      expect(events.find((event) => event.type === "response.completed").response.output[0].input).toBe(`patch ${token}`);
+      expect(warn.mock.calls.flat().join("\n")).not.toContain("degraded");
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   function streamResponse(events: Array<Record<string, unknown> | string>): Response {

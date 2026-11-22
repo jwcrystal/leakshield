@@ -18,10 +18,7 @@ from TypeScript.
 
 ## Remaining steps before independent packages
 
-1. Move OpenCode-specific Code Mode `execute` handling and tool-field
-   restoration policies out of `src/core/session-guard.ts` behind an explicit
-   host policy interface. Require safe defaults for hosts that provide no
-   restoration policy; tests must verify fail-closed behavior.
+1. **Completed in #95:** The `HostToolPolicy` interface is injected into `createGuardCore`; OpenCode supplies its own policy, while a missing policy refuses token-bearing tool calls. Shared shell-field helpers still reside in `src/core/tool-restore-policy.ts`.
 2. Define a stable public core API with integration and compatibility tests for
    OpenCode and Claude Code, including masking, HTTP/SSE/WS restoration,
    session persistence, and refusal behavior.
@@ -38,6 +35,6 @@ from TypeScript.
 
 Do not publish `@leakshield/core` yet. The subpath is experimental and the
 single-package deployment stays authoritative. A host-neutral import boundary
-alone is insufficient to prove host-neutral tool restoration: existing rules
-for `execute` and tool fields still reflect OpenCode. Avoid relaxing them to
-accommodate new hosts without adversarial tests.
+alone is insufficient to prove host-neutral tool restoration: the shared tool-restoration helpers retain OpenCode-era assumptions. A missing
+`HostToolPolicy` refuses token-bearing tool calls. Validate any new Host policy
+with adversarial tests before enabling restoration.

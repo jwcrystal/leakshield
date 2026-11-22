@@ -15,6 +15,7 @@ export function createWireLab(upstream, {
   sessionID = randomUUID(),
   persistence,
   piSessionID,
+  upstreamCredential,
 } = {}) {
   const destination = new URL(upstream);
   if (destination.protocol !== "http:" || destination.hostname !== "127.0.0.1" ||
@@ -60,7 +61,10 @@ export function createWireLab(upstream, {
         await beforeWire();
         const event = await mask(input);
         const reply = await fetch(destination, {
-          method: "POST", headers: { "content-type": "application/json" },
+          method: "POST", headers: {
+            "content-type": "application/json",
+            ...(upstreamCredential ? { authorization: "Bearer " + upstreamCredential } : {}),
+          },
           body: await event.request.text(), redirect: "error", signal: AbortSignal.timeout(5000),
         });
         response.writeHead(reply.status, { "content-type": reply.headers.get("content-type") ?? "text/plain" });

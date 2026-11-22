@@ -1,5 +1,7 @@
 # pi 1.6.0 loopback prototype
 
+The latest [managed provider/startup/routing test](managed-verification.md) exercises an isolated launcher with two authenticated loopback configurations, credential separation and override refusal.
+
 The latest [installation, lifecycle and interactive-display tests](lifecycle-verification.md) cover local installation, encrypted mapping recovery, bound-session refusal and actual pi terminal rendering.
 
 The latest [Core-owned wire experiment](wire-verification.md) covers successful masked compaction, shared mapping and incremental SSE. Earlier proof-only experiments below remain reproducible.

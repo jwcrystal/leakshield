@@ -1,13 +1,19 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createGuardCore } from "../src/core/index.js";
+import { createGuardCore, type HostToolPolicy } from "../src/core/index.js";
+import { opencodeToolPolicy } from "../src/opencode-tool-policy.js";
 
 const ROOT = join(__dirname, "..");
 
 describe("experimental package core subpath", () => {
   it("exports the host-neutral guard factory independently of the plugin entry", () => {
     expect(typeof createGuardCore).toBe("function");
+  });
+
+  it("exposes the host tool policy type that adapters implement", () => {
+    const policy: HostToolPolicy = opencodeToolPolicy;
+    expect(typeof policy.isCodeModeCall).toBe("function");
   });
 
   it("publishes both JS and TypeScript declarations without altering the default plugin entry", () => {

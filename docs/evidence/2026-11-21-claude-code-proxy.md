@@ -1,5 +1,7 @@
 # Claude Code 本機 proxy：Claude Code 2.1.321 實機驗證（issue #86）
 
+> 2026-11-22：Claude Code 2.1.330 重測結果相同，見 [2026-11-22 重測](2026-11-22-claude-code-proxy-2.1.330.md)。
+
 日期：2026-11-21 · Claude Code 2.1.321 · leakshield 分支 `claude/claude-code-proxy-d19a14`（`main` `ac9864e` 之上的 core thinking opt-in `2702f6e` 與 `feat(claude-code)` commit），以 `npm run build` 產生的 `dist/cli.js --claude-code-proxy` 執行。Opus 審查後修正了 proxy（路徑與 GET/HEAD header 掃描、body 正規化、不跟隨 redirect），修正後重新 build，mask 與 refuse 兩個情境重跑，結果與下表相同
 
 ## 方法

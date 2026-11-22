@@ -16,7 +16,8 @@
 | `wireProtection: false` 目前的契約（純 hook-only） | [純 hook-only 驗證 2026-10-11](2026-10-11-pure-hook-only-verification.md) |
 | 官方 `@rehydra/opencode` 的實際行為（原始碼） | [官方發布來源稽核 2026-10-11](2026-10-11-rehydra-current-source-audit.md) |
 | 各 transport 是否支援（Responses WS、AI SDK） | [Responses WS](2026-10-11-responses-ws-verification.md)、[AI SDK HTTP](2026-10-11-aisdk-http-verification.md) |
-| Claude Code 經本機 proxy 是否遮罩與還原 | [Claude Code proxy 驗證 2026-11-21](2026-11-21-claude-code-proxy.md) |
+| Claude Code 經本機 proxy 是否遮罩與還原 | [Claude Code 2.1.330 重測 2026-11-22](2026-11-22-claude-code-proxy-2.1.330.md)（方法與細節見 [2026-11-21](2026-11-21-claude-code-proxy.md)） |
+| Claude Code 工具的輸入格式、PreToolUse hook 實際行為 | [工具格式與 PreToolUse 2026-11-22](2026-11-22-claude-code-tool-shapes-pretooluse.md) |
 
 ## 比較
 
@@ -35,7 +36,9 @@
 
 | 日期 | 檔案 | 狀態 |
 |---|---|---|
-| 11-21 | [Claude Code 本機 proxy：Claude Code 2.1.321 實機驗證（#86）](2026-11-21-claude-code-proxy.md) | 現行 |
+| 11-22 | [Claude Code 2.1.330：工具輸入格式與 PreToolUse hook 行為（#91）](2026-11-22-claude-code-tool-shapes-pretooluse.md) | 現行 |
+| 11-22 | [Claude Code 本機 proxy：Claude Code 2.1.330 重測](2026-11-22-claude-code-proxy-2.1.330.md) | 現行 |
+| 11-21 | [Claude Code 本機 proxy：Claude Code 2.1.321 實機驗證（#86）](2026-11-21-claude-code-proxy.md) | 歷史（結論已由 11-22 重測確認；方法與 400 重試分析仍以此為準） |
 | 11-06 | [0.3.0 工具還原：OpenCode v2.2.5 實機驗證](2026-11-06-opencode-2.2.5-tool-restoration.md) | 現行 |
 | 10-14 | [容量修正驗證](2026-10-14-transparent-capacity-verification.md) | 現行 |
 | 10-14 | [容量與刪除回收重測](2026-10-14-live-capacity-and-lifecycle-retest.md) | 現行 |

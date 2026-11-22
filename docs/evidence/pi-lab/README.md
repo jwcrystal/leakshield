@@ -65,3 +65,7 @@ The prototype ran from PR #100's independent worktree. Captured summaries follow
 ```
 
 The full baseline passed 62 test files and 1,772 tests. TypeScript, build and package dry run also passed. Graph impact analysis reported LOW risk for the reused Core factory. Change analysis reported low risk for the research files. The index warned that process enumeration had incomplete coverage and that its FTS extension was unavailable. These graph results supplement the runtime tests.
+
+## Actual pi route verification
+
+The subsequent [routing and compaction verification](routing-verification.md) replaces the earlier test-client-only bypass observation with actual pi process evidence. Configured proxy failures did not fall back to the upstream. Manual compaction was refused by the proxy, and a direct configuration sent unmasked compaction content despite an active extension. This is an additional blocker to the original #98 readiness criteria.

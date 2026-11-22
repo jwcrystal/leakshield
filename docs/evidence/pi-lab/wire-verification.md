@@ -1,5 +1,7 @@
 # Core-owned wire protection and shared mapping experiment
 
+Subsequent [lifecycle and interactive-display verification](lifecycle-verification.md) adds optional persistence and pi-session binding to this lab and tests actual terminal rendering. This report records the original wire experiment.
+
 The new loopback wire proxy resolves the tested manual compaction gap. Actual pi 1.6.0 compaction completes successfully and both summarization requests contain only masked values. A single Core instance in the proxy owns the mapping used by extension preparation, local display and tool restoration.
 
 The overall #98 release gate remains blocked by direct-provider configuration and the remaining coverage gaps. This experiment covers one ephemeral managed session on an OpenAI-compatible loopback endpoint.

@@ -1,5 +1,7 @@
 # pi 1.6.0 loopback prototype
 
+The latest [installation, lifecycle and interactive-display tests](lifecycle-verification.md) cover local installation, encrypted mapping recovery, bound-session refusal and actual pi terminal rendering.
+
 The latest [Core-owned wire experiment](wire-verification.md) covers successful masked compaction, shared mapping and incremental SSE. Earlier proof-only experiments below remain reproducible.
 
 This research prototype exercises the exported LeakShield Core through the actual pi CLI. It uses a synthetic private value and a loopback provider. The overall Issue #98 release gate remains **BLOCKED** because direct requests to the upstream bypass the lab proxy.

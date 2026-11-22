@@ -9,15 +9,19 @@ const config = {
   settings: { max_chars: 200000, show_line_numbers: true, preview_length: 60, encoding_detection: false },
 };
 
-// Single ephemeral session, one Core owner, loopback research endpoints only.
-export function createWireLab(upstream, { beforeWire = () => {} } = {}) {
+// Single managed lab session, one Core owner, loopback research endpoints only.
+export function createWireLab(upstream, {
+  beforeWire = () => {},
+  sessionID = randomUUID(),
+  persistence,
+  piSessionID,
+} = {}) {
   const destination = new URL(upstream);
   if (destination.protocol !== "http:" || destination.hostname !== "127.0.0.1" ||
       destination.pathname !== "/v1/chat/completions" || destination.search ||
       destination.username || destination.password) throw new Error("Loopback chat endpoint required");
-  const sessionID = randomUUID();
   const credential = randomBytes(32).toString("hex");
-  const core = createGuardCore(config, "block", true, undefined, {}, {
+  const core = createGuardCore(config, "block", true, persistence, {}, {
     isCodeModeCall: () => false,
     isShellTool: () => false,
     classifyField: () => "verbatim",
@@ -37,6 +41,9 @@ export function createWireLab(upstream, { beforeWire = () => {} } = {}) {
   const server = createServer(async (request, response) => {
     try {
       if (request.headers.authorization !== "Bearer " + credential) throw new Error("Unauthorized");
+      if (piSessionID && request.headers["x-pi98-session"] !== piSessionID) {
+        throw new Error("Session mismatch");
+      }
       if (request.method !== "POST" ||
           !["/v1/chat/completions", "/lab/mask", "/lab/display", "/lab/tool"].includes(request.url)) {
         throw new Error("Unsupported route");

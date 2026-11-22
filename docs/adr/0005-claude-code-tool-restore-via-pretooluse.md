@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-22
 ---
 
@@ -33,11 +33,15 @@ ADR-0001 寫明欄位規則「不是 egress 防護」。在 OpenCode 上這是�
 
 這些欄位帶已映射的 placeholder 時，**拒絕整次呼叫、不改輸入**。
 
-## 輸入會變成另一個模型請求的欄位：不還原，原樣保留 placeholder
+## 輸入會變成另一個模型請求的欄位：不還原；送到其他 session 的欄位：拒絕
 
 `Agent.prompt`（子 agent）、`Skill.args`、`WebFetch.prompt`（摘要模型）的值會成為下一個模型請求的內容。這些請求走同一個 base URL，proxy 會重新遮罩，但還原原值沒有好處，反而多一條要靠 proxy 補救的路。所以**不還原**：placeholder 原樣交給工具，子 agent 之後真正用到它時，會在它自己的工具呼叫再經過 hook。
 
 `SendMessage.message`、`CronCreate.prompt`、`ScheduleWakeup.prompt` 會送到**其他 session**，或在之後的新 session 執行。placeholder 只在建立它的 session 內有效，送過去只會變成無效文字，模型和使用者都不會收到錯誤（ADR-0003 所說的無聲錯誤）。所以這幾個欄位帶已映射的 placeholder 時，**拒絕**。
+
+## MCP 與其他未列出的工具：沿用 ADR-0001
+
+MCP 工具（`mcp__<server>__<tool>`）與 Claude Code 日後新增、上面沒列到的工具，沿用 ADR-0001：依欄位名判斷，其餘欄位直接還原。MCP server 可能在遠端，等於 egress；但預設拒絕會擋掉使用者刻意設定的工具，而且與 OpenCode 的行為不一致。作為補償，`leakshield --doctor` 列出已設定的 MCP server，讓使用者知道哪些工具會收到原值。
 
 ## hook 與 proxy 之間的通道
 
@@ -65,8 +69,4 @@ ADR-0001 寫明欄位規則「不是 egress 防護」。在 OpenCode 上這是�
 - 每次工具呼叫多啟動一個 Node 行程。沒有 placeholder 時 hook 直接結束，成本只有行程啟動時間。
 - 其他會改寫輸入的 `PreToolUse` hook（例如 rtk 會把 `curl` 改成 `rtk curl`）與這個 hook 的先後順序，Claude Code 文件沒有寫明，尚未驗證。
 - 會離開本機與會跨 session 的欄位清單是依 2.1.330 的 23 個工具整理的。Claude Code 新增工具時，新工具會依 ADR-0001 的預設處理（依欄位名判斷、直接還原），需要隨版本複查。
-
-## 待決定
-
-1. **MCP 與其他未知工具**：沿用 ADR-0001（依欄位名判斷、其餘直接還原），還是 Claude Code 上預設拒絕？MCP server 可能在遠端，等於 egress。建議沿用 ADR-0001，與 OpenCode 一致，並在 `--doctor` 列出已設定的 MCP server。
-2. **跨 session 欄位**（`SendMessage`、`CronCreate`、`ScheduleWakeup`）：上面建議拒絕。另一個選項是原樣保留 placeholder 放行，代價是無聲錯誤。
+- MCP 工具會收到還原後的原值；遠端 MCP server 因此會看到原值。`--doctor` 只負責列出，不阻擋。

@@ -35,7 +35,7 @@ function issuedToken(core: GuardCore, sessionID: string): string {
   const protectedText = event.system[0].text;
   expect(protectedText).not.toContain(SENSITIVE);
   // Match the generated marker shape without embedding a complete marker literal.
-  const token = protectedText.match(/\\[[A-Z0-9:_-]+\\]/)?.[0];
+  const token = protectedText.match(/\[[A-Za-z0-9:_-]+\]/)?.[0];
   expect(token).toBeDefined();
   expect(token!.startsWith(PSEUDONYM_TOKEN_PREFIX_V2)).toBe(true);
   return token!;

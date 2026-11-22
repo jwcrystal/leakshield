@@ -23,8 +23,8 @@ export const opencodeToolPolicy: HostToolPolicy = {
   },
   isShellTool,
   classifyField: keyPolicy,
-  allowsDegradedRestore(tool, input): boolean {
-    return READ_ONLY_TOOLS.has(tool) && !isShellTool(tool) &&
+  allowsDegradedRestore(rawTool, input): boolean {
+    return READ_ONLY_TOOLS.has(rawTool.toLowerCase()) && !isShellTool(rawTool) &&
       !(input !== null && typeof input === "object" &&
         Object.keys(input).some((key) => isShellKey(key) || isCodeKey(key)));
   },

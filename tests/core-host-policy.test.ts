@@ -2,7 +2,7 @@
  * Markers are minted via model-request protection rather than written as literals.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { createGuardCore, type GuardCore } from "../src/core/session-guard.js";
+import { createGuardCore, type GuardCore, type HostToolPolicy } from "../src/core/session-guard.js";
 import { opencodeToolPolicy } from "../src/opencode-tool-policy.js";
 import { PSEUDONYM_TOKEN_PREFIX_V2 } from "../src/decision/pseudonymization.js";
 import type { GuardConfig } from "../src/types.js";
@@ -73,6 +73,35 @@ describe("explicit host tool policy boundary", () => {
     const input = { filePath: token };
     core.onToolBefore({ sessionID: "session_with_policy", tool: "read", input });
     expect(input.filePath).toBe(SENSITIVE);
+  });
+
+  it("hands the host policy the tool name exactly as the host sent it", () => {
+    const seen: string[] = [];
+    const spy: HostToolPolicy = {
+      ...opencodeToolPolicy,
+      allowsDegradedRestore(rawTool, input) {
+        seen.push(rawTool);
+        return opencodeToolPolicy.allowsDegradedRestore(rawTool, input);
+      },
+    };
+    const core = createGuardCore(settings, "block", true, undefined, {}, spy);
+    expect(core).not.toBeNull();
+    active.push(core!);
+    const token = issuedToken(core!, "session_raw_name");
+    // Lowercasing first would turn "runShell" into "runshell" and hide the
+    // "shell" segment from camelCase-aware classification. The call itself may
+    // be refused (a shell tool gets the stricter shell check); only the name
+    // the policy saw is asserted.
+    try {
+      core!.onToolBefore({ sessionID: "session_raw_name", tool: "runShell", input: { path: `notes/${token}.txt` } });
+    } catch {
+      // expected for shell-classified tools
+    }
+    expect(seen).toEqual(["runShell"]);
+  });
+
+  it("matches OpenCode read-only tools case-insensitively", () => {
+    expect(opencodeToolPolicy.allowsDegradedRestore("Read", { filePath: "a" })).toBe(true);
   });
 
   it("never treats an unknown tool as a proven read-only tool", () => {

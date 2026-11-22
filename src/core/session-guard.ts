@@ -1268,7 +1268,11 @@ export function createGuardCore(
     // A host with no explicit restoration policy must never infer that a
     // token-bearing tool invocation is safe to execute.
     if (!hostToolPolicy) {
-      if (inputCarriesToken(event.input, new WeakSet())) throw new Error(TOOL_REFUSAL_ERROR);
+      const sessionID = typeof event.sessionID === "string" ? event.sessionID : "";
+      const hasNearMiss = sessionID.length > 0 && inputHasNearMiss(sessionID, event.input, false);
+      if (inputCarriesToken(event.input, new WeakSet()) || hasNearMiss) {
+        throw new Error(TOOL_REFUSAL_ERROR);
+      }
       return;
     }
     const codeMode = hostToolPolicy.isCodeModeCall(event);

@@ -28,11 +28,6 @@ import { createResponsesWebSocketAdapter } from "./ws.js";
 import {
   parseSupportedShellArguments,
   ToolLeafPolicy,
-  isShellTool,
-  isShellKey,
-  isCodeKey,
-  keyPolicy,
-  READ_ONLY_TOOLS,
   warnDegradation,
   isShellSafeOriginal,
   commandAllowsEmbeddedTokens,
@@ -71,11 +66,6 @@ const TOOL_CODE_CONTEXT_ERROR =
   "LeakShield blocked this tool call because a protected value cannot be safely inserted into code. Pass the value through a plain argument or a file instead, or ask the user.";
 const TOOL_CODE_POSITION_ERROR =
   "LeakShield blocked this tool call; the tool did not run.\n- Allowed: a placeholder in a plain single-line quoted string with no interpolation, outside any multi-line string or line continuation.\n- Fix: copy the placeholder exactly as it appears in this conversation, including its brackets, into such a string, assign that to a variable, and reference the variable.\n- Do not replace the placeholder with other text, and do not ask for or write the real value. If refused again, stop and ask the user.";
-/**
- * OpenCode's built-in Code Mode tool (v2.2.5): custom tools are reachable only
- * through it, with input `{code: string}`.
- */
-const CODE_MODE_TOOL = "execute";
 /**
  * Refusal for `fetch` inside Code Mode source that holds a protected value.
  * This only avoids a misleading result: the inner fetch would send the
@@ -427,6 +417,14 @@ export interface GuardPersistenceOptions {
   keyProvider?: MappingKeyProvider | null;
 }
 
+/** Host-defined classification. Without this capability, token-bearing tool calls refuse. */
+export interface HostToolPolicy {
+  isCodeModeCall(event: RecordLike): boolean;
+  isShellTool(rawTool: string): boolean;
+  classifyField(key: string, inherited: ToolLeafPolicy): ToolLeafPolicy;
+  allowsDegradedRestore(tool: string, input: unknown): boolean;
+}
+
 export interface GuardCore {
   readonly hasSession: (sessionID: string) => boolean;
   readonly assertTrackable: (sessionID: string) => void;
@@ -461,6 +459,7 @@ export function createGuardCore(
   wireProtection = true,
   persistence?: GuardPersistenceOptions,
   dialect: { anthropicThinking?: "refuse" | "mask" } = {},
+  hostToolPolicy?: HostToolPolicy,
 ): GuardCore | null {
   const created = createPseudonymizer(config, TRANSPARENT_LIMITS);
   if (!created.ok) return null;
@@ -1212,7 +1211,7 @@ export function createGuardCore(
         if (containsTokenPrefix(key)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
         const descriptor = Object.getOwnPropertyDescriptor(record, key);
         if (descriptor === undefined || !("value" in descriptor)) throw new Error(TOOL_INPUT_SHAPE_ERROR);
-        plan(descriptor.value, keyPolicy(key, policy), key);
+        plan(descriptor.value, hostToolPolicy!.classifyField(key, policy), key);
       }
     }
     if (changes.length === 0) return undefined;
@@ -1265,15 +1264,14 @@ export function createGuardCore(
     }
   };
 
-  /** Classifies without running a getter or proxy trap: only an own string data property counts. */
-  const isCodeModeCall = (event: RecordLike): boolean => {
-    if (event.tool !== CODE_MODE_TOOL || !isRecordLike(event.input) || types.isProxy(event.input)) return false;
-    const descriptor = Object.getOwnPropertyDescriptor(event.input, "code");
-    return descriptor !== undefined && "value" in descriptor && typeof descriptor.value === "string";
-  };
-
   const onToolBefore = (event: RecordLike): void => {
-    const codeMode = isCodeModeCall(event);
+    // A host with no explicit restoration policy must never infer that a
+    // token-bearing tool invocation is safe to execute.
+    if (!hostToolPolicy) {
+      if (inputCarriesToken(event.input, new WeakSet())) throw new Error(TOOL_REFUSAL_ERROR);
+      return;
+    }
+    const codeMode = hostToolPolicy.isCodeModeCall(event);
     // Placeholders whose format the model changed would reach the tool as junk
     // with no error; refuse them before anything is restored or mutated.
     if (typeof event.sessionID === "string" && event.sessionID.length > 0) {
@@ -1306,16 +1304,12 @@ export function createGuardCore(
     // "verbatim" otherwise; each key may then switch the policy for its value
     // (shell/command-like keys -> "shell", code/script keys -> "inert",
     // description/title/label -> "verbatim").
-    const shellTool = isShellTool(rawTool);
+    const shellTool = hostToolPolicy.isShellTool(rawTool);
     const rootPolicy: ToolLeafPolicy = shellTool ? "shell" : "verbatim";
     // P1 (2026-10-06b): only proven read-only tools without shell/code fields
     // may degrade to literal placeholders; everything else refuses the
     // affected invocation when restoration is incomplete.
-    const allowDegraded =
-      READ_ONLY_TOOLS.has(tool) &&
-      !shellTool &&
-      !(isRecordLike(event.input) &&
-        Object.keys(event.input as RecordLike).some((key) => isShellKey(key) || isCodeKey(key)));
+    const allowDegraded = hostToolPolicy.allowsDegradedRestore(tool, event.input);
     const degraded = { count: 0 };
     if (typeof event.input === "string") {
       const descriptor = Object.getOwnPropertyDescriptor(event, "input");

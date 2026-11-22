@@ -1,5 +1,7 @@
 # pi 1.6.0 loopback prototype
 
+The latest [Core-owned wire experiment](wire-verification.md) covers successful masked compaction, shared mapping and incremental SSE. Earlier proof-only experiments below remain reproducible.
+
 This research prototype exercises the exported LeakShield Core through the actual pi CLI. It uses a synthetic private value and a loopback provider. The overall Issue #98 release gate remains **BLOCKED** because direct requests to the upstream bypass the lab proxy.
 
 The extension masks serialized OpenAI Chat Completions requests, restores text into a local stderr diagnostic display, and restores the built-in read tool's flat arguments at the execution boundary. It keeps assistant history pseudonymized. This is an ephemeral single-session fixture, with only the read tool enabled. The diagnostic display does not implement a pi interactive renderer.

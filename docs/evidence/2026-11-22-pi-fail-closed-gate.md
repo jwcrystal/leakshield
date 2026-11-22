@@ -2,7 +2,7 @@
 
 Date: 2026-11-22
 Status: **BLOCKED — FAIL-CLOSED NOT ESTABLISHED**
-Evidence level: static documentation/upstream issue only; **NO pi runtime or E2E verification performed**.
+Evidence level of the original investigation was static only. Subsequent cloud runtime proof is recorded in [the runtime report](2026-11-22-pi-runtime-provider-boundary.md) and [the two-stage loopback lab](pi-lab/README.md). The release gate remains blocked by direct-provider bypass.
 
 ## Scope and provenance
 - LeakShield issue: https://github.com/jwcrystal/leakshield/issues/98
@@ -47,7 +47,7 @@ Suggested test fixtures, to be adapted to the pinned pi package's supported CLI 
 | OpenCode and Claude Code regressions | NOT RUN | — |
 | Typecheck/test/build/package | NOT RUN | — |
 
-## Environment limitations
+## Original environment limitations
 This investigation could inspect connected GitHub repository metadata and public source docs, but this execution environment cannot resolve `github.com` for git clone and has no installed `pi` CLI. A real Git worktree and pi process could therefore **not** be created/run here. The separate GitHub branch for this research report is not a Git worktree. No adapter source has been changed.
 
 ## Unblock criteria

@@ -51,6 +51,7 @@ import {
 } from "./core/session-guard.js";
 import type { GuardConfig } from "./types.js";
 import { createAISDKTransportAdmission } from "./opencode-transparent-aisdk.js";
+import { opencodeToolPolicy } from "./opencode-tool-policy.js";
 
 export type { GuardPersistenceOptions } from "./core/session-guard.js";
 
@@ -130,7 +131,7 @@ export function createTransparentSessionGuard(
   wireProtection = true,
   persistence?: GuardPersistenceOptions,
 ): TransparentSessionGuard {
-  const core = createGuardCore(config, attachmentsPolicy, wireProtection, persistence);
+  const core = createGuardCore(config, attachmentsPolicy, wireProtection, persistence, {}, opencodeToolPolicy);
   if (core === null) return createFailClosedTransparentGuard(wireProtection);
   const disposals: Array<() => Promise<void>> = [];
   const aiSDK = createAISDKTransportAdmission(wireProtection);

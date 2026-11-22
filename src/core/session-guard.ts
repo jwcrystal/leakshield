@@ -422,7 +422,8 @@ export interface HostToolPolicy {
   isCodeModeCall(event: RecordLike): boolean;
   isShellTool(rawTool: string): boolean;
   classifyField(key: string, inherited: ToolLeafPolicy): ToolLeafPolicy;
-  allowsDegradedRestore(tool: string, input: unknown): boolean;
+  /** `rawTool` is the tool name as the host sent it, not lowercased. */
+  allowsDegradedRestore(rawTool: string, input: unknown): boolean;
 }
 
 export interface GuardCore {
@@ -1313,7 +1314,7 @@ export function createGuardCore(
     // P1 (2026-10-06b): only proven read-only tools without shell/code fields
     // may degrade to literal placeholders; everything else refuses the
     // affected invocation when restoration is incomplete.
-    const allowDegraded = hostToolPolicy.allowsDegradedRestore(tool, event.input);
+    const allowDegraded = hostToolPolicy.allowsDegradedRestore(rawTool, event.input);
     const degraded = { count: 0 };
     if (typeof event.input === "string") {
       const descriptor = Object.getOwnPropertyDescriptor(event, "input");

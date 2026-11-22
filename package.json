@@ -26,7 +26,11 @@
   "main": "./dist/index.js",
   "exports": {
     ".": "./dist/index.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "default": "./dist/core/index.js"
+    }
   },
   "files": [
     "dist",

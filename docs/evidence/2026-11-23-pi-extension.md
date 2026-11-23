@@ -70,7 +70,7 @@ triggered at runtime (`/tree` has no RPC command). See the gap audit.
 
 ### Build and tests
 
-- `npx vitest run`: 67 files, 1,813 tests pass.
+- `npx vitest run`: 67 files, 1,816 tests pass.
 - `npx tsc --noEmit`, `npm run build`, `npm pack --dry-run`.
 
 ## What this does not prove

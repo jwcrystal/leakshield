@@ -1,22 +1,10 @@
 # Issue #98 — pi extension boundary: pre-implementation security gate
 
+> Resolution (2026-11-23): the gate is closed by the in-process fetch boundary. Current record: [2026-11-23-pi-extension.md](2026-11-23-pi-extension.md); transport audit: [2026-11-23-pi-fetch-gap-audit.md](2026-11-23-pi-fetch-gap-audit.md). The gate conclusion below stays as written on 2026-11-22.
+
 Date: 2026-11-22
-Status: **RESOLVED by the transport boundary** — the hook-only plan below remains rejected; the shipped adapter uses a loopback provider boundary plus a generated pi config, credential separation and fail-closed extension instead. See the [adapter evidence](2026-11-23-pi-adapter.md) and [conformance note](#resolution-2026-11-23).
-
-Evidence level of the original investigation was static only. Subsequent cloud runtime proof is recorded in [the runtime report](2026-11-22-pi-runtime-provider-boundary.md) and [the two-stage loopback lab](pi-lab/README.md).
-
-## Resolution (2026-11-23)
-
-The gate required a tested non-bypassable provider/transport mechanism, not a hook assertion. The shipped adapter supplies it:
-
-- `leakshield pi` writes a generated agent directory whose only provider is the loopback boundary; ambient extension discovery and project trust are disabled.
-- The boundary masks every request on the supported routes before any upstream fetch, and fail-closed refusals are covered by tests.
-- The upstream credential stays in the boundary process; the pi child receives only a short-lived loopback token, and every environment name the credential resolution read is scrubbed from the child.
-- Hook throw/reject, compaction and disabled-extension scenarios no longer matter for provider egress: the boundary masks independently of the hook result.
-
-Proof: [adapter evidence](2026-11-23-pi-adapter.md), including the real pi 1.6.0 scripted run, the real CommandCode request, and the unit coverage of all three wire formats.
-
-Scope: this matches the OpenCode plugin's guarantee for host model requests. OS-level egress (a different process, or a permitted tool such as `bash`/`curl`) is a deployment-layer non-goal shared with the OpenCode plugin, not a pi-specific gap. Running plain `pi` outside the launcher is refused locally by the extension; removing the extension is the same class as disabling the OpenCode plugin.
+Status: **BLOCKED — FAIL-CLOSED NOT ESTABLISHED**
+Evidence level of the original investigation was static only. Subsequent cloud runtime proof is recorded in [the runtime report](2026-11-22-pi-runtime-provider-boundary.md) and [the two-stage loopback lab](pi-lab/README.md). The release gate remains blocked by direct-provider bypass.
 
 ## Scope and provenance
 - LeakShield issue: https://github.com/jwcrystal/leakshield/issues/98

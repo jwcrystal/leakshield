@@ -91,10 +91,11 @@ An extension that runs before the guard can keep the fetch it saw at load, and
 anything it sends through that reference bypasses the guard. An extension that
 runs after the guard sees the guard and is covered.
 
-Consequence for the adapter: the guard must be the first extension loaded
-(CLI `-e` is enough, or `settings.extensions[0]`). The guard cannot detect an
-earlier holder of the raw fetch, so the doctor has to check the effective order
-and report "not first" as unprotected.
+Consequence for the adapter: the guard should be the first extension loaded
+(CLI `-e` is enough, or `settings.extensions[0]`). pi's own requests are guarded
+at any position; the risk is only another extension's traffic. The guard cannot
+detect an earlier holder of the raw fetch, so the doctor checks the configured
+order and reports a later position as partial rather than protected.
 
 ## 6. Transports the guard cannot see
 

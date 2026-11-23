@@ -174,7 +174,7 @@ policy or terminal rendering.
 | `tests/pi-launcher.test.ts` | argument ownership, version gate, generated agent directory, credential scrubbing, session reuse, persistence options, cleanup on failure |
 | `tests/pi-doctor.test.ts` | version/extension/settings/provider/credential/launch/route checks and exit-code integration |
 
-Full suite: **68 files, 1,839 tests passed**. `tsc --noEmit`, `npm run build`
+Full suite: **69 files, 1,844 tests passed**. `tsc --noEmit`, `npm run build`
 and `npm pack --dry-run` pass; the tarball contains `dist/pi/*` and the `pi`
 manifest.
 

@@ -5,7 +5,7 @@ export const HELP_TEXT = `leakshield — scan text for secrets and PII before se
 Usage:
   leakshield [--cli] [scan options]   Scan text, a file, a directory or stdin
   leakshield --web [--port <n>]       Start the local Web UI (default port 3000)
-  leakshield --doctor                 Check the OpenCode plugin, Claude Code and pi setups
+  leakshield --doctor [host]          Check one host (opencode, claude-code, pi) or all
   leakshield --claude-code-proxy      Start the local proxy for Claude Code (see below)
   leakshield --pi [...]               Run the pi coding agent behind the LeakShield boundary
   leakshield --pi-install             Register the LeakShield extension in pi's settings

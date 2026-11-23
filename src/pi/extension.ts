@@ -44,10 +44,6 @@ export interface PiToolCallEvent {
   input: unknown;
 }
 
-export interface PiInputEvent {
-  source?: string;
-}
-
 export interface PiModelSelectEvent {
   model: PiModelLike;
 }
@@ -122,8 +118,9 @@ export default function leakshieldPiExtension(pi: PiExtensionApi): void {
     applyModel(ctx.model, ctx);
   });
 
-  pi.on("input", (event, ctx) => {
-    if ((event as PiInputEvent).source === "extension") return { action: "continue" };
+  pi.on("input", (_event, ctx) => {
+    // Extension-authored input is refused too: it can start a model request on
+    // an API the guard cannot see, which would transmit the prompt unmasked.
     const reason = refusal ?? (guard.core === null ? PROTECT_FAILED : null);
     if (reason === null) return { action: "continue" };
     announce(ctx, reason);

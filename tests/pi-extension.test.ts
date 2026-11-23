@@ -116,13 +116,13 @@ describe("pi extension", () => {
     expect(notices.length).toBeGreaterThan(0);
   });
 
-  it("lets extension-authored input through even when the run is refused", async () => {
+  it("refuses extension-authored input when the run is refused", async () => {
     const notices: string[] = [];
     const pi = fakePi();
     leakshieldPiExtension(pi.api);
     const refused = context(notices, { api: "bedrock-converse-stream" });
     await pi.emit("session_start", {}, refused);
-    expect(await pi.emit("input", { source: "extension" }, refused)).toEqual({ action: "continue" });
+    expect(await pi.emit("input", { source: "extension" }, refused)).toEqual({ action: "handled" });
   });
 
   it("restores a tool call in place and blocks an unknown tool", async () => {

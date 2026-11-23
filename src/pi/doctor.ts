@@ -15,6 +15,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DoctorCheck } from "../doctor.js";
 import { loadConfig } from "../config/loader.js";
+import { piPersistenceOptions } from "./persistence.js";
 import {
   defaultPiAgentDir,
   isSupportedPiApi,
@@ -111,6 +112,26 @@ export async function runPiDoctor(deps: PiDoctorDeps): Promise<DoctorCheck[]> {
           fix: "Fix the guard config, or point LEAKSHIELD_CONFIG at the intended file. pi exits instead of running unprotected.",
         },
   );
+
+  try {
+    const persistence = piPersistenceOptions(deps.env);
+    checks.push(
+      persistence === undefined
+        ? { id: "pi-persistence", state: "ok", detail: "mapping persistence is off; mappings last for the process" }
+        : {
+            id: "pi-persistence",
+            state: "ok",
+            detail: `mapping persistence is on (ttl ${persistence.ttlDays}d, ${persistence.path})`,
+          },
+    );
+  } catch (error) {
+    checks.push({
+      id: "pi-persistence",
+      state: "fail",
+      detail: `persistence configuration is invalid: ${error instanceof Error ? error.message : String(error)}`,
+      fix: "Fix the LEAKSHIELD_PI_PERSIST* values, or unset them; pi refuses to load the extension with an invalid value.",
+    });
+  }
 
   let agent: PiUserAgent | null = null;
   try {

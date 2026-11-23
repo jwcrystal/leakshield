@@ -6,10 +6,10 @@ Scans for secrets, PII, database credentials, internal domains, and NDA keywords
 ## Design
 - Single-package TypeScript application with three entrypoints:
   - `src/index.ts` — OpenCode plugin entry (re-exports `src/opencode.ts`); importing it never starts a process.
-  - `src/cli.ts` — CLI / Web UI / `--doctor` / `--forget` / `--claude-code-proxy` / `--pi` entry (the `leakshield` bin and release binaries).
+  - `src/cli.ts` — CLI / Web UI / `--doctor` / `--forget` / `--claude-code-proxy` entry (the `leakshield` bin and release binaries).
   - `src/pi/extension.ts` — pi extension entry (registered in pi `settings.extensions` or loaded with `-e`).
 - `src/core/` is the host-independent layer (wire masking, session guard); `src/opencode*.ts`, `src/claude-code/` and `src/pi/` are the host adapters on top of it.
-- The pi adapter is an in-process extension: it wraps `globalThis.fetch` (`src/pi/guard.ts`), so pi's provider SDKs get masked requests and restored assistant text without a proxy. Transports that bypass fetch are refused, and the extension has to load first.
+- The pi adapter is an in-process extension: it wraps `globalThis.fetch` (`src/pi/guard.ts`), so pi's provider SDKs get masked requests and restored assistant text without a proxy. Transports that bypass fetch are refused; pi's own traffic is guarded at any load position, and first position is recommended so an earlier extension cannot hold the raw fetch.
 - MCP server mode was removed: it relied on the model voluntarily calling a scan tool after it had already received the content.
 - Detection is rule-based: built-in rules, dynamic rules from `config/guard.config.yaml`, and opt-in exact `.env` value matching.
 - Output is normalized through `ScanResult` / `Finding`, then mapped to a decision (`ALLOW` / `WARN` / `CONFIRM`).

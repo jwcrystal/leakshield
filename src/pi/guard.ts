@@ -14,13 +14,10 @@
 import { classifyModelRoute } from "../core/wire.js";
 import { createGuardCore, type GuardCore, type GuardPersistenceOptions } from "../core/session-guard.js";
 import type { GuardConfig } from "../types.js";
+import { isSupportedPiApi } from "./settings.js";
 import { assertPiToolBoundary, piToolPolicy } from "./tool-policy.js";
 
-export const SUPPORTED_PI_APIS: ReadonlySet<string> = new Set([
-  "openai-completions",
-  "openai-responses",
-  "anthropic-messages",
-]);
+export { SUPPORTED_PI_APIS } from "./settings.js";
 
 export const PROTECT_FAILED = "LeakShield could not protect this provider request. [protect]";
 export const UNSUPPORTED_ROUTE = "LeakShield refused a provider request on a route it cannot mask. [route]";
@@ -36,7 +33,6 @@ export interface PiGuardModel {
 }
 
 export interface PiGuard {
-  readonly core: GuardCore | null;
   /** The reason the current model cannot be protected, or null. */
   readonly refusal: string | null;
   setSession(sessionID: string | null): void;
@@ -109,14 +105,11 @@ export function createPiGuard(options: PiGuardOptions): PiGuard {
   const refusal = (): string | null => {
     if (core === null) return PROTECT_FAILED;
     if (model === null) return UNSUPPORTED_MODEL;
-    if (invalidBase || !SUPPORTED_PI_APIS.has(model.api)) return UNSUPPORTED_MODEL;
+    if (invalidBase || !isSupportedPiApi(model.api)) return UNSUPPORTED_MODEL;
     return null;
   };
 
   const guard: PiGuard = {
-    get core() {
-      return core;
-    },
     get refusal() {
       return refusal();
     },
@@ -131,11 +124,17 @@ export function createPiGuard(options: PiGuardOptions): PiGuard {
     async handle(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
       const url = urlOf(input);
       const route = classifyModelRoute(url);
+      // A model-shaped POST is guarded wherever it goes: a missed or skipped
+      // model switch must not fail open just because the origin changed.
+      // Other provider-origin routes are classified below (GET passes, an
+      // unknown POST is refused).
       let isProvider = route !== null;
-      if (origin !== null) {
+      if (!isProvider && origin !== null) {
         try {
           isProvider = new URL(url).origin === origin;
         } catch {
+          // An unparsable URL cannot be sent by fetch either; let it surface
+          // the native error instead of masking it as a guard refusal.
           return fetchImpl(input, init);
         }
       }
@@ -163,12 +162,9 @@ export function createPiGuard(options: PiGuardOptions): PiGuard {
         return refusalResponse(refusalText(error));
       }
       const sent = masked.request as Request;
-      let response: Response;
-      try {
-        response = await fetchImpl(sent);
-      } catch {
-        return refusalResponse(PROTECT_FAILED);
-      }
+      // Network errors and aborts are not masking failures: propagate them so
+      // the SDK keeps its retry/cancel semantics. The request is already masked.
+      const response = await fetchImpl(sent);
       const reply: Record<string, unknown> = { sessionID, request: sent, response };
       await (core as GuardCore).onHttpResponse(reply);
       return reply.response as Response;

@@ -35,6 +35,10 @@ credential and session directory.
 
 ### Wire formats
 
+A model-shaped `POST` on an unexpected origin is masked too (unit test), so a
+missed model switch cannot fail open; network errors and aborts propagate
+unchanged instead of becoming a guard refusal.
+
 Real pi process, print mode, one prompt per format:
 
 | api | stub requests | original at stub | placeholder in request | restored in stdout |
@@ -79,6 +83,15 @@ ok   compaction sent no request
 ok   a prompt after the switch did not reach the provider
 ```
 
+A broken extension configuration fails closed the same way (invalid
+`LEAKSHIELD_PI_PERSIST`, real pi):
+
+```text
+ok   pi refuses to start (exit 1, "Failed to load extension")
+ok   no request reached the provider
+ok   the failure names the extension
+```
+
 ### Background requests
 
 Automatic compaction was run against real pi with a small context window: three
@@ -88,7 +101,7 @@ triggered at runtime (`/tree` has no RPC command). See the gap audit.
 
 ### Build and tests
 
-- `npx vitest run`: 68 files, 1,823 tests pass.
+- `npx vitest run`: 68 files, 1,825 tests pass.
 - `npx tsc --noEmit`, `npm run build`, `npm pack --dry-run`.
 
 ## What this does not prove

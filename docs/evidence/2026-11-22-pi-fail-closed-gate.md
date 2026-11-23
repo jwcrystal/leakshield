@@ -3,7 +3,7 @@
 > Resolution (2026-11-23): the gate is closed by the in-process fetch boundary. Current record: [2026-11-23-pi-extension.md](2026-11-23-pi-extension.md); transport audit: [2026-11-23-pi-fetch-gap-audit.md](2026-11-23-pi-fetch-gap-audit.md). The gate conclusion below stays as written on 2026-11-22.
 
 Date: 2026-11-22
-Status: **BLOCKED — FAIL-CLOSED NOT ESTABLISHED**
+Status at 2026-11-22: **BLOCKED — FAIL-CLOSED NOT ESTABLISHED**
 Evidence level of the original investigation was static only. Subsequent cloud runtime proof is recorded in [the runtime report](2026-11-22-pi-runtime-provider-boundary.md) and [the two-stage loopback lab](pi-lab/README.md). The release gate remains blocked by direct-provider bypass.
 
 ## Scope and provenance

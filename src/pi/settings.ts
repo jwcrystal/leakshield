@@ -40,7 +40,7 @@ export interface PiUserAgent {
   providers: Record<string, PiProviderEntry>;
 }
 
-const SUPPORTED_APIS: ReadonlySet<string> = new Set([
+export const SUPPORTED_PI_APIS: ReadonlySet<string> = new Set([
   "openai-completions",
   "openai-responses",
   "anthropic-messages",
@@ -49,7 +49,7 @@ const SUPPORTED_APIS: ReadonlySet<string> = new Set([
 export type PiApi = "openai-completions" | "openai-responses" | "anthropic-messages";
 
 export function isSupportedPiApi(value: string): value is PiApi {
-  return SUPPORTED_APIS.has(value);
+  return SUPPORTED_PI_APIS.has(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

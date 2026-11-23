@@ -26,6 +26,10 @@ function stateOf(checks: Awaited<ReturnType<typeof runPiDoctor>>, id: string): s
   return checks.find((check) => check.id === id)?.state;
 }
 
+function checksDetail(checks: Awaited<ReturnType<typeof runPiDoctor>>, id: string): string | undefined {
+  return checks.find((check) => check.id === id)?.detail;
+}
+
 function agent(settings: Record<string, unknown>, models: Record<string, unknown> = {}): Record<string, string> {
   return {
     [`${AGENT}/settings.json`]: JSON.stringify(settings),
@@ -102,6 +106,21 @@ describe("pi doctor", () => {
       })),
     );
     expect(stateOf(checks, "pi-provider")).toBe("warn");
+  });
+
+  it("reports the persistence configuration and fails an invalid value", async () => {
+    const files = agent({ defaultProvider: "anthropic", extensions: [EXTENSION] }, ANTHROPIC);
+    const off = await runPiDoctor(deps(files));
+    expect(stateOf(off, "pi-persistence")).toBe("ok");
+
+    const on = await runPiDoctor(deps(files, {
+      env: { HOME: "/home/test", LEAKSHIELD_PI_PERSIST: "1", LEAKSHIELD_PI_PERSIST_TTL_DAYS: "3" },
+    }));
+    expect(checksDetail(on, "pi-persistence")).toContain("ttl 3d");
+
+    const bad = await runPiDoctor(deps(files, { env: { HOME: "/home/test", LEAKSHIELD_PI_PERSIST: "enabled" } }));
+    expect(stateOf(bad, "pi-persistence")).toBe("fail");
+    expect(piVerdict(bad).exit).toBe(1);
   });
 
   it("fails a broken agent directory and an unloadable guard config", async () => {

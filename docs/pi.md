@@ -87,6 +87,7 @@ pi keeps its own credential and configuration. The extension runs inside the pi 
 
 - Every provider request on the selected model's origin: system prompt, conversation history, tool results, and summarization requests. Automatic compaction was run against real pi 1.6.0; branch summarization uses the same `completeSummarization` path and is covered by that transport.
 - Manual compaction (`/compact`, RPC `compact`) and `/tree` branch summarization are cancelled when the selected model cannot be guarded: they call the model without an `input` or `before_agent_start` event, so the fetch guard alone would not stop a fetch-bypassing transport.
+- A model-shaped `POST` is masked wherever it goes, not only to the current model's origin, so a missed or skipped model switch cannot fail open. Other provider-origin routes are classified separately: an unknown `POST` is refused.
 - A `POST` to the provider origin on a route the guard cannot classify is refused. So are masking failures, a missing session, an unsupported API, and a core that cannot be built. Read-only `GET`/`HEAD` requests (model catalogs, response lookups) pass through: they carry no conversation, and refusing them would break providers like OpenRouter and Copilot.
 - Assistant text in the reply is restored for display. Stored history keeps whatever pi received; the next request is masked again.
 - Tool arguments at execution time:
@@ -106,13 +107,13 @@ The encrypted mapping store is opt-in, like the OpenCode plugin's, because pi ha
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `LEAKSHIELD_PI_PERSIST` | off | `1`/`true`/`yes` enables the store |
+| `LEAKSHIELD_PI_PERSIST` | off | `1`/`true`/`yes`/`on` enables the store |
 | `LEAKSHIELD_PI_PERSIST_TTL_DAYS` | `7` | session TTL in days; `0` never expires |
 | `LEAKSHIELD_PI_PERSIST_PATH` | `~/.local/share/leakshield/SGP.db` | store path |
 | `LEAKSHIELD_PI_PERSIST_KEYFILE` | off | allow the keyfile step when no OS keychain is available |
 | `LEAKSHIELD_PI_PERSIST_KEYFILE_PATH` | `~/.local/share/leakshield/sgp.key` | keyfile path |
 
-Key custody is the same ladder as the plugin: OS keychain, then the opt-in keyfile, then memory-only with a warning. `leakshield --forget --all` erases the store. An invalid value refuses to load the extension instead of running without the store you asked for.
+Key custody is the same ladder as the plugin: OS keychain, then the opt-in keyfile, then memory-only with a warning. `leakshield --forget --all` erases the store. An invalid value makes the extension throw while pi loads it: pi exits 1 with `Failed to load extension` before any request, instead of running without the store you asked for.
 
 With the store enabled, a later process can restore placeholders from earlier sessions wherever the guard sees them: a new request that replays old history, and tool calls. A transcript rendered by a previous process is not re-rendered.
 
@@ -145,4 +146,5 @@ With the store enabled, a later process can restore placeholders from earlier se
 - `node scripts/e2e/run-pi-wire.mjs <pi> openai-completions|anthropic-messages|openai-responses` — real pi, recording stub, one request per format, placeholder at the stub, restored display.
 - `node scripts/e2e/run-pi-extension.mjs <pi>` — real pi, scripted read → write → edit → bash → `--continue`, with the original values reaching only the local tools.
 - `node scripts/e2e/run-pi-compaction-refusal.mjs <pi>` — real pi, a conversation on a guarded model, then a switch to a `bedrock-converse-stream` model: manual compaction is cancelled and nothing reaches the provider.
+- `node scripts/e2e/run-pi-config-refusal.mjs <pi>` — an invalid `LEAKSHIELD_PI_PERSIST` value: pi exits 1 with `Failed to load extension` and no request.
 - Record and transport audit: [2026-11-23-pi-extension.md](evidence/2026-11-23-pi-extension.md) and [2026-11-23-pi-fetch-gap-audit.md](evidence/2026-11-23-pi-fetch-gap-audit.md).

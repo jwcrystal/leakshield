@@ -172,7 +172,7 @@ describe("pi fetch guard", () => {
     expect(() => guard.restoreTool("mcp_remote", { query: token })).toThrow(PI_UNKNOWN_TOOL_ERROR);
   });
 
-  it("does not guard a different origin that happens to use a model path", async () => {
+  it("guards a model-shaped POST on an unexpected origin", async () => {
     const seen: string[] = [];
     const guard = ready(seen);
     const response = await guard.handle(new Request("https://other.example.test/v1/chat/completions", {
@@ -181,7 +181,28 @@ describe("pi fetch guard", () => {
     }));
     expect(response.status).toBe(200);
     expect(seen).toHaveLength(1);
-    expect(seen[0]).toContain(SECRET);
+    expect(seen[0]).not.toContain(SECRET);
+    expect(seen[0]).toMatch(TOKEN);
+
+    const bare = createPiGuard({ config, fetchImpl: echoFetch(seen) });
+    bare.setModel(model());
+    const refused = await bare.handle(new Request("https://other.example.test/v1/messages", {
+      method: "POST",
+      body: JSON.stringify({ messages: [{ role: "user", content: SECRET }] }),
+    }));
+    expect(await refused.text()).toContain(MISSING_SESSION);
+  });
+
+  it("propagates network failures instead of turning them into a refusal", async () => {
+    const guard = createPiGuard({
+      config,
+      fetchImpl: (async () => {
+        throw new TypeError("network down");
+      }) as unknown as typeof fetch,
+    });
+    guard.setSession(SESSION);
+    guard.setModel(model());
+    await expect(guard.handle(providerRequest({ model: "stub-model", messages: [{ role: "user", content: "hi" }] }))).rejects.toThrow("network down");
   });
 
   it("only guards the three fetch transports", () => {

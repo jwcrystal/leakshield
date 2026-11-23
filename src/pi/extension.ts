@@ -22,20 +22,13 @@ export const PI_EXTENSION_ID = "leakshield-pi";
 export const UNPROTECTED_NOTICE =
   "LeakShield blocked this run: provider requests for the selected model cannot be protected in-process.";
 
-export interface PiModelLike {
-  api: string;
-  provider: string;
-  id: string;
-  baseUrl: string;
-}
-
 export interface PiSessionManager {
   getSessionId(): string;
 }
 
 export interface PiContext {
   sessionManager: PiSessionManager;
-  model?: PiModelLike;
+  model?: PiGuardModel;
   ui?: { notify(message: string, level?: string): void };
 }
 
@@ -46,7 +39,7 @@ export interface PiToolCallEvent {
 }
 
 export interface PiModelSelectEvent {
-  model: PiModelLike;
+  model: PiGuardModel;
 }
 
 type Handler = (event: never, ctx: PiContext) => unknown;
@@ -61,7 +54,7 @@ function guardConfig(): GuardConfig {
   return { ...config, settings: { ...config.settings, encoding_detection: true } };
 }
 
-function modelOf(model: PiModelLike | undefined): PiGuardModel | null {
+function modelOf(model: PiGuardModel | undefined): PiGuardModel | null {
   if (model === undefined) return null;
   const { api, provider, id, baseUrl } = model;
   return { api, provider, id, baseUrl };
@@ -97,7 +90,7 @@ export default function leakshieldPiExtension(pi: PiExtensionApi): void {
     notice(ctx, reason);
   };
 
-  const applyModel = (model: PiModelLike | undefined, ctx: PiContext | undefined): void => {
+  const applyModel = (model: PiGuardModel | undefined, ctx: PiContext | undefined): void => {
     guard.setModel(modelOf(model));
     refusal = guard.refusal;
     if (refusal === null) announced = null;
@@ -119,26 +112,24 @@ export default function leakshieldPiExtension(pi: PiExtensionApi): void {
     applyModel(ctx.model, ctx);
   });
 
-  const refused = (ctx: PiContext | undefined): { cancel: true } | undefined => {
-    const reason = refusal ?? (guard.core === null ? PROTECT_FAILED : null);
-    if (reason === null) return undefined;
-    announce(ctx, reason);
+  const cancelIfRefused = (ctx: PiContext | undefined): { cancel: true } | undefined => {
+    if (refusal === null) return undefined;
+    announce(ctx, refusal);
     return { cancel: true };
   };
 
   pi.on("input", (_event, ctx) => {
     // Extension-authored input is refused too: it can start a model request on
     // an API the guard cannot see, which would transmit the prompt unmasked.
-    const reason = refusal ?? (guard.core === null ? PROTECT_FAILED : null);
-    if (reason === null) return { action: "continue" };
-    announce(ctx, reason);
+    if (refusal === null) return { action: "continue" };
+    announce(ctx, refusal);
     return { action: "handled" };
   });
 
   // Manual compaction and /tree summarization invoke the model without an
   // input or before_agent_start event, so they need their own refusal gate.
-  pi.on("session_before_compact", (_event, ctx) => refused(ctx));
-  pi.on("session_before_tree", (_event, ctx) => refused(ctx));
+  pi.on("session_before_compact", (_event, ctx) => cancelIfRefused(ctx));
+  pi.on("session_before_tree", (_event, ctx) => cancelIfRefused(ctx));
 
   pi.on("tool_call", (event, _ctx) => {
     const toolEvent = event as unknown as PiToolCallEvent;

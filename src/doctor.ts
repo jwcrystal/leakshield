@@ -1018,9 +1018,8 @@ export function formatDoctorReport(report: DoctorReport): string {
  * The OpenCode status decides as before. Only when OpenCode is absent
  * (HOST_MISSING) can Claude Code or an installed pi extension make the run
  * pass, unless a provider or host setting bypasses it; a failed Claude Code
- * check, or a pi failure once LeakShield is registered for pi, fails the run
- * whatever OpenCode reports. An inactive pi configuration does not fail a
- * protected OpenCode run.
+ * check still fails it. A pi failure only decides the run when OpenCode is
+ * absent, so a broken ~/.pi never fails a protected OpenCode run.
  */
 export function doctorExitCode(report: DoctorReport): number {
   const claudeCode = report.claudeCode ?? [];

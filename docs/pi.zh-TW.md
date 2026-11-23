@@ -113,6 +113,7 @@ pi `models.json` 中宣告的 provider 會照其 base URL、API 與模型清單�
   - `read`（`path`、`offset`、`limit`）、`grep`、`find`、`ls`：還原；未解析的 placeholder 可保持字面，因為只會 match 不到。
   - `write`（`path`、`content`）、`edit`（`path`、`edits[].oldText/newText`）：還原；不完整就拒絕該次呼叫。
   - `bash`、`powershell`：只有在完整參數詞、且原值在該引號情境安全時才還原；命令位置、選項注入、引號與 shell 特殊字元一律拒絕。
+  - shell 還原沿用 OpenCode plugin 的同一份 literal-argument 子集：placeholder 可以是完整未加引號或整詞引號的參數、`curl`／`http` 的內嵌值，或位於結尾單一 `>`／`>>`（目標為靜態檔名）之前。pipeline、命令串接、展開、`<`／`2>` 重導向、token 化的 redirect 目標都會拒絕該次呼叫；不含 token 的命令不受影響。
   - 未知、MCP、自訂工具：含 placeholder 就拒絕，因為參數可能被轉送到這個 session mapping 之外的遠端服務。
 - 未支援路由／模型、格式錯誤的 body、缺少 session 身分、錯誤的 loopback token、遮罩失敗、上游 redirect，都在送出前拒絕。
 

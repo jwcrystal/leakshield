@@ -1,0 +1,3169 @@
+{
+  "piVersion": "1.6.0",
+  "nodeVersion": "v24.22.3",
+  "sourceCommit": "c449a2bb72ab9fbc4d656ffd57f886d40611e11b",
+  "canary": "PI118_SYNTHETIC_PRIVATE_VALUE",
+  "results": [
+    {
+      "id": "baseline-openai-completions-normal",
+      "mode": "baseline",
+      "api": "openai-completions",
+      "workflow": "normal",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/chat/completions",
+          "raw": true,
+          "masked": false,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "provider-mask-openai-completions-normal",
+      "mode": "provider-mask",
+      "api": "openai-completions",
+      "workflow": "normal",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "wire-openai-completions-normal",
+      "mode": "wire",
+      "api": "openai-completions",
+      "workflow": "normal",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "baseline-anthropic-messages-normal",
+      "mode": "baseline",
+      "api": "anthropic-messages",
+      "workflow": "normal",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/messages?beta=true",
+          "raw": true,
+          "masked": false,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "provider-mask-anthropic-messages-normal",
+      "mode": "provider-mask",
+      "api": "anthropic-messages",
+      "workflow": "normal",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/messages?beta=true",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "wire-anthropic-messages-normal",
+      "mode": "wire",
+      "api": "anthropic-messages",
+      "workflow": "normal",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/messages?beta=true",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "baseline-openai-responses-normal",
+      "mode": "baseline",
+      "api": "openai-responses",
+      "workflow": "normal",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/responses",
+          "raw": true,
+          "masked": false,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "provider-mask-openai-responses-normal",
+      "mode": "provider-mask",
+      "api": "openai-responses",
+      "workflow": "normal",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/responses",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "wire-openai-responses-normal",
+      "mode": "wire",
+      "api": "openai-responses",
+      "workflow": "normal",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/responses",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "provider-mask-openai-completions-full",
+      "mode": "provider-mask",
+      "api": "openai-completions",
+      "workflow": "full",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "tool",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "tool",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": true,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "history",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": true,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "manual-compact",
+          "path": "/v1/chat/completions",
+          "raw": true,
+          "masked": false,
+          "toolResult": false,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "tree-summary",
+          "path": "/v1/chat/completions",
+          "raw": true,
+          "masked": false,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "input",
+          "raw": false
+        },
+        {
+          "stage": "tool",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "tool_call",
+          "raw": false
+        },
+        {
+          "stage": "tool",
+          "name": "tool_result",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "manual-compact",
+          "name": "session_before_compact",
+          "raw": true
+        },
+        {
+          "stage": "tree-summary",
+          "name": "session_before_tree",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        },
+        {
+          "stage": "tool",
+          "type": "tool_execution_end"
+        },
+        {
+          "stage": "tool",
+          "type": "agent_end"
+        },
+        {
+          "stage": "history",
+          "type": "agent_end"
+        },
+        {
+          "stage": "manual-compact",
+          "type": "compaction_start",
+          "reason": "manual"
+        },
+        {
+          "stage": "manual-compact",
+          "type": "compaction_end",
+          "reason": "manual",
+          "aborted": false
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        },
+        {
+          "stage": "tool",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        },
+        {
+          "stage": "history",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        },
+        {
+          "stage": "manual-compact",
+          "completed": true
+        },
+        {
+          "stage": "tree-summary",
+          "cancelled": false,
+          "summaryCreated": true
+        }
+      ]
+    },
+    {
+      "id": "context-mask-openai-completions-full",
+      "mode": "context-mask",
+      "api": "openai-completions",
+      "workflow": "full",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "tool",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "tool",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": true,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "history",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": true,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "manual-compact",
+          "path": "/v1/chat/completions",
+          "raw": true,
+          "masked": false,
+          "toolResult": false,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "tree-summary",
+          "path": "/v1/chat/completions",
+          "raw": true,
+          "masked": false,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": false
+        },
+        {
+          "stage": "tool",
+          "name": "input",
+          "raw": false
+        },
+        {
+          "stage": "tool",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "before_provider_request",
+          "raw": false
+        },
+        {
+          "stage": "tool",
+          "name": "tool_call",
+          "raw": false
+        },
+        {
+          "stage": "tool",
+          "name": "tool_result",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "before_provider_request",
+          "raw": false
+        },
+        {
+          "stage": "history",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "before_provider_request",
+          "raw": false
+        },
+        {
+          "stage": "manual-compact",
+          "name": "session_before_compact",
+          "raw": true
+        },
+        {
+          "stage": "tree-summary",
+          "name": "session_before_tree",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        },
+        {
+          "stage": "tool",
+          "type": "tool_execution_end"
+        },
+        {
+          "stage": "tool",
+          "type": "agent_end"
+        },
+        {
+          "stage": "history",
+          "type": "agent_end"
+        },
+        {
+          "stage": "manual-compact",
+          "type": "compaction_start",
+          "reason": "manual"
+        },
+        {
+          "stage": "manual-compact",
+          "type": "compaction_end",
+          "reason": "manual",
+          "aborted": false
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        },
+        {
+          "stage": "tool",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        },
+        {
+          "stage": "history",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        },
+        {
+          "stage": "manual-compact",
+          "completed": true
+        },
+        {
+          "stage": "tree-summary",
+          "cancelled": false,
+          "summaryCreated": true
+        }
+      ]
+    },
+    {
+      "id": "wire-openai-completions-full",
+      "mode": "wire",
+      "api": "openai-completions",
+      "workflow": "full",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "tool",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "tool",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": true,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "history",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": true,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "manual-compact",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "tree-summary",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "input",
+          "raw": false
+        },
+        {
+          "stage": "tool",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "tool_call",
+          "raw": false
+        },
+        {
+          "stage": "tool",
+          "name": "tool_result",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "manual-compact",
+          "name": "session_before_compact",
+          "raw": true
+        },
+        {
+          "stage": "tree-summary",
+          "name": "session_before_tree",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        },
+        {
+          "stage": "tool",
+          "type": "tool_execution_end"
+        },
+        {
+          "stage": "tool",
+          "type": "agent_end"
+        },
+        {
+          "stage": "history",
+          "type": "agent_end"
+        },
+        {
+          "stage": "manual-compact",
+          "type": "compaction_start",
+          "reason": "manual"
+        },
+        {
+          "stage": "manual-compact",
+          "type": "compaction_end",
+          "reason": "manual",
+          "aborted": false
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        },
+        {
+          "stage": "tool",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        },
+        {
+          "stage": "history",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        },
+        {
+          "stage": "manual-compact",
+          "completed": true
+        },
+        {
+          "stage": "tree-summary",
+          "cancelled": false,
+          "summaryCreated": true
+        }
+      ]
+    },
+    {
+      "id": "provider-throw-openai-completions-normal",
+      "mode": "provider-throw",
+      "api": "openai-completions",
+      "workflow": "normal",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/chat/completions",
+          "raw": true,
+          "masked": false,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [
+        {
+          "event": "before_provider_request",
+          "error": "PI118_FORCED_PAYLOAD_MASK_ERROR"
+        }
+      ],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "context-throw-openai-completions-normal",
+      "mode": "context-throw",
+      "api": "openai-completions",
+      "workflow": "normal",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/chat/completions",
+          "raw": true,
+          "masked": false,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [
+        {
+          "event": "context_with_system",
+          "error": "PI118_FORCED_CONTEXT_MASK_ERROR"
+        }
+      ],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "provider-abort-openai-completions-normal",
+      "mode": "provider-abort",
+      "api": "openai-completions",
+      "workflow": "normal",
+      "requests": [],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [
+        {
+          "event": "before_provider_request",
+          "error": "PI118_FORCED_PAYLOAD_MASK_ERROR_AFTER_ABORT"
+        }
+      ],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "aborted",
+          "errorMessage": "Request aborted"
+        }
+      ]
+    },
+    {
+      "id": "context-abort-openai-completions-normal",
+      "mode": "context-abort",
+      "api": "openai-completions",
+      "workflow": "normal",
+      "requests": [],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [
+        {
+          "event": "context_with_system",
+          "error": "PI118_FORCED_CONTEXT_MASK_ERROR_AFTER_ABORT"
+        }
+      ],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "aborted",
+          "errorMessage": "This operation was aborted"
+        }
+      ]
+    },
+    {
+      "id": "wire-error-openai-completions-normal",
+      "mode": "wire-error",
+      "api": "openai-completions",
+      "workflow": "normal",
+      "requests": [],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "error",
+          "errorMessage": "400: {\"type\":\"invalid_request_error\",\"message\":\"LeakShield could not protect this provider request. [protect]\"}"
+        }
+      ]
+    },
+    {
+      "id": "wire-over-limit-openai-completions-normal",
+      "mode": "wire-over-limit",
+      "api": "openai-completions",
+      "workflow": "normal",
+      "requests": [],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "error",
+          "errorMessage": "400: {\"type\":\"invalid_request_error\",\"message\":\"LeakShield blocked the request because its body is unsupported or could not be identified. [metadata-header-sensitive]\"}"
+        }
+      ]
+    },
+    {
+      "id": "provider-throw-anthropic-messages-normal",
+      "mode": "provider-throw",
+      "api": "anthropic-messages",
+      "workflow": "normal",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/messages?beta=true",
+          "raw": true,
+          "masked": false,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [
+        {
+          "event": "before_provider_request",
+          "error": "PI118_FORCED_PAYLOAD_MASK_ERROR"
+        }
+      ],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "context-throw-anthropic-messages-normal",
+      "mode": "context-throw",
+      "api": "anthropic-messages",
+      "workflow": "normal",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/messages?beta=true",
+          "raw": true,
+          "masked": false,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [
+        {
+          "event": "context_with_system",
+          "error": "PI118_FORCED_CONTEXT_MASK_ERROR"
+        }
+      ],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "provider-abort-anthropic-messages-normal",
+      "mode": "provider-abort",
+      "api": "anthropic-messages",
+      "workflow": "normal",
+      "requests": [],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [
+        {
+          "event": "before_provider_request",
+          "error": "PI118_FORCED_PAYLOAD_MASK_ERROR_AFTER_ABORT"
+        }
+      ],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "aborted",
+          "errorMessage": "Request aborted"
+        }
+      ]
+    },
+    {
+      "id": "context-abort-anthropic-messages-normal",
+      "mode": "context-abort",
+      "api": "anthropic-messages",
+      "workflow": "normal",
+      "requests": [],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [
+        {
+          "event": "context_with_system",
+          "error": "PI118_FORCED_CONTEXT_MASK_ERROR_AFTER_ABORT"
+        }
+      ],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "aborted",
+          "errorMessage": "This operation was aborted"
+        }
+      ]
+    },
+    {
+      "id": "wire-error-anthropic-messages-normal",
+      "mode": "wire-error",
+      "api": "anthropic-messages",
+      "workflow": "normal",
+      "requests": [],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "error",
+          "errorMessage": "400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"LeakShield could not protect this provider request. [protect]\"}}"
+        }
+      ]
+    },
+    {
+      "id": "wire-over-limit-anthropic-messages-normal",
+      "mode": "wire-over-limit",
+      "api": "anthropic-messages",
+      "workflow": "normal",
+      "requests": [],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "error",
+          "errorMessage": "400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"LeakShield blocked the request because its body is unsupported or could not be identified. [metadata-header-sensitive]\"}}"
+        }
+      ]
+    },
+    {
+      "id": "provider-throw-openai-responses-normal",
+      "mode": "provider-throw",
+      "api": "openai-responses",
+      "workflow": "normal",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/responses",
+          "raw": true,
+          "masked": false,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [
+        {
+          "event": "before_provider_request",
+          "error": "PI118_FORCED_PAYLOAD_MASK_ERROR"
+        }
+      ],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "context-throw-openai-responses-normal",
+      "mode": "context-throw",
+      "api": "openai-responses",
+      "workflow": "normal",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/responses",
+          "raw": true,
+          "masked": false,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [
+        {
+          "event": "context_with_system",
+          "error": "PI118_FORCED_CONTEXT_MASK_ERROR"
+        }
+      ],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "provider-abort-openai-responses-normal",
+      "mode": "provider-abort",
+      "api": "openai-responses",
+      "workflow": "normal",
+      "requests": [],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [
+        {
+          "event": "before_provider_request",
+          "error": "PI118_FORCED_PAYLOAD_MASK_ERROR_AFTER_ABORT"
+        }
+      ],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "aborted",
+          "errorMessage": "Request aborted"
+        }
+      ]
+    },
+    {
+      "id": "context-abort-openai-responses-normal",
+      "mode": "context-abort",
+      "api": "openai-responses",
+      "workflow": "normal",
+      "requests": [],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [
+        {
+          "event": "context_with_system",
+          "error": "PI118_FORCED_CONTEXT_MASK_ERROR_AFTER_ABORT"
+        }
+      ],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "aborted",
+          "errorMessage": "This operation was aborted"
+        }
+      ]
+    },
+    {
+      "id": "wire-error-openai-responses-normal",
+      "mode": "wire-error",
+      "api": "openai-responses",
+      "workflow": "normal",
+      "requests": [],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "error",
+          "errorMessage": "stub API error (400): {\"type\":\"invalid_request_error\",\"message\":\"LeakShield could not protect this provider request. [protect]\"}"
+        }
+      ]
+    },
+    {
+      "id": "wire-over-limit-openai-responses-normal",
+      "mode": "wire-over-limit",
+      "api": "openai-responses",
+      "workflow": "normal",
+      "requests": [],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "error",
+          "errorMessage": "stub API error (400): {\"type\":\"invalid_request_error\",\"message\":\"LeakShield blocked the request because its body is unsupported or could not be identified. [metadata-header-sensitive]\"}"
+        }
+      ]
+    },
+    {
+      "id": "provider-mask-late-openai-completions-normal",
+      "mode": "provider-mask-late",
+      "api": "openai-completions",
+      "workflow": "normal",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/chat/completions",
+          "raw": true,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "later-extension-injection",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "wire-late-openai-completions-normal",
+      "mode": "wire-late",
+      "api": "openai-completions",
+      "workflow": "normal",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "later-extension-injection",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "background-cancel-openai-completions-full",
+      "mode": "background-cancel",
+      "api": "openai-completions",
+      "workflow": "full",
+      "requests": [
+        {
+          "stage": "normal",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "tool",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "tool",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": true,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "history",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": true,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "normal",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "normal",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "input",
+          "raw": false
+        },
+        {
+          "stage": "tool",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "tool_call",
+          "raw": false
+        },
+        {
+          "stage": "tool",
+          "name": "tool_result",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "tool",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "history",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "manual-compact",
+          "name": "session_before_compact",
+          "raw": true
+        },
+        {
+          "stage": "tree-summary",
+          "name": "session_before_tree",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "normal",
+          "type": "agent_end"
+        },
+        {
+          "stage": "tool",
+          "type": "tool_execution_end"
+        },
+        {
+          "stage": "tool",
+          "type": "agent_end"
+        },
+        {
+          "stage": "history",
+          "type": "agent_end"
+        },
+        {
+          "stage": "manual-compact",
+          "type": "compaction_start",
+          "reason": "manual"
+        },
+        {
+          "stage": "manual-compact",
+          "type": "compaction_end",
+          "reason": "manual",
+          "aborted": true
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "normal",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        },
+        {
+          "stage": "tool",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        },
+        {
+          "stage": "history",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        },
+        {
+          "stage": "manual-compact",
+          "error": "Compaction cancelled"
+        },
+        {
+          "stage": "tree-summary",
+          "cancelled": true,
+          "summaryCreated": false
+        }
+      ]
+    },
+    {
+      "id": "provider-mask-openai-completions-auto",
+      "mode": "provider-mask",
+      "api": "openai-completions",
+      "workflow": "auto",
+      "requests": [
+        {
+          "stage": "prompt",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "prompt",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "automatic-compact",
+          "path": "/v1/chat/completions",
+          "raw": true,
+          "masked": false,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "prompt",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "automatic-compact",
+          "name": "session_before_compact",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "prompt",
+          "type": "agent_end"
+        },
+        {
+          "stage": "prompt",
+          "type": "agent_end"
+        },
+        {
+          "stage": "automatic-compact",
+          "type": "compaction_start",
+          "reason": "threshold"
+        },
+        {
+          "stage": "automatic-compact",
+          "type": "compaction_end",
+          "reason": "threshold",
+          "aborted": false
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "prompt",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        },
+        {
+          "stage": "prompt",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "context-mask-openai-completions-auto",
+      "mode": "context-mask",
+      "api": "openai-completions",
+      "workflow": "auto",
+      "requests": [
+        {
+          "stage": "prompt",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "prompt",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "automatic-compact",
+          "path": "/v1/chat/completions",
+          "raw": true,
+          "masked": false,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "prompt",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "before_provider_request",
+          "raw": false
+        },
+        {
+          "stage": "prompt",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "before_provider_request",
+          "raw": false
+        },
+        {
+          "stage": "automatic-compact",
+          "name": "session_before_compact",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "prompt",
+          "type": "agent_end"
+        },
+        {
+          "stage": "prompt",
+          "type": "agent_end"
+        },
+        {
+          "stage": "automatic-compact",
+          "type": "compaction_start",
+          "reason": "threshold"
+        },
+        {
+          "stage": "automatic-compact",
+          "type": "compaction_end",
+          "reason": "threshold",
+          "aborted": false
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "prompt",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        },
+        {
+          "stage": "prompt",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "wire-openai-completions-auto",
+      "mode": "wire",
+      "api": "openai-completions",
+      "workflow": "auto",
+      "requests": [
+        {
+          "stage": "prompt",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "prompt",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "automatic-compact",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "prompt",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "automatic-compact",
+          "name": "session_before_compact",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "prompt",
+          "type": "agent_end"
+        },
+        {
+          "stage": "prompt",
+          "type": "agent_end"
+        },
+        {
+          "stage": "automatic-compact",
+          "type": "compaction_start",
+          "reason": "threshold"
+        },
+        {
+          "stage": "automatic-compact",
+          "type": "compaction_end",
+          "reason": "threshold",
+          "aborted": false
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "prompt",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        },
+        {
+          "stage": "prompt",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    },
+    {
+      "id": "background-cancel-openai-completions-auto",
+      "mode": "background-cancel",
+      "api": "openai-completions",
+      "workflow": "auto",
+      "requests": [
+        {
+          "stage": "prompt",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        },
+        {
+          "stage": "prompt",
+          "path": "/v1/chat/completions",
+          "raw": false,
+          "masked": true,
+          "toolResult": false,
+          "toolResultRaw": false
+        }
+      ],
+      "hooks": [
+        {
+          "stage": "startup",
+          "name": "session_start",
+          "raw": false
+        },
+        {
+          "stage": "prompt",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "input",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "before_agent_start",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "context",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "context_with_system",
+          "raw": true
+        },
+        {
+          "stage": "prompt",
+          "name": "before_provider_request",
+          "raw": true
+        },
+        {
+          "stage": "automatic-compact",
+          "name": "session_before_compact",
+          "raw": true
+        }
+      ],
+      "events": [
+        {
+          "stage": "prompt",
+          "type": "agent_end"
+        },
+        {
+          "stage": "prompt",
+          "type": "agent_end"
+        },
+        {
+          "stage": "automatic-compact",
+          "type": "compaction_start",
+          "reason": "threshold"
+        },
+        {
+          "stage": "automatic-compact",
+          "type": "compaction_end",
+          "reason": "threshold",
+          "aborted": true
+        }
+      ],
+      "errors": [],
+      "outcomes": [
+        {
+          "stage": "prompt",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        },
+        {
+          "stage": "prompt",
+          "lastRole": "assistant",
+          "stopReason": "stop"
+        }
+      ]
+    }
+  ]
+}

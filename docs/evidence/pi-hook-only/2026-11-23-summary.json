@@ -1,0 +1,27 @@
+{
+  "date": "2026-11-23",
+  "piVersion": "1.6.0",
+  "nodeVersion": "v24.22.3",
+  "scenarioCount": 37,
+  "assertionsPassed": 146,
+  "loopbackRequests": 50,
+  "runtimePackageIntegrity": "sha512-zX1BVEsshx7A2MRuQ6jfr3RJGWw4Wn+vLq5ZfmlvS1RskhRmByaSZVXH/zcwRrWHO7qPgs98pNCbPOEti/t0fQ==",
+  "probeSha256": "99cd1cacca664e84930636687cea8eda88dc2d1b9892fae0e3d87bdb90f1fce5",
+  "resultsSha256": "da5969f44622996b7862d9addf236e0857a67e92406e4c782852dc5bf58832d2",
+  "productionAdapterSourceCommit": "c449a2bb72ab9fbc4d656ffd57f886d40611e11b",
+  "interpretation": {
+    "ordinaryHooks": "mask ordinary requests, history and tool results in tested cases",
+    "background": "generic context/payload hooks skipped by manual/automatic compaction and tree summaries",
+    "hookErrors": "throw/rejection alone fails open in these host callbacks",
+    "explicitAbort": "ctx.abort stops tested ordinary requests on all three APIs",
+    "specializedCancellation": "cancel result stops manual/automatic compaction and tree summaries",
+    "wire": "existing fetch guard masks normal and background requests, masks late additions, refuses forced errors/size limits"
+  },
+  "limitations": [
+    "loopback stubs, not real provider availability or incident frequency",
+    "SDK AgentSession used for branch navigation; interactive TUI not exercised",
+    "hook prototypes only substitute a synthetic canary; they do not implement production mapping/restoration",
+    "abort race/retry variations, model switches, OAuth, non-fetch transports, Windows and multiple pi versions not covered",
+    "forced wire-error injects a throwing Core to test the real fetch wrapper; over-limit uses the real Core"
+  ]
+}

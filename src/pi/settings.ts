@@ -8,7 +8,7 @@
  */
 import path from "node:path";
 
-export interface PiModelEntry {
+interface PiModelEntry {
   id?: string;
   api?: string;
   baseUrl?: string;
@@ -16,7 +16,7 @@ export interface PiModelEntry {
   [key: string]: unknown;
 }
 
-export interface PiProviderEntry {
+interface PiProviderEntry {
   baseUrl?: string;
   api?: string;
   apiKey?: string;
@@ -25,7 +25,7 @@ export interface PiProviderEntry {
   [key: string]: unknown;
 }
 
-export interface PiUserSettings {
+interface PiUserSettings {
   defaultModel?: string;
   defaultProvider?: string;
   sessionDir?: string;

@@ -188,8 +188,9 @@ describe("pi extension", () => {
     await pi.emit("session_start", {}, context(notices));
     await pi.emit("before_agent_start", {}, context(notices, { api: "bedrock-converse-stream" }));
     expect(state.model?.api).toBe("bedrock-converse-stream");
-    const refused = context(notices, { api: "bedrock-converse-stream" });
-    expect(await pi.emit("input", { source: "interactive" }, refused)).toEqual({ action: "handled" });
+    // The stored refusal from the re-read cancels an operation that cannot
+    // re-read the model itself, even with a supported model in this context.
+    expect(await pi.emit("session_before_compact", { reason: "manual" }, context(notices))).toEqual({ cancel: true });
   });
 
   it("reattaches the model on model_select and clears the refusal", async () => {

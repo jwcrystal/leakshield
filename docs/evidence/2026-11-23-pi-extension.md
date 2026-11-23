@@ -105,6 +105,25 @@ triggered at runtime (`/tree` has no RPC command). See the gap audit.
 - `npx vitest run`: 68 files, 1,827 tests pass.
 - `npx tsc --noEmit`, `npm run build`, `npm pack --dry-run`.
 
+## Gate evidence (#98)
+
+- **Hook ordering.** The design does not use `before_provider_request`,
+  `context` or `before_agent_start` as an enforcement point: the fetch wrapper
+  is the enforcement layer and fails closed on its own. The hooks the adapter
+  does use (`session_start`, `model_select`, `input`, `tool_call`,
+  `session_before_compact`, `session_before_tree`) were exercised by the
+  real-pi runs above; the session is bound before the first request, which is
+  why every request carried placeholders.
+- **Forced error and async rejection.** A masking failure, including a
+  rejected `onHttpRequest`, returns 400 and sends nothing (unit test). A
+  broken extension configuration makes pi exit 1 before any request (real pi,
+  `run-pi-config-refusal.mjs`).
+- **Disabled extension.** `--no-extensions`/`-ne` remove the guard. This is the
+  same class as not installing the OpenCode plugin; blocking it requires a
+  launcher or an OS-level policy, which is outside this adapter.
+- **Version.** Every run above used pi 1.6.0. The doctor accepts 1.6.x within
+  major 1; later minors have no runtime evidence.
+
 ## What this does not prove
 
 - Branch summarization, Bedrock, Codex WebSocket and Google at runtime; the

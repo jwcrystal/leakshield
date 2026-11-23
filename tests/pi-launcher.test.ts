@@ -152,6 +152,7 @@ describe("pi managed files", () => {
       packages: [],
       extensions: [EXTENSION],
       sessionDir: "/home/test/.pi/agent/sessions",
+      defaultProvider: "anthropic",
     });
   });
 });
@@ -241,6 +242,19 @@ describe("pi managed launch", () => {
     expect(recorded.childEnv).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(recorded.closed).toBe(true);
     expect(recorded.removed).toEqual([`${DATA}/pi/run-fixed-id`]);
+  });
+
+  it("selects the generated default provider when no model is configured", async () => {
+    const { deps, recorded } = harness({
+      "/home/test/.pi/agent/settings.json": JSON.stringify({ defaultProvider: "anthropic" }),
+    });
+    expect(await runPiLauncher([], deps)).toBe(0);
+    expect(recorded.childArgs).not.toContain("--provider");
+    expect(recorded.childArgs).not.toContain("--model");
+    const settings = JSON.parse(recorded.written[`${DATA}/pi/run-fixed-id/agent/settings.json`]?.content ?? "{}") as {
+      defaultProvider?: string;
+    };
+    expect(settings.defaultProvider).toBe("anthropic");
   });
 
   it("falls back to pi's own credential resolution", async () => {

@@ -199,6 +199,7 @@ export function buildManagedFiles(
     packages: [],
     extensions: [options.extensionPath],
     sessionDir: options.sessionDir,
+    defaultProvider: resolution.provider,
   };
   return {
     modelsJson: `${JSON.stringify({ providers: { [resolution.provider]: provider } }, null, 2)}\n`,
@@ -384,11 +385,11 @@ export async function runPiLauncher(args: readonly string[], deps: PiLauncherDep
     // Ambient discovery stays off: an unlisted extension or project package
     // could open its own connection and bypass the boundary. The explicit -e
     // path is still loaded, and these flags go last so they win over user args.
+    // pi requires --model whenever --provider is given; without a model the
+    // generated settings.json defaultProvider is the selection instead.
     const piArgs = [
       ...launcher.piArgs,
-      "--provider",
-      resolution.provider,
-      ...(resolution.model !== undefined ? ["--model", resolution.model] : []),
+      ...(resolution.model !== undefined ? ["--provider", resolution.provider, "--model", resolution.model] : []),
       "--no-extensions",
       "--extension",
       deps.extensionPath(),

@@ -8,7 +8,8 @@
  * tools receive the restored values.
  *
  * Usage: node scripts/e2e/run-pi-adapter.mjs <path-to-pi-binary> [--persist]
- * Requires `npm run build` first and Node.js 24.
+ * Requires `npm run build` first (the script imports the built placeholder
+ * prefix) and Node.js 24.
  */
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";

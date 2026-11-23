@@ -35,7 +35,7 @@ function declaration(overrides: Partial<HostCapabilities> = {}): HostCapabilitie
   };
 }
 
-const audit = { fileExists: () => true };
+const audit = { fileExists: () => true, isFile: () => true };
 
 function errorOf(capabilities: HostCapabilities): string {
   try {
@@ -94,6 +94,44 @@ describe("capability declaration", () => {
     );
   });
 
+  it("rejects a directory as evidence", () => {
+    const capabilities = withRow("transports.http", {
+      state: "protected",
+      mechanism: "core.onHttpRequest",
+      evidence: "tests/",
+    });
+    expect(errorOf(capabilities)).toContain("normalized file path");
+  });
+
+  it("rejects evidence that escapes through a parent segment", () => {
+    const capabilities = withRow("transports.http", {
+      state: "protected",
+      mechanism: "core.onHttpRequest",
+      evidence: "tests/../README.md",
+    });
+    expect(errorOf(capabilities)).toContain("normalized file path");
+  });
+
+  it("rejects an absolute evidence path", () => {
+    const capabilities = withRow("transports.http", {
+      state: "protected",
+      mechanism: "core.onHttpRequest",
+      evidence: "/etc/hosts",
+    });
+    expect(errorOf(capabilities)).toContain("must be repository-relative");
+  });
+
+  it("rejects a path that exists but is not a file", () => {
+    const capabilities = withRow("transports.http", {
+      state: "protected",
+      mechanism: "core.onHttpRequest",
+      evidence: "tests",
+    });
+    expect(() => assertCapabilities(capabilities, { fileExists: () => true, isFile: () => false })).toThrow(
+      /is not a file/,
+    );
+  });
+
   it("rejects a not-present row without probe evidence", () => {
     const capabilities = withRow("transports.websocket", { state: "not-present", mechanism: "no WS in the host" });
     expect(errorOf(capabilities)).toContain("transports.websocket is not-present without an evidence path");
@@ -101,7 +139,7 @@ describe("capability declaration", () => {
 
   it("rejects a refused row with no runtime test or e2e record", () => {
     const capabilities = withRow("transports.nonFetch", { state: "refused", mechanism: "unsupported API" });
-    expect(errorOf(capabilities)).toContain("refused without a runtime test or evidence");
+    expect(errorOf(capabilities)).toContain("is refused without an evidence path");
   });
 
   it("rejects refused evidence that is only prose", () => {

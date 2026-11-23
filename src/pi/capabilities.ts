@@ -40,7 +40,7 @@ export const PI_CAPABILITIES: HostCapabilities = {
     replyDisplay: {
       state: "protected",
       mechanism: "the fetch wrapper restores placeholders in JSON and SSE replies attributed to a masked request",
-      evidence: "tests/pi-extension.test.ts",
+      evidence: "tests/pi-guard.test.ts",
     },
     background: {
       state: "protected",

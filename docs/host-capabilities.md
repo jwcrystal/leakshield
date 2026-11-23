@@ -77,7 +77,7 @@ This is what `leakshield --doctor` prints, generated from the adapter constants 
 | Host | Interception | HTTP | WebSocket | Non-fetch | Tool args | Reply | Background | Credentials |
 |---|---|---|---|---|---|---|---|---|
 | OpenCode | host hook | protected ¹ | protected ¹ ² | unknown (probe pending) | protected | protected | protected (payload hooks) | in-process |
-| Claude Code | proxy | protected (Anthropic) | not-present | outside (Bedrock/Vertex bypass the proxy) | unknown (not restored yet) | protected | unknown ³ | separated ⁴ |
+| Claude Code | proxy | protected (Anthropic) | unknown (no probe) | outside (Bedrock/Vertex bypass the proxy) | unknown (not restored yet) | protected | unknown ³ | separated ⁴ |
 | pi | fetch | protected | refused (Codex) | refused | protected | protected | protected (same fetch) | in-process |
 
 ¹ OpenCode's HTTP and WebSocket rows hold only in transparent mode with wire protection on (`wireProtection` omitted or `true`, the v2 default). The [hook-first configuration](plugin/wire-protection.md) sets `wireProtection: false`: LeakShield registers no outbound HTTP or WS send hooks, the doctor reports `PARTIAL`, and later-added content can leave unmasked. Transports are not uniform either: Commandcode's `/alpha/generate`, including its Go/403 fallback, is untouched with wire protection off and refused with it on.
@@ -93,6 +93,7 @@ This is what `leakshield --doctor` prints, generated from the adapter constants 
 Each one caps its host at `PARTIAL` and names the issue that would close it:
 
 - OpenCode `transports.nonFetch`: Bedrock, Vertex and SDK-internal transports are unaudited ([#110](https://github.com/jwcrystal/leakshield/issues/110)).
+- Claude Code `transports.websocket`: no WS traffic has been observed, but no transport-level probe has looked for it ([#113](https://github.com/jwcrystal/leakshield/issues/113)).
 - Claude Code `surfaces.toolArgs`: placeholders are not restored at tool execution ([#91](https://github.com/jwcrystal/leakshield/issues/91)).
 - Claude Code `surfaces.background`: compaction and summaries have no separate probe ([#111](https://github.com/jwcrystal/leakshield/issues/111)).
 

@@ -115,6 +115,8 @@ export interface CapabilityAudit {
   root?: string;
   /** Injectable for tests that declare synthetic evidence. */
   fileExists?(filePath: string): boolean;
+  /** Injectable alongside `fileExists`; a directory is not evidence. */
+  isFile?(filePath: string): boolean;
 }
 
 /** Where `refused` evidence may point: a runtime test or an end-to-end record. */
@@ -127,8 +129,27 @@ export function assertCapabilities(
   const host = capabilities.host;
   const root = audit.root ?? fileURLToPath(new URL("../../", import.meta.url));
   const fileExists = audit.fileExists ?? ((filePath: string) => fs.existsSync(path.resolve(root, filePath)));
+  const isFile = audit.isFile ?? ((filePath: string) => {
+    try {
+      return fs.statSync(path.resolve(root, filePath)).isFile();
+    } catch {
+      return false;
+    }
+  });
   const fail = (message: string): never => {
     throw new CapabilityInvariantError(host, message);
+  };
+
+  /** Evidence must be a normalized, repository-relative file, not a directory or a traversal. */
+  const requireEvidence = (row: CapabilityRow, evidence: string | undefined, label: string): string => {
+    const evidencePath = evidence ?? fail(`${row} is ${label} without an evidence path`);
+    if (path.isAbsolute(evidencePath)) fail(`${row} evidence must be repository-relative: ${evidencePath}`);
+    if (path.posix.normalize(evidencePath) !== evidencePath || evidencePath.endsWith("/")) {
+      fail(`${row} evidence must be a normalized file path: ${evidencePath}`);
+    }
+    if (!fileExists(evidencePath)) fail(`${row} evidence does not exist: ${evidencePath}`);
+    if (!isFile(evidencePath)) fail(`${row} evidence is not a file: ${evidencePath}`);
+    return evidencePath;
   };
 
   if (host.length === 0) fail("host is empty");
@@ -149,15 +170,12 @@ export function assertCapabilities(
     if (capability.mechanism.length === 0) fail(`${row} has no mechanism`);
 
     if (state === "protected" || state === "not-present") {
-      if (capability.evidence === undefined) fail(`${row} is ${state} without an evidence path`);
-      else if (!fileExists(capability.evidence)) fail(`${row} evidence does not exist: ${capability.evidence}`);
+      requireEvidence(row, capability.evidence, state);
     }
 
     if (state === "refused") {
-      const evidence = capability.evidence;
-      if (evidence === undefined) fail(`${row} is refused without a runtime test or evidence`);
-      else if (!fileExists(evidence)) fail(`${row} evidence does not exist: ${evidence}`);
-      else if (!RUNTIME_EVIDENCE.test(evidence)) {
+      const evidence = requireEvidence(row, capability.evidence, "refused");
+      if (!RUNTIME_EVIDENCE.test(evidence)) {
         fail(`${row} is refused but ${evidence} is not a runtime test or an e2e record`);
       }
     }

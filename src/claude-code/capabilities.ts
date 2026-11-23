@@ -5,8 +5,10 @@
  * ANTHROPIC_BASE_URL is masked regardless of why Claude Code sent it. Traffic
  * that never reaches the base URL (Bedrock, Vertex, Foundry, cloud sessions,
  * WebFetch's domain check) has no interception point: that is `outside`, and
- * the doctor warns about it. Tool-argument restoration does not exist yet, and
- * background requests have not been probed separately, so both stay `unknown`.
+ * the doctor warns about it. Tool-argument restoration does not exist yet,
+ * background requests and WebSocket traffic have no transport-level probe, so
+ * those rows stay `unknown` rather than claiming a coverage or an absence the
+ * evidence does not carry.
  */
 import type { HostCapabilities } from "../types/capabilities.js";
 
@@ -22,10 +24,9 @@ export const CLAUDE_CODE_CAPABILITIES: HostCapabilities = {
       note: "Anthropic Messages only. A body on another route is blocked, not forwarded.",
     },
     websocket: {
-      state: "not-present",
-      mechanism: "no WS endpoint at the base URL; the proxy answers only HTTP routes",
-      evidence: "docs/evidence/2026-11-21-claude-code-proxy.md",
-      note: "The recorded run reached the upstream with POST /v1/messages and HEAD /api/hello only.",
+      state: "unknown",
+      mechanism: "no WS traffic has been observed, but no transport-level probe has looked for it",
+      note: "The 2026-11-21 record covers one stub-backed HTTP scenario only and leaves interactive mode unverified (#113). Not claimed as not-present without a probe.",
     },
     nonFetch: {
       state: "outside",

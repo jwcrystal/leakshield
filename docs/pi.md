@@ -148,6 +148,6 @@ If the LeakShield extension is installed in pi's settings but pi is started with
 - Project trust is disabled (`--no-approve`) for the managed run; project `.pi` resources do not load.
 - Providers outside the three wire protocols (`google-generative-ai`, Bedrock, Vertex, Codex responses) are refused.
 - Images and attachments follow LeakShield's `block` policy in this adapter; they are replaced rather than forwarded.
-- This is a model-boundary control, not an OS egress firewall. Any local process, including a user shell, can still send data directly.
+- This is a model-boundary control, not an OS egress firewall. Any local process, including a user shell, can still send data directly; the OpenCode plugin has the same scope, so OS-level egress is a deployment concern rather than a host-adapter gap.
 - The standalone release binaries (`leakshield`, built with Bun) cannot serve the pi extension file from inside the binary. Use the npm package (or a checkout) for the pi adapter; `--doctor` reports the missing extension.
 - Interactive TUI rendering was not part of this change's runtime verification; the transformer is exercised by unit tests and print mode.

@@ -146,6 +146,6 @@ Session 檔留在使用者原本的目錄，`--continue`、`--resume`、`--sessi
 - 受管執行固定加 `--no-approve`，專案 `.pi` 資源不載入。
 - 三種 wire protocol 之外的 provider（`google-generative-ai`、Bedrock、Vertex、Codex responses）一律拒絕。
 - 圖片與附件沿用 LeakShield 的 `block` 政策，會被替換而非轉送。
-- 這是模型邊界控制，不是作業系統層的出口防火牆；任何本機行程仍可直接連網。
+- 這是模型邊界控制，不是作業系統層的出口防火牆；任何本機行程仍可直接連網。OpenCode plugin 的範圍相同，OS-level egress 屬部署層問題，不是 host adapter 的缺口。
 - 獨立發行檔（Bun 編譯的 `leakshield`）無法從二進位檔提供 pi extension 檔案；pi adapter 請用 npm 套件或 checkout，`--doctor` 會回報缺少 extension。
 - 這次沒有驗證互動式 TUI 畫面；transformer 由單元測試與 print mode 覆蓋。

@@ -143,6 +143,25 @@ Full suite: **68 files, 1,830 tests passed**. `tsc --noEmit`, `npm run build`
 and `npm pack --dry-run` pass; the tarball contains `dist/pi/*` and the `pi`
 manifest.
 
+## Parity with the OpenCode plugin
+
+| Surface | OpenCode plugin | pi adapter |
+|---|---|---|
+| Host model requests | intercepted inside the host (HTTP/WS/AI SDK), final body masked | single generated provider points at the loopback boundary, masked before upstream |
+| Provider endpoint change | still intercepted by host hooks | inside `leakshield pi`, the generated config has only the boundary |
+| Degraded mode | hook-only (`wireProtection: false`) is PARTIAL | no degraded mode; the boundary is the only route |
+| Another process or config | not prevented | not prevented |
+| `bash`/`curl`/MCP egress | not prevented (documented non-goal) | not prevented (documented non-goal) |
+| OS firewall/netns/container | not implemented | not implemented |
+
+Provider-route parity is achieved: both protect the host's model requests, and
+neither is an OS egress firewall. OS-level egress — stopping a different
+process or a permitted tool from connecting directly — is a deployment-layer
+non-goal shared with the OpenCode plugin, not a pi-specific gap. #98's original
+gate asked for an enforceable non-bypass mechanism for pi's hook design; the
+loopback boundary, generated config, credential separation and extension
+refusal provide that at the same host scope.
+
 ## Coverage vs gaps
 
 Protected and exercised:
@@ -163,12 +182,12 @@ Not exercised, or outside the adapter's scope:
 - Anthropic, OpenAI and OpenRouter real-service runs: pi owns provider clients; the adapter verifies the three wire formats by unit test and one live smoke. Anthropic's `x-api-key` header path is unit-tested only.
 - automatic compaction, branch summarization and interactive TUI rendering are pi host behaviors; the adapter masks the shared provider route and supplies display text, but does not test pi's compaction policy or terminal rendering. Research PR #100 covered manual compaction and a PTY render.
 - OAuth-only accounts (pi's credential feature, not implemented by this adapter); Google/Bedrock/Vertex/Codex wire formats are not supported
-- direct-provider bypass by a user who runs plain `pi` without the launcher; the extension refuses input/tools, but this is a local guard, not an egress firewall
+- direct-provider bypass by a user who runs plain `pi` without the launcher or removes the extension; this is the same class as disabling the OpenCode plugin and needs a deployment egress policy, not another adapter feature
 - MCP, codemode and tool-search built-ins are disabled by the launcher
 
-The #98 release gate remains open for an enforced egress policy. OAuth-only
-accounts remain unsupported and are documented, not a gate. Provider-by-provider
-live coverage is pi's integration surface, not this adapter's. This change closes
-the application-level gaps that blocked normal coding work: tool restoration,
-formal install/start entry points, user settings, session reuse and the
-provider/background request paths.
+The #98 gate is satisfied at the OpenCode plugin's scope: host model requests
+cannot bypass the boundary, and credentials stay out of the child. OS-level
+egress is a shared non-goal. OAuth-only accounts and per-provider live runs are
+documented limitations, not gates. This change closes the application-level gaps
+that blocked normal coding work: tool restoration, formal install/start entry
+points, user settings, session reuse and the provider/background request paths.

@@ -9,9 +9,9 @@
  * An invalid value refuses to load the extension instead of silently running
  * without the store the user asked for.
  */
-import { defaultStorePath } from "../decision/mapping-key.js";
-import type { GuardPersistenceOptions } from "../core/session-guard.js";
-import { PERSISTENCE_TTL_DEFAULT_DAYS, PERSISTENCE_TTL_MAX_DAYS } from "../plugin-options.js";
+import { defaultStorePath } from "../../decision/mapping-key.js";
+import type { GuardPersistenceOptions } from "../../core/session-guard.js";
+import { PERSISTENCE_TTL_DEFAULT_DAYS, PERSISTENCE_TTL_MAX_DAYS } from "../../guard-options.js";
 
 export const PI_PERSIST_ENV = "LEAKSHIELD_PI_PERSIST";
 export const PI_PERSIST_TTL_ENV = "LEAKSHIELD_PI_PERSIST_TTL_DAYS";

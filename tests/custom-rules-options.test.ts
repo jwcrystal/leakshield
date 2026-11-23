@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { GuardConfigSchema, loadConfigWithFingerprint } from "../src/config/loader.js";
-import { runDoctor, type DoctorDeps } from "../src/doctor.js";
+import { runDoctor, type DoctorDeps } from "../src/adapters/opencode/doctor.js";
 import { allowlistSuppressions, resetAllowlistSuppressionsForTests } from "../src/scanner/allowlist.js";
 import { scanText, redactText } from "../src/scanner/engine.js";
 import { customRuleBoundaries, customRuleFlags, customRulePattern, customRuleSource } from "../src/rules/dynamic.js";

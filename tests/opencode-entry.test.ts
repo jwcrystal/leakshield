@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import leakshieldPlugin, * as pluginModule from "../src/opencode.js";
+import leakshieldPlugin, * as pluginModule from "../src/adapters/opencode/plugin.js";
 
 const secret = "sk-12345678901234567890";
 const temporaryDirectories: string[] = [];

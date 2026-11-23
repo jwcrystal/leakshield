@@ -685,7 +685,9 @@ function forwardSerialized(request: Request, raw: string, serialized: string): R
   if (serialized === raw && !raw.includes("\uFFFD")) return request;
   const headers = new Headers(request.headers);
   headers.delete("content-encoding");
-  headers.set("content-length", String(byteLength(serialized)));
+  // Let fetch frame the replacement body. An explicit length can also be
+  // rejected when Node's fetch uses a newer host-installed dispatcher.
+  headers.delete("content-length");
   return new Request(request, { body: serialized, headers });
 }
 

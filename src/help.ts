@@ -38,7 +38,7 @@ Claude Code proxy options (then set ANTHROPIC_BASE_URL=http://127.0.0.1:<port>):
   --attachments block|allow      Refuse (default) or pass images/documents through unscanned
 
 pi (the LeakShield extension runs inside pi; see docs/pi.md):
-  Register node_modules/leakshield/dist/pi/extension.js as the first entry of
+  Register node_modules/leakshield/dist/adapters/pi/extension.js as the first entry of
   pi settings.extensions, or start pi with -e <path>. Check it with
   leakshield --doctor pi; LEAKSHIELD_CONFIG selects the guard config file.
 

@@ -10,9 +10,9 @@ pi builds its provider clients per request and resolves `fetch` at that point (`
 
 | Layer | Responsibility |
 |---|---|
-| `src/pi/guard.ts` | Wraps `globalThis.fetch`: masks provider requests, restores assistant text in the reply, passes unrelated fetch traffic through, refuses unknown routes and transports it cannot see |
-| `src/pi/extension.ts` | Binds the pi session and model, blocks input and tools when the model cannot be protected, restores tool arguments at `tool_call` |
-| `src/pi/tool-policy.ts` | pi's `HostToolPolicy`: read/write/edit/bash/powershell fields, unknown and MCP tools refused |
+| `src/adapters/pi/guard.ts` | Wraps `globalThis.fetch`: masks provider requests, restores assistant text in the reply, passes unrelated fetch traffic through, refuses unknown routes and transports it cannot see |
+| `src/adapters/pi/extension.ts` | Binds the pi session and model, blocks input and tools when the model cannot be protected, restores tool arguments at `tool_call` |
+| `src/adapters/pi/tool-policy.ts` | pi's `HostToolPolicy`: read/write/edit/bash/powershell fields, unknown and MCP tools refused |
 
 pi's own provider traffic is guarded wherever LeakShield sits in the load order: the SDKs resolve `fetch` per request. What position changes is other extensions: one loaded earlier that keeps the raw fetch (or a client built from it) reaches the provider unmasked. First position is therefore recommended, not required for pi itself, and the doctor reports when LeakShield is not first.
 
@@ -22,14 +22,14 @@ Add the extension to pi's `settings.json` (`~/.pi/agent/settings.json`). First p
 
 ```json
 {
-  "extensions": ["/absolute/path/to/node_modules/leakshield/dist/pi/extension.js"]
+  "extensions": ["/absolute/path/to/node_modules/leakshield/dist/adapters/pi/extension.js"]
 }
 ```
 
 Or start pi with the flag, which always loads before `settings.extensions`:
 
 ```bash
-pi -e /absolute/path/to/node_modules/leakshield/dist/pi/extension.js
+pi -e /absolute/path/to/node_modules/leakshield/dist/adapters/pi/extension.js
 ```
 
 The flag is the only setup that structurally guarantees first position, but `--doctor pi` cannot see CLI flags: it reports a `-e`-only install as NOT VERIFIED. Register the path in settings when you want the check to be meaningful.
@@ -39,7 +39,7 @@ From a checkout:
 ```bash
 npm ci
 npm run build
-pi -e "$PWD/dist/pi/extension.js"
+pi -e "$PWD/dist/adapters/pi/extension.js"
 ```
 
 Then check the setup:
@@ -50,7 +50,7 @@ leakshield --doctor pi
 
 `LEAKSHIELD_CONFIG` selects the guard config file, the same way `--config` does for the Claude Code proxy. Without it, the usual discovery applies (`config/guard.config.yaml` in the working directory, then `~/.leakshield/guard.config.yaml`).
 
-The extension needs Node.js 20 or later and a built LeakShield package. It is not served from the standalone Bun binaries; use the npm package or a checkout.
+The extension needs Node.js 22.19 or later (pi 1.6's minimum) and a built LeakShield package. It is not served from the standalone Bun binaries; use the npm package or a checkout.
 
 ## Provider support
 
@@ -152,6 +152,8 @@ With the store enabled, a later process can restore placeholders from earlier se
 `leakshield --doctor pi` checks only this section. It exits 0 with `PROTECTED` when LeakShield is the first entry of `settings.extensions` and no check failed, and with `PARTIAL` when it is registered later (pi's own requests are still guarded; an earlier extension's can bypass). A `-e`-only install cannot be seen and reports `NOT VERIFIED` with exit 1. `--doctor claude-code` and `--doctor opencode` do the same for the other hosts.
 
 ## Limitations
+
+The declared coverage, and the residuals that qualify it, are printed by `leakshield --doctor pi` and summarized in the [host capability matrix](host-capabilities.md); the bullets below are the operational consequences.
 
 - A `pi` run without the extension is not protected. Nothing can fail closed in a process that never loaded the guard.
 - `pi --no-extensions` disables it, as do `-ne` and a project that overrides settings. The doctor reports the settings state, not a running process.

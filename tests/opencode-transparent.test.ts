@@ -13,7 +13,7 @@
 
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { createTransparentSessionGuard } from "../src/opencode-transparent.js";
+import { createTransparentSessionGuard } from "../src/adapters/opencode/transparent.js";
 import { PSEUDONYM_TOKEN_PREFIX } from "../src/decision/pseudonymization.js";
 import type { GuardConfig } from "../src/types.js";
 
@@ -2057,9 +2057,7 @@ describe("transparent http.request wire mask", () => {
     expect(rebuilt.headers.get("x-trace")).toBe("trace-1");
     expect(rebuilt.headers.get("content-type")).toBe("application/json");
     expect(rebuilt.headers.get("content-encoding")).toBe(null);
-    expect(rebuilt.headers.get("content-length")).toBe(
-      String(new TextEncoder().encode(JSON.stringify(wire)).length),
-    );
+    expect(rebuilt.headers.get("content-length")).toBeNull();
   });
 
   it("retains the original request object when nothing changes", async () => {
@@ -3346,7 +3344,7 @@ describe("transparent standalone joiners in replayed tool history", () => {
 
 describe("attachment policy: allow", () => {
   it("schema rejects attachments allow outside transparent mode", async () => {
-    const { validatePluginOptions } = await import("../src/plugin-options.js");
+    const { validatePluginOptions } = await import("../src/guard-options.js");
     const bad = validatePluginOptions({ mode: "redact", attachments: "allow" });
     expect(bad.ok).toBe(false);
     if (!bad.ok) expect(bad.error).toContain('attachments "allow"');

@@ -27,7 +27,7 @@ if (piBinary === undefined) {
   console.error("usage: node scripts/e2e/run-pi-extension.mjs <pi-binary>");
   process.exit(2);
 }
-const extensionPath = path.join(root, "dist/pi/extension.js");
+const extensionPath = path.join(root, "dist/adapters/pi/extension.js");
 if (!fs.existsSync(extensionPath)) {
   console.error(`missing ${extensionPath}; run npm run build first`);
   process.exit(2);

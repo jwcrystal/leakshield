@@ -10,9 +10,9 @@ pi 每次請求才建立 provider client，並在當下解析 `fetch`（`options
 
 | 層 | 責任 |
 |---|---|
-| `src/pi/guard.ts` | 包住 `globalThis.fetch`：遮罩 provider 請求、在回覆中還原助理文字、讓無關的 fetch 流量直接通過、拒絕未知路由與看不到的傳輸 |
-| `src/pi/extension.ts` | 綁定 pi session 與模型；模型無法保護時擋下輸入與工具；在 `tool_call` 還原工具參數 |
-| `src/pi/tool-policy.ts` | pi 的 `HostToolPolicy`：read/write/edit/bash/powershell 欄位；未知與 MCP 工具一律拒絕 |
+| `src/adapters/pi/guard.ts` | 包住 `globalThis.fetch`：遮罩 provider 請求、在回覆中還原助理文字、讓無關的 fetch 流量直接通過、拒絕未知路由與看不到的傳輸 |
+| `src/adapters/pi/extension.ts` | 綁定 pi session 與模型；模型無法保護時擋下輸入與工具；在 `tool_call` 還原工具參數 |
+| `src/adapters/pi/tool-policy.ts` | pi 的 `HostToolPolicy`：read/write/edit/bash/powershell 欄位；未知與 MCP 工具一律拒絕 |
 
 pi 自己的 provider 流量不管 LeakShield 排在第幾個都會被守到：SDK 是每次請求才解析 `fetch`。順序影響的是其他 extension：比它早載入、且握有原始 fetch（或用它建立的 client）的 extension，送出的請求不會被遮罩。因此排第一是建議，不是 pi 本身的前提；不是第一個時 doctor 會回報。
 
@@ -22,14 +22,14 @@ pi 自己的 provider 流量不管 LeakShield 排在第幾個都會被守到：S
 
 ```json
 {
-  "extensions": ["/absolute/path/to/node_modules/leakshield/dist/pi/extension.js"]
+  "extensions": ["/absolute/path/to/node_modules/leakshield/dist/adapters/pi/extension.js"]
 }
 ```
 
 或用旗標啟動，`-e` 一定比 `settings.extensions` 先載入：
 
 ```bash
-pi -e /absolute/path/to/node_modules/leakshield/dist/pi/extension.js
+pi -e /absolute/path/to/node_modules/leakshield/dist/adapters/pi/extension.js
 ```
 
 這是唯一在結構上保證排第一的安裝方式，但 `--doctor pi` 看不到 CLI 旗標：只用 `-e` 時會回報 NOT VERIFIED。要讓檢查有意義，就把路徑註冊進 settings。
@@ -39,7 +39,7 @@ pi -e /absolute/path/to/node_modules/leakshield/dist/pi/extension.js
 ```bash
 npm ci
 npm run build
-pi -e "$PWD/dist/pi/extension.js"
+pi -e "$PWD/dist/adapters/pi/extension.js"
 ```
 
 然後檢查設定：
@@ -50,7 +50,7 @@ leakshield --doctor pi
 
 `LEAKSHIELD_CONFIG` 指定 guard 設定檔，跟 Claude Code proxy 的 `--config` 一樣。沒設定時照一般搜尋順序（工作目錄的 `config/guard.config.yaml`，再找 `~/.leakshield/guard.config.yaml`）。
 
-extension 需要 Node.js 20 以上與已建置的 LeakShield 套件。Bun 打包的單檔執行檔不提供這個檔案；請用 npm 套件或 checkout。
+extension 需要 Node.js 22.19 以上（pi 1.6 的最低版本）與已建置的 LeakShield 套件。Bun 打包的單檔執行檔不提供這個檔案；請用 npm 套件或 checkout。
 
 ## Provider 支援
 
@@ -152,6 +152,8 @@ mapping 預設只在行程存活期間有效：resume 後的舊 placeholder 維�
 `leakshield --doctor pi` 只檢查這個區段。LeakShield 是 `settings.extensions` 第一項且沒有失敗檢查時 exit 0、回報 `PROTECTED`；排後面時 exit 0、回報 `PARTIAL`（pi 自己的請求仍受保護，先載入的 extension 可以繞過）。只用 `-e` 時 doctor 看不到，回報 `NOT VERIFIED`、exit 1。`--doctor claude-code` 與 `--doctor opencode` 對其他 host 做同樣的事。
 
 ## 限制
+
+宣告的覆蓋範圍（含限定它的 residuals）由 `leakshield --doctor pi` 印出，總表在[host capability matrix](host-capabilities.md)；下列各點是操作上的後果。
 
 - 沒載入 extension 的 `pi` 不受保護。沒載入 guard 的行程無法 fail closed。
 - `pi --no-extensions`、`-ne` 或專案覆寫設定都會停用它。doctor 回報的是設定狀態，不是執行中的行程。

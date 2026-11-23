@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { opencodeToolPolicy } from "../src/opencode-tool-policy.js";
+import { opencodeToolPolicy } from "../src/adapters/opencode/tool-policy.js";
 
 const p = opencodeToolPolicy;
 describe("OpenCode tool policy injection", () => {

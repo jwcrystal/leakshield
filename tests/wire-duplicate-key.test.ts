@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { createTransparentSessionGuard } from "../src/opencode-transparent.js";
+import { createTransparentSessionGuard } from "../src/adapters/opencode/transparent.js";
 import { PSEUDONYM_TOKEN_PREFIX_V2 } from "../src/decision/pseudonymization.js";
 import type { GuardConfig } from "../src/types.js";
 
@@ -144,7 +144,7 @@ describe.each(routes)("$name remasker forwards the scanned value", (route) => {
     const { event, original, forwarded } = await send(hook, route.url, pretty);
     expect(event.request).not.toBe(original);
     expect(forwarded).toBe(route.single("hello"));
-    expect((event.request as Request).headers.get("content-length")).toBe(String(new TextEncoder().encode(forwarded).length));
+    expect((event.request as Request).headers.get("content-length")).toBeNull();
   });
 
   it("rebuilds an unchanged body whose bytes are not valid UTF-8", async () => {

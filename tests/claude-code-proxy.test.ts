@@ -1,10 +1,10 @@
-// Component under test: the Claude Code proxy adapter (src/claude-code/proxy.ts).
+// Component under test: the Claude Code proxy adapter (src/adapters/claude-code/proxy.ts).
 // The upstream is a fake fetch (or, in the last block, a loopback HTTP
 // server) that records exactly what would have reached Anthropic.
 import { createServer, type Server } from "node:http";
 import { connect as netConnect, type AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { createClaudeCodeProxy, parseUpstream, startClaudeCodeProxy, HEALTH_PATH } from "../src/claude-code/proxy.js";
+import { createClaudeCodeProxy, parseUpstream, startClaudeCodeProxy, HEALTH_PATH } from "../src/adapters/claude-code/proxy.js";
 import { loadConfig } from "../src/config/loader.js";
 import { PSEUDONYM_TOKEN_PREFIX_V2 } from "../src/decision/pseudonymization.js";
 

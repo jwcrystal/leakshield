@@ -24,38 +24,16 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadConfig } from "./config/loader.js";
-import { defaultKeyfilePath, defaultStorePath } from "./decision/mapping-key.js";
-import { InMemoryMappingKeyProvider, openMappingStore } from "./decision/mapping-store.js";
-import { validatePluginOptions, type PluginOptions } from "./plugin-options.js";
-import { BUILTIN_RULE_IDS } from "./rules/builtin.js";
-import { skippedCustomRules, customRuleBoundaries } from "./rules/dynamic.js";
-import { allowlistSuppressions } from "./scanner/allowlist.js";
-import { scanText } from "./scanner/engine.js";
-import type { GuardConfig } from "./types.js";
-
-export type DoctorStatus = "PROTECTED" | "PARTIAL" | "BROKEN" | "NOT_REGISTERED" | "HOST_MISSING";
-
-export interface DoctorCheck {
-  id: string;
-  state: "ok" | "warn" | "fail" | "skip";
-  detail: string;
-  fix?: string;
-}
-
-export interface DoctorReport {
-  status: DoctorStatus;
-  hostVersion: string | null;
-  hostGeneration: "v1" | "v2" | null;
-  configPath: string | null;
-  checks: DoctorCheck[];
-  /** Copy-paste registration snippet for the OpenCode v2 config. */
-  snippet?: string;
-  /** Claude Code proxy checks; reported separately from the OpenCode status. */
-  claudeCode?: DoctorCheck[];
-  /** pi adapter checks; reported separately from the OpenCode status. */
-  pi?: DoctorCheck[];
-}
+import { loadConfig } from "../../config/loader.js";
+import { defaultKeyfilePath, defaultStorePath } from "../../decision/mapping-key.js";
+import { InMemoryMappingKeyProvider, openMappingStore } from "../../decision/mapping-store.js";
+import { validatePluginOptions, type PluginOptions } from "../../guard-options.js";
+import type { DoctorCheck, DoctorReport, DoctorStatus } from "../../doctor-report.js";
+import { BUILTIN_RULE_IDS } from "../../rules/builtin.js";
+import { skippedCustomRules, customRuleBoundaries } from "../../rules/dynamic.js";
+import { allowlistSuppressions } from "../../scanner/allowlist.js";
+import { scanText } from "../../scanner/engine.js";
+import type { GuardConfig } from "../../types.js";
 
 export interface DoctorDeps {
   opencodeVersion(): string | null;
@@ -731,6 +709,9 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     candidate.mode === "transparent" ? (candidate.wireProtection === false ? 0 : 1) : 2;
   const weakest = [...validated].sort((a, b) => weakness(a.options) - weakness(b.options))[0]!;
   const options = weakest.options;
+  const wireProtection: NonNullable<DoctorReport["wireProtection"]> = options.mode !== "transparent"
+    ? "not-applicable"
+    : options.wireProtection === false ? "disabled" : "enabled";
   // Attachments are reported conservatively too: any transparent entry that
   // lets them through unscanned outranks a stricter tied entry (#67).
   if (
@@ -768,7 +749,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
         detail: `Guard config failed to load${guardPath ? ` for ${guardPath}` : ""}: ${(error as Error).message}`,
         fix: "Fix the config file, or remove configPath to use defaults.",
       });
-      return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
+      return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks, wireProtection };
     }
   }
   if (!guardConfig) {
@@ -778,7 +759,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       detail: "Guard config did not load for the entry that decides the verdict.",
       fix: "Rerun the doctor; if it repeats, report the configuration.",
     });
-    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
+    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks, wireProtection };
   }
   checks.push({
     id: "guard-config",
@@ -942,13 +923,13 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       detail: `Synthetic sk- canary NOT detected${smokeFailures[0]!.path ? ` under ${smokeFailures[0]!.path}` : ""} — that guard config disables the rules this install relies on.`,
       fix: "Restore credential rules in the guard config, or remove configPath to use defaults.",
     });
-    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
+    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks, wireProtection };
   }
 
   // A failed check must not still read as PARTIAL or PROTECTED: an allowlist
   // failure is a "do not trust this install" signal, like a missing canary.
   if (checks.some((check) => check.state === "fail")) {
-    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
+    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks, wireProtection };
   }
 
   if (options.mode === "transparent") {
@@ -965,78 +946,5 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     detail: "Install-level checks pass. Live-session proof: run the README smoke test or scripts/e2e/run-boundary.mjs.",
   });
 
-  return { status: options.mode === "transparent" && options.wireProtection === false ? "PARTIAL" : "PROTECTED", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
-}
-
-export function formatDoctorReport(report: DoctorReport): string {
-  const icon = { ok: "[OK]  ", warn: "[WARN]", fail: "[FAIL]", skip: "[SKIP]" } as const;
-  const lines: string[] = [];
-  lines.push(`leakshield doctor — ${new Date().toISOString()}`);
-  for (const check of report.checks) {
-    lines.push(`${icon[check.state]} ${check.id}: ${check.detail}`);
-    if (check.fix) lines.push(`       fix: ${check.fix}`);
-  }
-  if (report.snippet) {
-    lines.push("");
-    lines.push("Registration snippet for your opencode.json:");
-    lines.push(report.snippet);
-  }
-  lines.push("");
-  const verdict =
-    report.status === "PROTECTED"
-      ? "PROTECTED — install-level checks pass."
-      : report.status === "PARTIAL"
-        ? "PARTIAL — hook-first protection; final outbound HTTP bodies are not inspected."
-        : report.status === "BROKEN"
-          ? "BROKEN — registered but would not protect; fix the [FAIL] items above."
-          : report.status === "NOT_REGISTERED"
-            ? "NOT REGISTERED — LeakShield is not in the OpenCode config; sessions are unprotected."
-            : "HOST MISSING — no OpenCode binary found.";
-  lines.push(verdict);
-  if (report.claudeCode && report.claudeCode.length > 0) {
-    lines.push("");
-    lines.push("Claude Code:");
-    for (const check of report.claudeCode) {
-      lines.push(`${icon[check.state]} ${check.id}: ${check.detail}`);
-      if (check.fix) lines.push(`       fix: ${check.fix}`);
-    }
-  }
-  if (report.pi && report.pi.length > 0) {
-    lines.push("");
-    lines.push("pi:");
-    for (const check of report.pi) {
-      lines.push(`${icon[check.state]} ${check.id}: ${check.detail}`);
-      if (check.fix) lines.push(`       fix: ${check.fix}`);
-    }
-  }
-  lines.push("");
-  lines.push("Scope: model-conversation leak protection. This is NOT a tool-egress firewall: permitted local tools (curl, remote MCP, …) can still transmit originals. See README.");
-  return lines.join("\n");
-}
-
-/**
- * The OpenCode status decides as before. Only when OpenCode is absent
- * (HOST_MISSING) can Claude Code or an installed pi extension make the run
- * pass, unless a provider or host setting bypasses it; a failed Claude Code
- * check still fails it. A pi failure only decides the run when OpenCode is
- * absent, so a broken ~/.pi never fails a protected OpenCode run.
- */
-export function doctorExitCode(report: DoctorReport): number {
-  const claudeCode = report.claudeCode ?? [];
-  const pi = report.pi ?? [];
-  if (claudeCode.some((check) => check.state === "fail")) return 1;
-  // pi checks are supplementary: a broken ~/.pi must not fail an otherwise
-  // protected OpenCode run. They decide the run only when OpenCode is absent.
-  if (pi.some((check) => check.state === "fail") && report.status === "HOST_MISSING") return 1;
-  if (report.status === "PROTECTED" || report.status === "PARTIAL") return 0;
-  if (report.status !== "HOST_MISSING") return 1;
-  // A bypassing provider or host-managed endpoint means requests may not reach
-  // the proxy even though it answers at the configured base URL.
-  const bypassed = claudeCode.some((check) => check.id === "claude-code-provider" || check.id === "claude-code-host-managed");
-  if (bypassed) return 1;
-  const claudeCodeProtected = claudeCode.some((check) => check.id === "claude-code-proxy" && check.state === "ok");
-  const piProtected = pi.some((check) =>
-    check.id === "pi-extension-registered" && (check.state === "ok" || check.state === "warn"))
-    && !pi.some((check) => check.state === "fail");
-  return claudeCodeProtected || piProtected ? 0 : 1;
+  return { status: options.mode === "transparent" && options.wireProtection === false ? "PARTIAL" : "PROTECTED", hostVersion: host.version, hostGeneration: host.generation, configPath, checks, wireProtection };
 }

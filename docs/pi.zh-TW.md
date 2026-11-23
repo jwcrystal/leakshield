@@ -127,7 +127,7 @@ mapping 只在行程內。續用舊 session 時舊 placeholder 保持字面；�
 - 直接跑 `pi` 會連到真實 provider 端點時的警告
 - 目前 shell 是否在受管啟動中，並探測邊界健康狀態
 
-`leakshield --doctor pi` 只檢查這一段，且只有在此 shell 是受管啟動、沒有失敗檢查時才 exit 0。`--doctor claude-code` 與 `--doctor opencode` 同理，CI 可以只檢查單一整合，不受其他 host 狀態影響。請用 `--doctor pi`，不要用 `leakshield pi --doctor`，那會把 flag 傳給 pi。
+`leakshield --doctor pi` 只檢查這一段，且只有在此 shell 是受管啟動、沒有失敗檢查時才 exit 0。`--doctor claude-code` 與 `--doctor opencode` 同理，CI 可以只檢查單一整合，不受其他 host 狀態影響。請用 `--doctor pi`；`leakshield pi` 需要 `--provider`，其餘參數會當成 pi 的參數，所以 `leakshield pi --doctor` 不會執行 doctor。
 
 ## 限制
 

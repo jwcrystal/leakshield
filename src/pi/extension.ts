@@ -54,12 +54,6 @@ function guardConfig(): GuardConfig {
   return { ...config, settings: { ...config.settings, encoding_detection: true } };
 }
 
-function modelOf(model: PiGuardModel | undefined): PiGuardModel | null {
-  if (model === undefined) return null;
-  const { api, provider, id, baseUrl } = model;
-  return { api, provider, id, baseUrl };
-}
-
 function notice(ctx: PiContext | undefined, message: string): void {
   if (ctx?.ui) ctx.ui.notify(message, "error");
   else console.error(`[${PI_EXTENSION_ID}] ${message}`);
@@ -91,7 +85,7 @@ export default function leakshieldPiExtension(pi: PiExtensionApi): void {
   };
 
   const applyModel = (model: PiGuardModel | undefined, ctx: PiContext | undefined): void => {
-    guard.setModel(modelOf(model));
+    guard.setModel(model ?? null);
     refusal = guard.refusal;
     if (refusal === null) announced = null;
     else announce(ctx, refusal);
@@ -119,8 +113,11 @@ export default function leakshieldPiExtension(pi: PiExtensionApi): void {
   };
 
   pi.on("input", (_event, ctx) => {
-    // Extension-authored input is refused too: it can start a model request on
-    // an API the guard cannot see, which would transmit the prompt unmasked.
+    // Re-read the model here too: this is the last hook before a run starts,
+    // and `before_agent_start` cannot cancel one. Extension-authored input is
+    // refused as well, because it can start a request on an API the guard
+    // cannot see.
+    applyModel(ctx.model, ctx);
     if (refusal === null) return { action: "continue" };
     announce(ctx, refusal);
     return { action: "handled" };

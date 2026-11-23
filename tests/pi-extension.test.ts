@@ -171,6 +171,16 @@ describe("pi extension", () => {
     expect(await pi.emit("session_before_tree", {}, supported)).toBeUndefined();
   });
 
+  it("re-reads the model on input before a run starts", async () => {
+    const notices: string[] = [];
+    const pi = fakePi();
+    leakshieldPiExtension(pi.api);
+    await pi.emit("session_start", {}, context(notices));
+    expect(await pi.emit("input", { source: "interactive" }, context(notices))).toEqual({ action: "continue" });
+    const switched = context(notices, { api: "bedrock-converse-stream" });
+    expect(await pi.emit("input", { source: "interactive" }, switched)).toEqual({ action: "handled" });
+  });
+
   it("re-reads the model at agent start", async () => {
     const notices: string[] = [];
     const pi = fakePi();
@@ -178,7 +188,8 @@ describe("pi extension", () => {
     await pi.emit("session_start", {}, context(notices));
     await pi.emit("before_agent_start", {}, context(notices, { api: "bedrock-converse-stream" }));
     expect(state.model?.api).toBe("bedrock-converse-stream");
-    expect(await pi.emit("input", { source: "interactive" }, context(notices))).toEqual({ action: "handled" });
+    const refused = context(notices, { api: "bedrock-converse-stream" });
+    expect(await pi.emit("input", { source: "interactive" }, refused)).toEqual({ action: "handled" });
   });
 
   it("reattaches the model on model_select and clears the refusal", async () => {

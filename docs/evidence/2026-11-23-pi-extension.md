@@ -36,8 +36,9 @@ credential and session directory.
 ### Wire formats
 
 A model-shaped `POST` on an unexpected origin is masked too (unit test), so a
-missed model switch cannot fail open; network errors and aborts propagate
-unchanged instead of becoming a guard refusal.
+missed model switch cannot fail open; a masking failure is refused by the
+wrapper (unit test); network errors and aborts propagate unchanged instead of
+becoming a guard refusal.
 
 Real pi process, print mode, one prompt per format:
 
@@ -101,7 +102,7 @@ triggered at runtime (`/tree` has no RPC command). See the gap audit.
 
 ### Build and tests
 
-- `npx vitest run`: 68 files, 1,825 tests pass.
+- `npx vitest run`: 68 files, 1,827 tests pass.
 - `npx tsc --noEmit`, `npm run build`, `npm pack --dry-run`.
 
 ## What this does not prove

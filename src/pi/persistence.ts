@@ -11,6 +11,7 @@
  */
 import { defaultStorePath } from "../decision/mapping-key.js";
 import type { GuardPersistenceOptions } from "../core/session-guard.js";
+import { PERSISTENCE_TTL_DEFAULT_DAYS, PERSISTENCE_TTL_MAX_DAYS } from "../plugin-options.js";
 
 export const PI_PERSIST_ENV = "LEAKSHIELD_PI_PERSIST";
 export const PI_PERSIST_TTL_ENV = "LEAKSHIELD_PI_PERSIST_TTL_DAYS";
@@ -18,8 +19,8 @@ export const PI_PERSIST_PATH_ENV = "LEAKSHIELD_PI_PERSIST_PATH";
 export const PI_PERSIST_KEYFILE_ENV = "LEAKSHIELD_PI_PERSIST_KEYFILE";
 export const PI_PERSIST_KEYFILE_PATH_ENV = "LEAKSHIELD_PI_PERSIST_KEYFILE_PATH";
 
-export const DEFAULT_PERSIST_TTL_DAYS = 7;
-export const MAX_PERSIST_TTL_DAYS = 3650;
+export const DEFAULT_PERSIST_TTL_DAYS = PERSISTENCE_TTL_DEFAULT_DAYS;
+export const MAX_PERSIST_TTL_DAYS = PERSISTENCE_TTL_MAX_DAYS;
 
 const TRUE_VALUES: ReadonlySet<string> = new Set(["1", "true", "yes", "on"]);
 const FALSE_VALUES: ReadonlySet<string> = new Set(["0", "false", "no", "off"]);

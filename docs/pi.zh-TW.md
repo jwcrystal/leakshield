@@ -88,6 +88,7 @@ pi 保留自己的憑證與設定。extension 跑在 pi 行程內，所以不像
 - 所選模型 origin 上的每個 provider 請求：system prompt、對話歷史、工具結果與摘要請求。自動 compaction 已用真實 pi 1.6.0 跑過；branch summarization 走同一個 `completeSummarization`，由同一條傳輸涵蓋。
 - 手動 compaction（`/compact`、RPC `compact`）與 `/tree` 分支摘要，在模型無法保護時會直接取消：它們不會經過 `input` 或 `before_agent_start`，光靠 fetch guard 擋不住不經 fetch 的傳輸。
 - 模型形狀的 `POST` 不論送往哪個 origin 都會遮罩，不只看目前模型的 origin，所以漏掉或跳過的換模型事件不會 fail open。provider origin 上的其他路由另外分類：未知的 `POST` 一律拒絕。
+- 非模型路徑、且不是 provider host 的 `POST`（例如某個 extension 呼叫 Google 的 `:generateContent`）會直接通過。路由分類只涵蓋三種支援的 API，那個端點也不是目前選定的模型；它和一般非 provider 流量一樣在這個 adapter 的範圍外。
 - 送往 provider origin、但 guard 無法分類的 `POST` 會被拒絕。遮罩失敗、沒有 session、API 不支援、core 建不起來時也一樣。唯讀的 `GET`/`HEAD`（模型目錄、查詢回覆）直接通過：它們不帶對話內容，拒絕會弄壞 OpenRouter、Copilot 這類 provider 的目錄功能。
 - 回覆中的助理文字會還原供顯示。pi 收到什麼就存什麼，下一個請求會再遮罩一次。
 - 工具參數在執行時還原：
@@ -156,7 +157,7 @@ mapping 預設只在行程存活期間有效：resume 後的舊 placeholder 維�
 - `pi --no-extensions`、`-ne` 或專案覆寫設定都會停用它。doctor 回報的是設定狀態，不是執行中的行程。
 - pi 自己的請求不管載入順序都會被守到。比 LeakShield 先載入的 extension 可能握有原始 fetch（或用它建立的 client），送出的請求不會被遮罩；比它晚載入的會看到 guard。把 LeakShield 排第一就排除前一種情況。
 - 三種 wire API 以外的 provider 一律拒絕，不嘗試保護。
-- 換模型會在 `model_select` 套用，並在每次 `before_agent_start` 重新讀取；即使某條路徑跳過事件，下一個請求仍會套用新模型。
+- 換模型會在 `model_select` 套用，`before_agent_start` 再讀一次，`input`（run 開始前的最後一個 hook）再讀一次。`before_agent_start` 不能取消 run，所以如果某條路徑三個事件都沒觸發，就只能靠請求當下的 fetch guard；不支援的 API 一旦知道模型就拒絕，而這樣漏掉、又屬於非 fetch 傳輸的請求無法取消。
 - 圖片與附件在此 adapter 採 LeakShield 的 `block` 政策，會被替換而不是轉送。
 - 這是模型邊界控制，不是 OS 出口防火牆。任何本機行程（包含使用者 shell）仍可直接送出資料；OpenCode plugin 的範圍相同，OS 層出口屬於部署問題，不是 host adapter 的缺口。
 - 互動式 TUI 顯示不在這次實機驗證範圍；print mode 與 wire 腳本已涵蓋傳輸。

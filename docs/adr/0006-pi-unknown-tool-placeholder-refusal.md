@@ -30,6 +30,6 @@ Issue #98 也明確要求：「Unknown executable tools must refuse placeholders
 
 ## Consequences
 
-- MCP、codemode、自訂工具在受管模式中含 placeholder 會被拒絕；不含 placeholder 則可使用（codemode 仍被啟動器的 `--no-extensions` 停用）。
+- MCP、codemode、自訂工具含 placeholder 會被拒絕；不含 placeholder 則可使用。
 - 這是 pi adapter 比 OpenCode 更嚴的地方，差異記錄在 `docs/pi.md`。
 - ADR-0001 對 OpenCode 仍然有效；本 ADR 只覆寫 pi adapter 的未知工具行為。

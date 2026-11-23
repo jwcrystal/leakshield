@@ -159,6 +159,27 @@ describe("pi fetch guard", () => {
     expect(seen).toHaveLength(0);
   });
 
+  it("refuses a provider request when masking fails", async () => {
+    const seen: string[] = [];
+    const guard = createPiGuard({
+      config,
+      fetchImpl: echoFetch(seen),
+      createCore: (() => ({
+        onHttpRequest: async () => {
+          throw new Error("LeakShield mask failed");
+        },
+        onHttpResponse: async () => {},
+        onToolBefore: () => {},
+      })) as unknown as typeof createGuardCore,
+    });
+    guard.setSession(SESSION);
+    guard.setModel(model());
+    const response = await guard.handle(providerRequest({ model: "stub-model", messages: [{ role: "user", content: SECRET }] }));
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("LeakShield mask failed");
+    expect(seen).toHaveLength(0);
+  });
+
   it("restores tool arguments and refuses unknown tools", async () => {
     const seen: string[] = [];
     const guard = ready(seen);

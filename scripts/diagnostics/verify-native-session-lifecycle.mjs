@@ -28,7 +28,7 @@ const env = {
   OPENCODE_SERVER_PASSWORD: password, OPENCODE_PASSWORD: password,
 };
 const hash = (file) => createHash("sha256").update(readFileSync(file)).digest("hex");
-const compiledHash = hash(path.join(root, "dist/opencode-transparent.js"));
+const compiledHash = hash(path.join(root, "dist/adapters/opencode/opencode-transparent.js"));
 const server = spawn(bin, ["serve", "--hostname", "127.0.0.1", "--port", "0"], { cwd: directory, env, stdio: ["ignore", "pipe", "pipe"] });
 let serverText = "";
 let serverURL;
@@ -86,7 +86,7 @@ try {
     });
   }
   summary.privateServerStopped = server.exitCode !== null || server.signalCode !== null;
-  summary.compiledGuardUnchanged = hash(path.join(root, "dist/opencode-transparent.js")) === compiledHash;
+  summary.compiledGuardUnchanged = hash(path.join(root, "dist/adapters/opencode/opencode-transparent.js")) === compiledHash;
   summary.passed = summary.passed && summary.privateServerStopped && summary.compiledGuardUnchanged;
   writeFileSync(path.join(directory, "summary.json"), JSON.stringify(summary, null, 2), { mode: 0o600 });
 }

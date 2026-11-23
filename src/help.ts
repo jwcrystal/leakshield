@@ -5,7 +5,9 @@ export const HELP_TEXT = `leakshield — scan text for secrets and PII before se
 Usage:
   leakshield [--cli] [scan options]   Scan text, a file, a directory or stdin
   leakshield --web [--port <n>]       Start the local Web UI (default port 3000)
-  leakshield --doctor                 Check the OpenCode plugin and the Claude Code proxy setup
+  leakshield --doctor [host]          Check one host (opencode, claude-code, pi) or all;
+                                      use --doctor pi, not pi --doctor
+  leakshield --doctor=<host>          Same target, inline form
   leakshield --claude-code-proxy      Start the local proxy for Claude Code (see below)
   leakshield --forget --all           Delete all persisted transparent-mode mappings
   leakshield --forget --session <id>  Delete persisted mappings for one session
@@ -34,6 +36,11 @@ Claude Code proxy options (then set ANTHROPIC_BASE_URL=http://127.0.0.1:<port>):
   --upstream <url>               Anthropic API base URL (default https://api.anthropic.com)
   --config <path>                LeakShield config file (default: discovered from the working directory)
   --attachments block|allow      Refuse (default) or pass images/documents through unscanned
+
+pi (the LeakShield extension runs inside pi; see docs/pi.md):
+  Register node_modules/leakshield/dist/pi/extension.js as the first entry of
+  pi settings.extensions, or start pi with -e <path>. Check it with
+  leakshield --doctor pi; LEAKSHIELD_CONFIG selects the guard config file.
 
 Forget options:
   --path <file>                  Mapping store location (default: ~/.local/share/leakshield/SGP.db)

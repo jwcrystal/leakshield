@@ -32,6 +32,8 @@ import { BUILTIN_RULE_IDS } from "./rules/builtin.js";
 import { skippedCustomRules, customRuleBoundaries } from "./rules/dynamic.js";
 import { allowlistSuppressions } from "./scanner/allowlist.js";
 import { scanText } from "./scanner/engine.js";
+import { capabilityCapText, capabilitySection } from "./doctor-capabilities.js";
+import type { HostCapabilities } from "./types/capabilities.js";
 import type { GuardConfig } from "./types.js";
 
 export type DoctorStatus = "PROTECTED" | "PARTIAL" | "BROKEN" | "NOT_REGISTERED" | "HOST_MISSING";
@@ -55,6 +57,12 @@ export interface DoctorReport {
   claudeCode?: DoctorCheck[];
   /** pi adapter checks; reported separately from the OpenCode status. */
   pi?: DoctorCheck[];
+  /** OpenCode's declared coverage, printed under the checks. */
+  capabilities?: HostCapabilities;
+  /** Claude Code's declared coverage, printed with its checks. */
+  claudeCodeCapabilities?: HostCapabilities;
+  /** pi's declared coverage, printed with its checks. */
+  piCapabilities?: HostCapabilities;
 }
 
 export interface DoctorDeps {
@@ -981,10 +989,17 @@ export function formatDoctorReport(report: DoctorReport): string {
     lines.push("Registration snippet for your opencode.json:");
     lines.push(report.snippet);
   }
+  const capText = report.capabilities ? capabilityCapText(report.capabilities) : null;
+  if (report.capabilities) {
+    lines.push("");
+    lines.push(...capabilitySection(report.capabilities));
+  }
   lines.push("");
   const verdict =
     report.status === "PROTECTED"
-      ? "PROTECTED — install-level checks pass."
+      ? capText === null
+        ? "PROTECTED — install-level checks pass."
+        : `PARTIAL — install-level checks pass, but ${capText}; see Host capabilities above.`
       : report.status === "PARTIAL"
         ? "PARTIAL — hook-first protection; final outbound HTTP bodies are not inspected."
         : report.status === "BROKEN"
@@ -1000,6 +1015,10 @@ export function formatDoctorReport(report: DoctorReport): string {
       lines.push(`${icon[check.state]} ${check.id}: ${check.detail}`);
       if (check.fix) lines.push(`       fix: ${check.fix}`);
     }
+    if (report.claudeCodeCapabilities) {
+      lines.push("");
+      lines.push(...capabilitySection(report.claudeCodeCapabilities));
+    }
   }
   if (report.pi && report.pi.length > 0) {
     lines.push("");
@@ -1007,6 +1026,10 @@ export function formatDoctorReport(report: DoctorReport): string {
     for (const check of report.pi) {
       lines.push(`${icon[check.state]} ${check.id}: ${check.detail}`);
       if (check.fix) lines.push(`       fix: ${check.fix}`);
+    }
+    if (report.piCapabilities) {
+      lines.push("");
+      lines.push(...capabilitySection(report.piCapabilities));
     }
   }
   lines.push("");

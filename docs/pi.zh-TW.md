@@ -97,6 +97,26 @@ pi 保留自己的憑證與設定。extension 跑在 pi 行程內，所以不像
   - shell 還原範圍與 OpenCode plugin 相同：placeholder 可以是完整未加引號的參數、整詞加引號的參數、`curl`/`http` 內嵌的值，或單一結尾 `>`/`>>` 配固定檔名之前。管線、命令串接、展開、`<`/`2>` 重導向與被 token 化的重導向目標都會拒絕。沒有 placeholder 的命令不受影響。
   - 未知、MCP 與自訂工具：帶著 placeholder 就拒絕。它們的參數可能被轉送到這個 session mapping 之外的遠端服務。
 
+## 與 OpenCode plugin 的一致性
+
+兩個 adapter 實作同一份保護契約，只有 host hook 與它的涵蓋範圍不同。
+
+共同的契約：
+
+- 三種支援的 wire API 上，模型請求在行程內先遮罩才送出；遮罩失敗或請求形狀無法辨識時拒絕，不轉送；
+- 回覆中的助理文字還原供顯示；工具參數只在實際執行邊界還原；
+- 未知、MCP、自訂工具的 placeholder 一律拒絕該次呼叫；
+- adapter 看不到的傳輸在選模型時就拒絕；
+- 憑證留在 host 行程；兩邊都沒有把它跟 host 隔離；
+- mapping 持久化是選用，使用同一個加密 store 與同一套金鑰取得順序。
+
+屬於 host 實作、不算契約差異的：
+
+- 攔截面：OpenCode 用 host 的 wire hook，pi 換掉 `globalThis.fetch`。fetch 包裝額外看得到工具或 extension 呼叫模型 URL，所以 pi 可能更嚴；pi 自己的 provider 流量不會少看。
+- 唯讀 `GET`/`HEAD`（模型目錄）在 pi 直接放行；OpenCode 的 hook 不會收到這種請求。
+- pi 拒絕 Codex 的 WebSocket 傳輸；OpenCode 有 WebSocket frame adapter。
+- pi 的載入順序會影響其他 extension；OpenCode 的 host hook 不依賴 plugin 順序。
+
 ## Session 與持久化
 
 session 檔留在 pi 原本的位置，`--continue`、`--resume`、`--session` 與 `/tree` 照常可用。

@@ -97,6 +97,26 @@ pi keeps its own credential and configuration. The extension runs inside the pi 
   - Shell restoration follows the same literal-argument subset as the OpenCode plugin: a placeholder may be a complete unquoted or whole-word quoted argument, a `curl`/`http` embedded value, or sit before a single trailing `>`/`>>` with a static filename. Pipelines, command chaining, expansions, `<`/`2>` redirection and a tokenized redirect target refuse the call. Token-free commands are unchanged.
   - Unknown, MCP and custom tools: a placeholder refuses the call. Their arguments may be forwarded to a remote service outside this session's mapping.
 
+## Parity with the OpenCode plugin
+
+The two adapters implement the same protection contract; only the host hook and its reach differ.
+
+Shared contract:
+
+- model requests on the supported wire APIs are masked in-process before they are sent; a masking failure or an unknown request shape is refused, not forwarded;
+- assistant text in the reply is restored for display, and tool arguments are restored only at the local execution boundary;
+- a placeholder for an unknown, MCP or custom tool refuses the call;
+- transports the adapter cannot see are refused when the model is selected;
+- the credential stays in the host process; neither adapter isolates it from the host;
+- mapping persistence is opt-in, with the same encrypted store and key ladder.
+
+Host-specific, and not a contract difference:
+
+- interception surface: OpenCode's host wire hook versus pi's `globalThis.fetch`. The fetch wrapper additionally sees a tool or extension that calls a model URL, so pi can be stricter; it never sees less of pi's own provider traffic.
+- read-only `GET`/`HEAD` requests (model catalogs) pass in pi; OpenCode's hook does not receive them.
+- pi refuses the Codex WebSocket transport; OpenCode has a WebSocket frame adapter.
+- pi's load order matters for other extensions; OpenCode's host hook does not depend on plugin order.
+
 ## Sessions and persistence
 
 Session files stay where pi keeps them, so `--continue`, `--resume`, `--session` and `/tree` keep working.

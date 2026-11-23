@@ -1,4 +1,4 @@
-// Component under test: the in-process fetch boundary (src/pi/guard.ts).
+// Component under test: the in-process fetch boundary (src/adapters/pi/guard.ts).
 // A recording stub stands in for the provider SDK's fetch.
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config/loader.js";
@@ -12,8 +12,8 @@ import {
   UNSUPPORTED_ROUTE,
   type PiGuard,
   type PiGuardModel,
-} from "../src/pi/guard.js";
-import { PI_UNKNOWN_TOOL_ERROR } from "../src/pi/tool-policy.js";
+} from "../src/adapters/pi/guard.js";
+import { PI_UNKNOWN_TOOL_ERROR } from "../src/adapters/pi/tool-policy.js";
 
 const SECRET = ["PI", "GUARD", "SECRET"].join("_");
 const SESSION = "pi-guard-session";

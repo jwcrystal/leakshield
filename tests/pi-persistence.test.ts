@@ -1,10 +1,10 @@
 // Component under test: opt-in persistence configuration for the pi extension
-// (src/pi/persistence.ts) and its wiring into the guard core.
+// (src/adapters/pi/persistence.ts) and its wiring into the guard core.
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config/loader.js";
 import type { createGuardCore } from "../src/core/session-guard.js";
 import { defaultStorePath } from "../src/decision/mapping-key.js";
-import { createPiGuard } from "../src/pi/guard.js";
+import { createPiGuard } from "../src/adapters/pi/guard.js";
 import {
   DEFAULT_PERSIST_TTL_DAYS,
   MAX_PERSIST_TTL_DAYS,
@@ -14,7 +14,7 @@ import {
   PI_PERSIST_PATH_ENV,
   PI_PERSIST_TTL_ENV,
   piPersistenceOptions,
-} from "../src/pi/persistence.js";
+} from "../src/adapters/pi/persistence.js";
 
 const config = loadConfig(undefined, process.cwd());
 

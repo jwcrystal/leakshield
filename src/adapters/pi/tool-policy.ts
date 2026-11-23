@@ -10,14 +10,14 @@
  * Unknown and MCP tools never restore and never degrade: a placeholder there
  * could reach a remote service, so the call is refused instead.
  */
-import type { HostToolPolicy, RecordLike } from "../core/session-guard.js";
-import { containsTokenPrefix } from "../decision/pseudonymization.js";
+import type { HostToolPolicy, RecordLike } from "../../core/session-guard.js";
+import { containsTokenPrefix } from "../../decision/pseudonymization.js";
 import {
   isShellTool,
   isShellKey,
   isCodeKey,
   keyPolicy,
-} from "../core/tool-restore-policy.js";
+} from "../../core/tool-restore-policy.js";
 
 /** pi 1.6.0 built-in tools whose inputs execute a command. */
 const PI_SHELL_TOOLS = new Set(["bash", "powershell"]);

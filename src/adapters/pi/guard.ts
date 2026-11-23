@@ -11,9 +11,9 @@
  * `fetch` (OpenAI Codex over WebSocket, Bedrock, Google service-account auth)
  * are refused by model/API check rather than guarded here.
  */
-import { classifyModelRoute } from "../core/wire.js";
-import { createGuardCore, type GuardCore, type GuardPersistenceOptions } from "../core/session-guard.js";
-import type { GuardConfig } from "../types.js";
+import { classifyModelRoute } from "../../core/wire.js";
+import { createGuardCore, type GuardCore, type GuardPersistenceOptions } from "../../core/session-guard.js";
+import type { GuardConfig } from "../../types.js";
 import { isSupportedPiApi } from "./settings.js";
 import { assertPiToolBoundary, piToolPolicy } from "./tool-policy.js";
 

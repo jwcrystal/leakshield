@@ -48,12 +48,12 @@ import {
   UNSUPPORTED_ROUTE_ERROR,
   type GuardPersistenceOptions,
   type RecordLike,
-} from "./core/session-guard.js";
-import type { GuardConfig } from "./types.js";
+} from "../../core/session-guard.js";
+import type { GuardConfig } from "../../types.js";
 import { createAISDKTransportAdmission } from "./opencode-transparent-aisdk.js";
 import { opencodeToolPolicy } from "./opencode-tool-policy.js";
 
-export type { GuardPersistenceOptions } from "./core/session-guard.js";
+export type { GuardPersistenceOptions } from "../../core/session-guard.js";
 
 type V2Plugin = PluginNamespace.Plugin;
 type PluginContext = PluginNamespace.Context;

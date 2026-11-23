@@ -35,7 +35,7 @@ const rows = JSON.parse(
 );
 
 const loaded = loadConfigWithFingerprint(findConfigPath());
-// Same production posture as the plugin's setup (src/opencode.ts): encoding
+// Same production posture as the plugin's setup (src/adapters/opencode/opencode.ts): encoding
 // detection is always enabled at the model boundary.
 const config = {
   ...loaded.config,

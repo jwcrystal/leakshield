@@ -5,7 +5,7 @@ date: 2026-11-23
 
 # pi 的未知工具含 placeholder 一律拒絕
 
-pi adapter 的 `assertPiToolBoundary`（`src/pi/tool-policy.ts`）在呼叫 core 之前，對**不在 pi 內建名單**的工具做一次 placeholder 檢查：只要參數或鍵名含 `SGP2` prefix，就拒絕整次呼叫。pi 內建 `read`、`write`、`edit`、`bash`、`powershell`、`grep`、`find`、`ls` 仍交給 `HostToolPolicy` 依欄位還原。
+pi adapter 的 `assertPiToolBoundary`（`src/adapters/pi/tool-policy.ts`）在呼叫 core 之前，對**不在 pi 內建名單**的工具做一次 placeholder 檢查：只要參數或鍵名含 `SGP2` prefix，就拒絕整次呼叫。pi 內建 `read`、`write`、`edit`、`bash`、`powershell`、`grep`、`find`、`ls` 仍交給 `HostToolPolicy` 依欄位還原。
 
 ## Context
 
@@ -18,7 +18,7 @@ Issue #98 也明確要求：「Unknown executable tools must refuse placeholders
 ## Decision
 
 - pi adapter 只還原八個內建工具的參數；其餘工具若含 placeholder 就拒絕，不嘗試推測欄位。
-- 這個拒絕發生在 `src/pi/tool-policy.ts` 的 `assertPiToolBoundary`，由 `src/pi/guard.ts` 在 `tool_call` 的本機執行邊界呼叫；extension 收到拒絕後 block 該次 tool call。
+- 這個拒絕發生在 `src/adapters/pi/tool-policy.ts` 的 `assertPiToolBoundary`，由 `src/adapters/pi/guard.ts` 在 `tool_call` 的本機執行邊界呼叫；extension 收到拒絕後 block 該次 tool call。
 - 不含 placeholder 的未知工具照常執行。
 - 若某個自訂工具確定是本機唯讀、且欄位語意可證明安全，應把它加進 adapter 的已知名單並補測試，而不是放寬成「所有未知工具都還原」。
 

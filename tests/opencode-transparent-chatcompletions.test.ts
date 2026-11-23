@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { createTransparentSessionGuard } from "../src/opencode-transparent.js";
+import { createTransparentSessionGuard } from "../src/adapters/opencode/opencode-transparent.js";
 import type { GuardConfig } from "../src/types.js";
 
 const baseConfig: GuardConfig = {

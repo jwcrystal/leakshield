@@ -1,14 +1,18 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, normalize } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const SRC = join(__dirname, "..", "src");
 const CORE_PATHS = ["core", "decision", "scanner", "rules", "config", "types.ts"];
-const HOST_IMPORT = /(?:\bfrom|\bimport|\brequire)\s*\(?\s*["'](?:@opencode[^"']*|(?:\.{1,2}\/)+(?:[\w-]+\/)*opencode[^"']*)["']/;
+const SPECIFIER = /(?:\bfrom|\bimport|\brequire)\s*\(?\s*["']([^"']+)["']/g;
 
 function sourceFiles(path: string): string[] {
   if (!statSync(path).isDirectory()) return [path];
   return readdirSync(path).flatMap((entry) => sourceFiles(join(path, entry)));
+}
+
+function specifiers(text: string): string[] {
+  return [...text.matchAll(SPECIFIER)].map((match) => match[1]!);
 }
 
 describe("host-independent core boundary", () => {
@@ -18,7 +22,12 @@ describe("host-independent core boundary", () => {
     expect(files.length).toBeGreaterThan(10);
   });
 
-  it.each(files.map((f) => [f.slice(SRC.length + 1), f]))("%s imports nothing from the OpenCode layer", (_name, file) => {
-    expect(readFileSync(file, "utf8")).not.toMatch(HOST_IMPORT);
+  it.each(files.map((f) => [f.slice(SRC.length + 1), f]))("%s imports no host adapter", (_name, file) => {
+    for (const specifier of specifiers(readFileSync(file, "utf8"))) {
+      expect(specifier.startsWith("@opencode")).toBe(false);
+      if (!specifier.startsWith(".")) continue;
+      const resolved = normalize(join(dirname(file), specifier));
+      expect(resolved.slice(SRC.length + 1)).not.toMatch(/^adapters\//);
+    }
   });
 });

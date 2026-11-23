@@ -98,6 +98,29 @@ describe("pi fetch guard", () => {
     expect(seen[0]).toBe("");
   });
 
+  it("passes model-catalog GETs through on the provider origin", async () => {
+    const seen: string[] = [];
+    const guard = ready(seen);
+    const withSession = await guard.handle(new Request("https://api.example.test/v1/models/user"));
+    expect(withSession.status).toBe(200);
+    const bare = createPiGuard({ config, fetchImpl: echoFetch(seen) });
+    bare.setModel(model());
+    const withoutSession = await bare.handle(new Request("https://api.example.test/v1/models"));
+    expect(withoutSession.status).toBe(200);
+    expect(seen).toHaveLength(2);
+  });
+
+  it("refuses a model whose baseUrl is not an http(s) origin", async () => {
+    const seen: string[] = [];
+    const guard = createPiGuard({ config, fetchImpl: echoFetch(seen) });
+    guard.setSession(SESSION);
+    guard.setModel(model({ baseUrl: "localhost:11434" }));
+    const response = await guard.handle(providerRequest({ model: "stub-model" }));
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain(UNSUPPORTED_MODEL);
+    expect(seen).toHaveLength(0);
+  });
+
   it("refuses an unknown POST route on the provider origin", async () => {
     const seen: string[] = [];
     const guard = ready(seen);

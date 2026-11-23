@@ -156,6 +156,16 @@ describe("pi extension", () => {
     expect(result).toEqual({ block: true, reason: "LeakShield cannot protect this model", terminate: true });
   });
 
+  it("re-reads the model at agent start", async () => {
+    const notices: string[] = [];
+    const pi = fakePi();
+    leakshieldPiExtension(pi.api);
+    await pi.emit("session_start", {}, context(notices));
+    await pi.emit("before_agent_start", {}, context(notices, { api: "bedrock-converse-stream" }));
+    expect(state.model?.api).toBe("bedrock-converse-stream");
+    expect(await pi.emit("input", { source: "interactive" }, context(notices))).toEqual({ action: "handled" });
+  });
+
   it("reattaches the model on model_select and clears the refusal", async () => {
     const notices: string[] = [];
     const pi = fakePi();

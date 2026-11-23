@@ -32,6 +32,8 @@ Or start pi with the flag, which always loads before `settings.extensions`:
 pi -e /absolute/path/to/node_modules/leakshield/dist/pi/extension.js
 ```
 
+The flag is the only setup that structurally guarantees first position, but `--doctor pi` cannot see CLI flags: it reports a `-e`-only install as NOT VERIFIED. Register the path in settings when you want the check to be meaningful.
+
 From a checkout:
 
 ```bash
@@ -84,7 +86,7 @@ pi keeps its own credential and configuration. The extension runs inside the pi 
 ## What is protected
 
 - Every provider request on the selected model's origin: system prompt, conversation history, tool results, and summarization requests. Automatic compaction was run against real pi 1.6.0; branch summarization uses the same `completeSummarization` path and is covered by that transport.
-- A `POST` to the provider origin on a route the guard cannot classify is refused. So are masking failures, a missing session, an unsupported API, and a core that cannot be built.
+- A `POST` to the provider origin on a route the guard cannot classify is refused. So are masking failures, a missing session, an unsupported API, and a core that cannot be built. Read-only `GET`/`HEAD` requests (model catalogs, response lookups) pass through: they carry no conversation, and refusing them would break providers like OpenRouter and Copilot.
 - Assistant text in the reply is restored for display. Stored history keeps whatever pi received; the next request is masked again.
 - Tool arguments at execution time:
   - `read` (`path`, `offset`, `limit`), `grep`, `find`, `ls`: restored; an unresolved placeholder may stay literal because it can only match nothing.
@@ -108,7 +110,7 @@ Session files stay where pi keeps them, so `--continue`, `--resume`, `--session`
 - LeakShield is registered in `settings.extensions`, and whether it is first
 - the selected provider/model uses one of the three fetch APIs
 
-`leakshield --doctor pi` checks only this section. It exits 0 only when the extension is registered and no check failed; a load-order warning keeps exit 0 but says LeakShield is not first. `--doctor claude-code` and `--doctor opencode` do the same for the other hosts.
+`leakshield --doctor pi` checks only this section. It exits 0 with `PROTECTED` when LeakShield is the first entry of `settings.extensions` and no check failed, and with `PARTIAL` when it is registered later (pi's own requests are still guarded; an earlier extension's can bypass). A `-e`-only install cannot be seen and reports `NOT VERIFIED` with exit 1. `--doctor claude-code` and `--doctor opencode` do the same for the other hosts.
 
 ## Limitations
 
@@ -116,7 +118,7 @@ Session files stay where pi keeps them, so `--continue`, `--resume`, `--session`
 - `pi --no-extensions` disables it, as do `-ne` and a project that overrides settings. The doctor reports the settings state, not a running process.
 - pi's own requests are guarded regardless of load position. An extension loaded before LeakShield can keep the raw fetch (or a client built from it) and reach the provider unmasked; one loaded after it sees the guard. Loading LeakShield first removes the earlier case.
 - Providers outside the three wire APIs are refused, not guarded.
-- A model switch is checked on `model_select`; a switch made through a path that skips that event would be caught by the guard's per-request model check only if the new model uses a supported API.
+- A model switch is applied on `model_select` and re-read at each `before_agent_start`, so the next request is guarded even if a switch skipped the event.
 - Images and attachments follow LeakShield's `block` policy in this adapter; they are replaced rather than forwarded.
 - This is a model-boundary control, not an OS egress firewall. Any local process, including a user shell, can still send data directly; the OpenCode plugin has the same scope, so OS-level egress is a deployment concern rather than a host-adapter gap.
 - Interactive TUI rendering was not part of the runtime verification; print mode and the wire scripts cover the transport.

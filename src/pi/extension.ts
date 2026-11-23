@@ -92,11 +92,19 @@ function installGuard(): PiGuard {
 export default function leakshieldPiExtension(pi: PiExtensionApi): void {
   const guard = installGuard();
   let refusal: string | null = guard.refusal;
+  let announced: string | null = null;
+
+  const announce = (ctx: PiContext | undefined, reason: string): void => {
+    if (announced === reason) return;
+    announced = reason;
+    notice(ctx, reason);
+  };
 
   const applyModel = (model: PiModelLike | undefined, ctx: PiContext | undefined): void => {
     guard.setModel(modelOf(model));
     refusal = guard.refusal;
-    if (refusal !== null) notice(ctx, refusal);
+    if (refusal === null) announced = null;
+    else announce(ctx, refusal);
   };
 
   pi.on("session_start", (_event, ctx) => {
@@ -108,24 +116,28 @@ export default function leakshieldPiExtension(pi: PiExtensionApi): void {
     applyModel((event as PiModelSelectEvent).model, ctx);
   });
 
+  // The model is re-read at each run so a switch that skipped `model_select`
+  // cannot leave the guard bound to a previous provider.
+  pi.on("before_agent_start", (_event, ctx) => {
+    applyModel(ctx.model, ctx);
+  });
+
   pi.on("input", (event, ctx) => {
     if ((event as PiInputEvent).source === "extension") return { action: "continue" };
     const reason = refusal ?? (guard.core === null ? PROTECT_FAILED : null);
     if (reason === null) return { action: "continue" };
-    notice(ctx, reason);
+    announce(ctx, reason);
     return { action: "handled" };
   });
 
-  pi.on("tool_call", (event, ctx) => {
+  pi.on("tool_call", (event, _ctx) => {
     const toolEvent = event as unknown as PiToolCallEvent;
     if (refusal !== null) return { block: true, reason: refusal, terminate: true };
     try {
       const restored = guard.restoreTool(toolEvent.toolName, toolEvent.input);
       if (restored !== toolEvent.input) toolEvent.input = restored;
     } catch (error) {
-      const reason = refusalText(error);
-      notice(ctx, reason);
-      return { block: true, reason, terminate: true };
+      return { block: true, reason: refusalText(error), terminate: true };
     }
     return undefined;
   });

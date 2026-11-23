@@ -45,9 +45,8 @@ export interface PiGuard {
   handle(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   /** Restores placeholders in a pi tool call, refusing unknown tools. */
   restoreTool(tool: string, input: unknown): unknown;
-  /** Points globalThis.fetch at this guard. Returns the previous implementation. */
-  install(): typeof fetch;
-  restore(previous: typeof fetch): void;
+  /** Points globalThis.fetch at this guard. */
+  install(): void;
 }
 
 export interface PiGuardOptions {
@@ -56,19 +55,26 @@ export interface PiGuardOptions {
   createCore?: typeof createGuardCore;
 }
 
-function providerOriginOf(model: PiGuardModel | null): string | null {
-  if (model === null) return null;
-  try {
-    return new URL(model.baseUrl).origin;
-  } catch {
-    return null;
-  }
-}
-
 function urlOf(input: RequestInfo | URL): string {
   if (typeof input === "string") return input;
   if (input instanceof URL) return input.href;
   return input.url;
+}
+
+function methodOf(input: RequestInfo | URL, init?: RequestInit): string {
+  if (typeof init?.method === "string") return init.method.toUpperCase();
+  if (input instanceof Request) return input.method.toUpperCase();
+  return "GET";
+}
+
+function originOf(baseUrl: string): string | null {
+  try {
+    const url = new URL(baseUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.hostname.length > 0 ? url.origin : null;
+  } catch {
+    return null;
+  }
 }
 
 function refusalText(error: unknown): string {
@@ -95,14 +101,17 @@ export function createPiGuard(options: PiGuardOptions): PiGuard {
   );
   let sessionID: string | null = null;
   let model: PiGuardModel | null = null;
+  let origin: string | null = null;
+  let invalidBase = false;
 
   const refusal = (): string | null => {
     if (core === null) return PROTECT_FAILED;
-    if (model === null || !SUPPORTED_PI_APIS.has(model.api)) return UNSUPPORTED_MODEL;
+    if (model === null) return UNSUPPORTED_MODEL;
+    if (invalidBase || !SUPPORTED_PI_APIS.has(model.api)) return UNSUPPORTED_MODEL;
     return null;
   };
 
-  const guard = {
+  const guard: PiGuard = {
     get core() {
       return core;
     },
@@ -114,11 +123,12 @@ export function createPiGuard(options: PiGuardOptions): PiGuard {
     },
     setModel(next: PiGuardModel | null) {
       model = next;
+      origin = next === null ? null : originOf(next.baseUrl);
+      invalidBase = next !== null && origin === null;
     },
     async handle(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
       const url = urlOf(input);
       const route = classifyModelRoute(url);
-      const origin = providerOriginOf(model);
       let isProvider = route !== null;
       if (origin !== null) {
         try {
@@ -128,6 +138,11 @@ export function createPiGuard(options: PiGuardOptions): PiGuard {
         }
       }
       if (!isProvider) return fetchImpl(input, init);
+
+      // Model catalogs and response lookups are read-only and carry no
+      // conversation. They also keep features like OpenRouter's key catalog.
+      const method = methodOf(input, init);
+      if (method === "GET" || method === "HEAD") return fetchImpl(input, init);
 
       const reason = refusal() ?? (sessionID === null ? MISSING_SESSION : null);
       if (reason !== null) return refusalResponse(reason);
@@ -164,14 +179,9 @@ export function createPiGuard(options: PiGuardOptions): PiGuard {
       core.onToolBefore(event);
       return event.input;
     },
-    install(): typeof fetch {
-      const previous = globalThis.fetch;
+    install() {
       globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => guard.handle(input, init);
-      return previous;
     },
-    restore(previous: typeof fetch) {
-      globalThis.fetch = previous;
-    },
-  } satisfies PiGuard;
+  };
   return guard;
 }

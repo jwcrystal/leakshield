@@ -61,18 +61,18 @@ describe("pi doctor", () => {
     expect(piVerdict(checks)).toEqual({ exit: 0, verdict: expect.stringContaining("PROTECTED") });
   });
 
-  it("fails when the extension is not registered in pi settings", async () => {
+  it("cannot verify a -e-only install from pi settings", async () => {
     const checks = await runPiDoctor(deps(agent({ defaultProvider: "anthropic" }, ANTHROPIC)));
-    expect(stateOf(checks, "pi-extension-registered")).toBe("fail");
-    expect(piVerdict(checks)).toEqual({ exit: 1, verdict: expect.stringContaining("NOT PROTECTED") });
+    expect(stateOf(checks, "pi-extension-registered")).toBe("skip");
+    expect(piVerdict(checks)).toEqual({ exit: 1, verdict: expect.stringContaining("NOT VERIFIED") });
   });
 
-  it("warns when another extension loads before LeakShield", async () => {
+  it("reports a later position as partial rather than protected", async () => {
     const checks = await runPiDoctor(
       deps(agent({ defaultProvider: "anthropic", extensions: ["/other/before.js", EXTENSION] }, ANTHROPIC)),
     );
     expect(stateOf(checks, "pi-extension-registered")).toBe("warn");
-    expect(piVerdict(checks)).toEqual({ exit: 0, verdict: expect.stringContaining("not the first") });
+    expect(piVerdict(checks)).toEqual({ exit: 0, verdict: expect.stringContaining("PARTIAL") });
   });
 
   it("resolves a relative extension entry against the working directory", async () => {
@@ -129,7 +129,10 @@ describe("pi doctor", () => {
     };
     expect(doctorExitCode(report)).toBe(0);
     expect(
-      doctorExitCode({ ...report, pi: [{ id: "pi-extension-registered", state: "fail", detail: "missing" }] }),
+      doctorExitCode({ ...report, pi: [{ id: "pi-extension-registered", state: "warn", detail: "second" }] }),
+    ).toBe(0);
+    expect(
+      doctorExitCode({ ...report, pi: [{ id: "pi-extension-registered", state: "skip", detail: "not visible" }] }),
     ).toBe(1);
     expect(
       doctorExitCode({ ...report, pi: [{ id: "pi", state: "fail", detail: "unsupported" }] }),
@@ -145,7 +148,7 @@ describe("pi doctor", () => {
       checks: [],
     };
     expect(
-      doctorExitCode({ ...protectedRun, pi: [{ id: "pi-extension-registered", state: "fail", detail: "missing" }] }),
+      doctorExitCode({ ...protectedRun, pi: [{ id: "pi-extension-registered", state: "fail", detail: "broken" }] }),
     ).toBe(0);
   });
 });

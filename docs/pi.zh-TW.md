@@ -32,6 +32,8 @@ pi 自己的 provider 流量不管 LeakShield 排在第幾個都會被守到：S
 pi -e /absolute/path/to/node_modules/leakshield/dist/pi/extension.js
 ```
 
+這是唯一在結構上保證排第一的安裝方式，但 `--doctor pi` 看不到 CLI 旗標：只用 `-e` 時會回報 NOT VERIFIED。要讓檢查有意義，就把路徑註冊進 settings。
+
 從 checkout 使用：
 
 ```bash
@@ -84,7 +86,7 @@ pi 保留自己的憑證與設定。extension 跑在 pi 行程內，所以不像
 ## 保護範圍
 
 - 所選模型 origin 上的每個 provider 請求：system prompt、對話歷史、工具結果與摘要請求。自動 compaction 已用真實 pi 1.6.0 跑過；branch summarization 走同一個 `completeSummarization`，由同一條傳輸涵蓋。
-- 送往 provider origin、但 guard 無法分類的 `POST` 會被拒絕。遮罩失敗、沒有 session、API 不支援、core 建不起來時也一樣。
+- 送往 provider origin、但 guard 無法分類的 `POST` 會被拒絕。遮罩失敗、沒有 session、API 不支援、core 建不起來時也一樣。唯讀的 `GET`/`HEAD`（模型目錄、查詢回覆）直接通過：它們不帶對話內容，拒絕會弄壞 OpenRouter、Copilot 這類 provider 的目錄功能。
 - 回覆中的助理文字會還原供顯示。pi 收到什麼就存什麼，下一個請求會再遮罩一次。
 - 工具參數在執行時還原：
   - `read`（`path`、`offset`、`limit`）、`grep`、`find`、`ls`：會還原；對不到的 placeholder 可以維持字面，因為它只會比對不到。
@@ -108,7 +110,7 @@ session 檔留在 pi 原本的位置，`--continue`、`--resume`、`--session` �
 - LeakShield 是否註冊在 `settings.extensions`，以及是否排第一
 - 所選 provider/model 是否使用三種 fetch API 之一
 
-`leakshield --doctor pi` 只檢查這個區段。extension 已註冊且沒有失敗檢查時才 exit 0；載入順序警告仍維持 exit 0，但會說明 LeakShield 不是第一個。`--doctor claude-code` 與 `--doctor opencode` 對其他 host 做同樣的事。
+`leakshield --doctor pi` 只檢查這個區段。LeakShield 是 `settings.extensions` 第一項且沒有失敗檢查時 exit 0、回報 `PROTECTED`；排後面時 exit 0、回報 `PARTIAL`（pi 自己的請求仍受保護，先載入的 extension 可以繞過）。只用 `-e` 時 doctor 看不到，回報 `NOT VERIFIED`、exit 1。`--doctor claude-code` 與 `--doctor opencode` 對其他 host 做同樣的事。
 
 ## 限制
 
@@ -116,7 +118,7 @@ session 檔留在 pi 原本的位置，`--continue`、`--resume`、`--session` �
 - `pi --no-extensions`、`-ne` 或專案覆寫設定都會停用它。doctor 回報的是設定狀態，不是執行中的行程。
 - pi 自己的請求不管載入順序都會被守到。比 LeakShield 先載入的 extension 可能握有原始 fetch（或用它建立的 client），送出的請求不會被遮罩；比它晚載入的會看到 guard。把 LeakShield 排第一就排除前一種情況。
 - 三種 wire API 以外的 provider 一律拒絕，不嘗試保護。
-- 換模型會在 `model_select` 檢查；若某條路徑跳過該事件，guard 只在請求當下能依新模型是否為支援 API 判斷。
+- 換模型會在 `model_select` 套用，並在每次 `before_agent_start` 重新讀取；即使某條路徑跳過事件，下一個請求仍會套用新模型。
 - 圖片與附件在此 adapter 採 LeakShield 的 `block` 政策，會被替換而不是轉送。
 - 這是模型邊界控制，不是 OS 出口防火牆。任何本機行程（包含使用者 shell）仍可直接送出資料；OpenCode plugin 的範圍相同，OS 層出口屬於部署問題，不是 host adapter 的缺口。
 - 互動式 TUI 顯示不在這次實機驗證範圍；print mode 與 wire 腳本已涵蓋傳輸。

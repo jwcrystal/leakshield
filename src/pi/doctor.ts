@@ -59,13 +59,13 @@ function samePath(left: string, right: string): boolean {
 
 /** Index of the LeakShield entry in `settings.extensions`, or -1. */
 export function extensionIndex(
-  agent: PiUserAgent,
+  entries: readonly string[],
   extensionPath: string,
   cwd: string,
+  agentDir: string,
 ): number {
-  const entries = (agent.settings.extensions ?? []).filter((entry): entry is string => typeof entry === "string");
   return entries.findIndex((entry) =>
-    resolveExtensionEntry(entry, cwd, agent.agentDir).some((candidate) => samePath(candidate, extensionPath)),
+    resolveExtensionEntry(entry, cwd, agentDir).some((candidate) => samePath(candidate, extensionPath)),
   );
 }
 
@@ -103,7 +103,7 @@ export async function runPiDoctor(deps: PiDoctorDeps): Promise<DoctorCheck[]> {
   const configError = deps.checkConfig();
   checks.push(
     configError === null
-      ? { id: "pi-config", state: "ok", detail: "guard configuration loads" }
+      ? { id: "pi-config", state: "ok", detail: "guard configuration loads (checked from this shell's directory)" }
       : {
           id: "pi-config",
           state: "fail",
@@ -125,30 +125,28 @@ export async function runPiDoctor(deps: PiDoctorDeps): Promise<DoctorCheck[]> {
   }
 
   if (agent !== null) {
-    const index = extensionIndex(agent, extensionPath, deps.cwd);
+    const entries = (agent.settings.extensions ?? []).filter((entry): entry is string => typeof entry === "string");
+    const index = extensionIndex(entries, extensionPath, deps.cwd, agent.agentDir);
     if (index === -1) {
       checks.push({
         id: "pi-extension-registered",
-        state: "fail",
-        detail: "LeakShield is not in pi settings.extensions, so a plain `pi` run is not protected.",
-        fix: `Add "${extensionPath}" as the first entry of settings.extensions, or start pi with -e "${extensionPath}".`,
+        state: "skip",
+        detail: "LeakShield is not in pi settings.extensions; a run started with `-e` cannot be seen from here.",
+        fix: `Add "${extensionPath}" first in settings.extensions to make this check meaningful, or keep using -e (which always loads before settings extensions).`,
       });
     } else if (index > 0) {
-      const earlier = (agent.settings.extensions ?? [])
-        .slice(0, index)
-        .map((entry) => String(entry))
-        .join(", ");
+      const earlier = entries.slice(0, index).join(", ");
       checks.push({
         id: "pi-extension-registered",
         state: "warn",
         detail: `LeakShield is extension #${index + 1}; ${earlier} loads first and can keep the raw fetch. pi's own requests are still guarded.`,
-        fix: "Move the LeakShield entry to the top of settings.extensions, or pass it with -e.",
+        fix: "Move the LeakShield entry to the top of settings.extensions so no earlier extension can hold the raw fetch.",
       });
     } else {
       checks.push({
         id: "pi-extension-registered",
         state: "ok",
-        detail: "LeakShield is the first configured extension",
+        detail: "LeakShield is the first entry of settings.extensions (CLI -e and package entries are not visible to this check)",
       });
     }
 

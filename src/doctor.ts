@@ -1036,7 +1036,8 @@ export function doctorExitCode(report: DoctorReport): number {
   const bypassed = claudeCode.some((check) => check.id === "claude-code-provider" || check.id === "claude-code-host-managed");
   if (bypassed) return 1;
   const claudeCodeProtected = claudeCode.some((check) => check.id === "claude-code-proxy" && check.state === "ok");
-  const piProtected = pi.some((check) => check.id === "pi-extension-registered" && check.state === "ok")
+  const piProtected = pi.some((check) =>
+    check.id === "pi-extension-registered" && (check.state === "ok" || check.state === "warn"))
     && !pi.some((check) => check.state === "fail");
   return claudeCodeProtected || piProtected ? 0 : 1;
 }

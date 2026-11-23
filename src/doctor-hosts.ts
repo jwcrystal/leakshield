@@ -71,18 +71,15 @@ export function piVerdict(checks: readonly DoctorCheck[]): { exit: number; verdi
   if (checks.every((check) => check.state === "skip")) {
     return { exit: 1, verdict: "NOT INSTALLED — pi is not on PATH" };
   }
-  const registered = checks.find((check) => check.id === "pi-extension-registered");
-  if (registered?.state === "fail") {
-    return { exit: 1, verdict: "NOT PROTECTED — register the extension in pi settings.extensions" };
-  }
   if (checks.some((check) => check.state === "fail")) return { exit: 1, verdict: "BROKEN" };
+  const registered = checks.find((check) => check.id === "pi-extension-registered");
   if (registered?.state === "ok") {
     return { exit: 0, verdict: "PROTECTED — the extension guards pi's provider requests" };
   }
   if (registered?.state === "warn") {
-    return { exit: 0, verdict: "PROTECTED — LeakShield is not the first extension loaded" };
+    return { exit: 0, verdict: "PARTIAL — pi's own requests are guarded; an extension loaded before LeakShield can bypass" };
   }
-  return { exit: 1, verdict: "NOT PROTECTED — no LeakShield extension check ran" };
+  return { exit: 1, verdict: "NOT VERIFIED — the extension is not in settings.extensions; a `-e` run is invisible to the doctor" };
 }
 
 export async function runDoctorCommand(args: readonly string[]): Promise<number> {

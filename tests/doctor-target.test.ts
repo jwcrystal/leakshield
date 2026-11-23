@@ -64,11 +64,11 @@ describe("per-host verdicts", () => {
         { id: "pi", state: "ok", detail: "1.6.0" },
         { id: "pi-extension-registered", state: "warn", detail: "second" },
       ]),
-    ).toEqual({ exit: 0, verdict: expect.stringContaining("not the first") });
+    ).toEqual({ exit: 0, verdict: expect.stringContaining("PARTIAL") });
     expect(
       piVerdict([
         { id: "pi", state: "ok", detail: "1.6.0" },
-        { id: "pi-extension-registered", state: "fail", detail: "missing" },
+        { id: "pi-extension-registered", state: "skip", detail: "not visible" },
       ]).exit,
     ).toBe(1);
     expect(

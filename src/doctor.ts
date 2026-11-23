@@ -53,6 +53,8 @@ export interface DoctorReport {
   snippet?: string;
   /** Claude Code proxy checks; reported separately from the OpenCode status. */
   claudeCode?: DoctorCheck[];
+  /** pi adapter checks; reported separately from the OpenCode status. */
+  pi?: DoctorCheck[];
 }
 
 export interface DoctorDeps {
@@ -999,6 +1001,14 @@ export function formatDoctorReport(report: DoctorReport): string {
       if (check.fix) lines.push(`       fix: ${check.fix}`);
     }
   }
+  if (report.pi && report.pi.length > 0) {
+    lines.push("");
+    lines.push("pi:");
+    for (const check of report.pi) {
+      lines.push(`${icon[check.state]} ${check.id}: ${check.detail}`);
+      if (check.fix) lines.push(`       fix: ${check.fix}`);
+    }
+  }
   lines.push("");
   lines.push("Scope: model-conversation leak protection. This is NOT a tool-egress firewall: permitted local tools (curl, remote MCP, …) can still transmit originals. See README.");
   return lines.join("\n");
@@ -1012,12 +1022,16 @@ export function formatDoctorReport(report: DoctorReport): string {
  */
 export function doctorExitCode(report: DoctorReport): number {
   const claudeCode = report.claudeCode ?? [];
+  const pi = report.pi ?? [];
   if (claudeCode.some((check) => check.state === "fail")) return 1;
+  if (pi.some((check) => check.state === "fail")) return 1;
   if (report.status === "PROTECTED" || report.status === "PARTIAL") return 0;
   if (report.status !== "HOST_MISSING") return 1;
   // A bypassing provider or host-managed endpoint means requests may not reach
   // the proxy even though it answers at the configured base URL.
   const bypassed = claudeCode.some((check) => check.id === "claude-code-provider" || check.id === "claude-code-host-managed");
   if (bypassed) return 1;
-  return claudeCode.some((check) => check.id === "claude-code-proxy" && check.state === "ok") ? 0 : 1;
+  const claudeCodeProtected = claudeCode.some((check) => check.id === "claude-code-proxy" && check.state === "ok");
+  const piProtected = pi.some((check) => check.id === "pi-launcher" && check.state === "ok");
+  return claudeCodeProtected || piProtected ? 0 : 1;
 }

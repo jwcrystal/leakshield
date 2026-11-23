@@ -9,8 +9,9 @@
 
 **在把程式碼、文件、資料丟給 AI 服務之前，先掃描敏感內容的守門員。**
 
-支援三種使用模式：
+支援四種使用模式：
 - **OpenCode Plugin**：OpenCode 的強制入口檢查；OpenCode 要把內容送往模型時使用。
+- **pi adapter**：受管啟動器與 extension，讓 pi coding agent 經 loopback provider 邊界受到保護。
 - **CLI**：手動或 CI 掃描文字、檔案與目錄；支援脫敏。
 - **Web UI**：本機瀏覽器介面與 REST endpoint，供手動掃描。
 
@@ -19,6 +20,7 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 | 模式 | 啟動方式 | 適用情境 |
 |------|----------|----------|
 | OpenCode Plugin | 在 `opencode.json` 加入 `leakshield` 套件或 `dist` 目錄（OpenCode v2） | 自動且 fail-closed 地保護 OpenCode 模型輸入與工具輸出 |
+| pi adapter | `leakshield pi --provider <id>` | 受管啟動 pi，遮罩 provider 請求並還原 read/write/edit/bash 參數 |
 | CLI | `npm run scan -- --file ./path`（全域安裝或 `npm link` 後可用 `leakshield --file ./path`） | 明確的本機或 CI 掃描；不會把內容送到模型 |
 | Web UI | `npm run web` | 在 `http://localhost:3000` 手動以瀏覽器掃描 |
 
@@ -28,6 +30,7 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 
 - Transparent 模式已在 OpenCode v2.0.28 搭配本機替身 provider 驗證，並用真實 OpenAI 模型驗證過一次。0.3.0 的工具還原另在 OpenCode v2.2.5 用本機替身 provider、OpenChamber 的 render 工具與 `rtk` 重新驗證（[紀錄](docs/evidence/2026-11-06-opencode-2.2.5-tool-restoration.md)）。它**不保證**敏感內容絕不會送到模型：建議的 hook-first 設定在 `--doctor` 顯示為 `PARTIAL`，hook 之後才加入的內容，以及被允許的工具外送（curl、遠端 MCP），都不在保護範圍內。
 - Claude Code 透過本機 proxy 支援（`leakshield --claude-code-proxy`，再設定 `ANTHROPIC_BASE_URL`），已用 Claude Code 2.1.321 搭配本機替身上游驗證（[紀錄](docs/evidence/2026-11-21-claude-code-proxy.md)）。它會遮罩模型請求並還原助理文字，但還不會在工具執行時還原 placeholder，詳見 [Claude Code](docs/claude-code.zh-TW.md)。
+- pi 透過 `leakshield pi` 支援：agent 唯一的 provider 走 loopback 邊界，read/write/edit/bash 參數在本機還原。已用 pi 1.6.0 搭配錄製替身上游驗證（[紀錄](docs/evidence/2026-11-23-pi-adapter.md)）；驗證環境沒有真實 provider 憑證，且不支援只有 OAuth 的帳號。詳見 [pi adapter](docs/pi.zh-TW.md)。
 - 尚未驗證：Windows 與 Linux 的 OS keychain 持久化（macOS 已於 2026-10-20 驗證）、真實 Anthropic provider、其他 provider 的長對話、長時間使用（[#26](https://github.com/jwcrystal/leakshield/issues/26)）。
 - `0.x` 期間預設值仍可能調整，變更見 [CHANGELOG](CHANGELOG.md)。
 - 驗證紀錄：[docs/evidence](docs/evidence/README.md)。漏洞請私下回報：[SECURITY.md](SECURITY.md)。授權：[Apache-2.0](LICENSE)。
@@ -359,6 +362,18 @@ leakshield --doctor                                # "Claude Code:" 區段會檢
 ```
 
 Proxy 會遮罩 Claude Code 送出的每個 Anthropic Messages 請求（含 `count_tokens`），還原助理 JSON 或串流文字中的 placeholder，無法遮罩的請求直接擋下，不會轉送。已用 API key 驗證；Claude Code 文件說 base URL 也適用於 claude.ai 登入，這裡尚未測試。它不會還原工具呼叫裡的 placeholder，也看不到繞過 base URL 的流量，例如 WebFetch 的網域檢查會把 hostname 送給 Anthropic。設定方式與完整的缺口清單見 [docs/claude-code.zh-TW.md](docs/claude-code.zh-TW.md)。
+
+---
+
+### pi（受管啟動器）
+
+```bash
+leakshield --pi-install                            # 選用：把 extension 註冊到 pi 設定
+leakshield pi --provider anthropic --continue      # 讓 pi 走 loopback 邊界
+leakshield --doctor                                # "pi:" 區段會檢查設定
+```
+
+pi 的 provider hook 出錯時會 fail open，compaction 也會繞過它，因此啟動器會產生只含 loopback 邊界的暫存 agent 目錄。每個 provider 請求先在邊界遮罩，才加上上游憑證；pi 子行程拿不到該憑證。extension 在工具執行邊界還原 `read`、`write`、`edit`、`bash`、`powershell` 的參數與助理顯示文字，session 檔留在使用者原本的目錄，`--continue`、`--resume`、`--session` 照常運作。已用 pi 1.6.0 搭配錄製替身驗證；這次沒有真實 provider 憑證，且不支援只有 OAuth 的帳號。完整說明與限制（環境 extension 與專案信任會被停用；直接跑 `pi` 時 extension 只會拒絕，不會提供保護）見 [pi adapter](docs/pi.zh-TW.md)。
 
 ---
 

@@ -6,6 +6,9 @@
  * is absent (see `doctorExitCode`).
  */
 
+import { capabilityCapText, capabilitySection } from "./doctor-capabilities.js";
+import type { HostCapabilities } from "./types/capabilities.js";
+
 export type DoctorStatus = "PROTECTED" | "PARTIAL" | "BROKEN" | "NOT_REGISTERED" | "HOST_MISSING";
 
 export interface DoctorCheck {
@@ -21,12 +24,20 @@ export interface DoctorReport {
   hostGeneration: "v1" | "v2" | null;
   configPath: string | null;
   checks: DoctorCheck[];
+  /** Weakest validated OpenCode configuration; absent when options are unknown. */
+  wireProtection?: "enabled" | "disabled" | "not-applicable";
   /** Copy-paste registration snippet for the OpenCode v2 config. */
   snippet?: string;
   /** Claude Code proxy checks; reported separately from the OpenCode status. */
   claudeCode?: DoctorCheck[];
   /** pi adapter checks; reported separately from the OpenCode status. */
   pi?: DoctorCheck[];
+  /** OpenCode's declared coverage, printed under the checks. */
+  capabilities?: HostCapabilities;
+  /** Claude Code's declared coverage, printed with its checks. */
+  claudeCodeCapabilities?: HostCapabilities;
+  /** pi's declared coverage, printed with its checks. */
+  piCapabilities?: HostCapabilities;
 }
 
 export function formatDoctorReport(report: DoctorReport): string {
@@ -43,9 +54,27 @@ export function formatDoctorReport(report: DoctorReport): string {
     lines.push(report.snippet);
   }
   lines.push("");
+  lines.push(`Configuration status: ${report.status}`);
+  lines.push(`Wire protection: ${report.wireProtection ?? "unknown"} (configuration only; live-session interception is not verified).`);
+  const capText = report.capabilities ? capabilityCapText(report.capabilities) : null;
+  if (report.capabilities) {
+    lines.push("");
+    lines.push(...capabilitySection(report.capabilities));
+  }
+  if (report.status === "PROTECTED" || report.status === "PARTIAL") {
+    if (report.status === "PARTIAL") {
+      lines.push("Partial reason (configuration): wireProtection=false; final outbound HTTP bodies and WebSocket frames are not inspected.");
+    }
+    if (capText !== null) {
+      lines.push(`Partial reason (host coverage): ${capText}.`);
+    }
+  }
+  lines.push("");
   const verdict =
     report.status === "PROTECTED"
-      ? "PROTECTED — install-level checks pass."
+      ? capText === null
+        ? "PROTECTED — install-level checks pass."
+        : `PARTIAL — install-level checks pass, but ${capText}; see Host capabilities above.`
       : report.status === "PARTIAL"
         ? "PARTIAL — hook-first protection; final outbound HTTP bodies are not inspected."
         : report.status === "BROKEN"
@@ -61,6 +90,10 @@ export function formatDoctorReport(report: DoctorReport): string {
       lines.push(`${icon[check.state]} ${check.id}: ${check.detail}`);
       if (check.fix) lines.push(`       fix: ${check.fix}`);
     }
+    if (report.claudeCodeCapabilities) {
+      lines.push("");
+      lines.push(...capabilitySection(report.claudeCodeCapabilities));
+    }
   }
   if (report.pi && report.pi.length > 0) {
     lines.push("");
@@ -68,6 +101,10 @@ export function formatDoctorReport(report: DoctorReport): string {
     for (const check of report.pi) {
       lines.push(`${icon[check.state]} ${check.id}: ${check.detail}`);
       if (check.fix) lines.push(`       fix: ${check.fix}`);
+    }
+    if (report.piCapabilities) {
+      lines.push("");
+      lines.push(...capabilitySection(report.piCapabilities));
     }
   }
   lines.push("");

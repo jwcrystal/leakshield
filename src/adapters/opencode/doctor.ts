@@ -709,6 +709,9 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     candidate.mode === "transparent" ? (candidate.wireProtection === false ? 0 : 1) : 2;
   const weakest = [...validated].sort((a, b) => weakness(a.options) - weakness(b.options))[0]!;
   const options = weakest.options;
+  const wireProtection: NonNullable<DoctorReport["wireProtection"]> = options.mode !== "transparent"
+    ? "not-applicable"
+    : options.wireProtection === false ? "disabled" : "enabled";
   // Attachments are reported conservatively too: any transparent entry that
   // lets them through unscanned outranks a stricter tied entry (#67).
   if (
@@ -746,7 +749,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
         detail: `Guard config failed to load${guardPath ? ` for ${guardPath}` : ""}: ${(error as Error).message}`,
         fix: "Fix the config file, or remove configPath to use defaults.",
       });
-      return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
+      return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks, wireProtection };
     }
   }
   if (!guardConfig) {
@@ -756,7 +759,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       detail: "Guard config did not load for the entry that decides the verdict.",
       fix: "Rerun the doctor; if it repeats, report the configuration.",
     });
-    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
+    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks, wireProtection };
   }
   checks.push({
     id: "guard-config",
@@ -920,13 +923,13 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       detail: `Synthetic sk- canary NOT detected${smokeFailures[0]!.path ? ` under ${smokeFailures[0]!.path}` : ""} — that guard config disables the rules this install relies on.`,
       fix: "Restore credential rules in the guard config, or remove configPath to use defaults.",
     });
-    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
+    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks, wireProtection };
   }
 
   // A failed check must not still read as PARTIAL or PROTECTED: an allowlist
   // failure is a "do not trust this install" signal, like a missing canary.
   if (checks.some((check) => check.state === "fail")) {
-    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
+    return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks, wireProtection };
   }
 
   if (options.mode === "transparent") {
@@ -943,5 +946,5 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     detail: "Install-level checks pass. Live-session proof: run the README smoke test or scripts/e2e/run-boundary.mjs.",
   });
 
-  return { status: options.mode === "transparent" && options.wireProtection === false ? "PARTIAL" : "PROTECTED", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
+  return { status: options.mode === "transparent" && options.wireProtection === false ? "PARTIAL" : "PROTECTED", hostVersion: host.version, hostGeneration: host.generation, configPath, checks, wireProtection };
 }

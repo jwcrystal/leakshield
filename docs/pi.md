@@ -153,6 +153,8 @@ With the store enabled, a later process can restore placeholders from earlier se
 
 ## Limitations
 
+The declared coverage, and the residuals that qualify it, are printed by `leakshield --doctor pi` and summarized in the [host capability matrix](host-capabilities.md); the bullets below are the operational consequences.
+
 - A `pi` run without the extension is not protected. Nothing can fail closed in a process that never loaded the guard.
 - `pi --no-extensions` disables it, as do `-ne` and a project that overrides settings. The doctor reports the settings state, not a running process.
 - pi's own requests are guarded regardless of load position. An extension loaded before LeakShield can keep the raw fetch (or a client built from it) and reach the provider unmasked; one loaded after it sees the guard. Loading LeakShield first removes the earlier case.

@@ -153,6 +153,8 @@ mapping 預設只在行程存活期間有效：resume 後的舊 placeholder 維�
 
 ## 限制
 
+宣告的覆蓋範圍（含限定它的 residuals）由 `leakshield --doctor pi` 印出，總表在[host capability matrix](host-capabilities.md)；下列各點是操作上的後果。
+
 - 沒載入 extension 的 `pi` 不受保護。沒載入 guard 的行程無法 fail closed。
 - `pi --no-extensions`、`-ne` 或專案覆寫設定都會停用它。doctor 回報的是設定狀態，不是執行中的行程。
 - pi 自己的請求不管載入順序都會被守到。比 LeakShield 先載入的 extension 可能握有原始 fetch（或用它建立的 client），送出的請求不會被遮罩；比它晚載入的會看到 guard。把 LeakShield 排第一就排除前一種情況。

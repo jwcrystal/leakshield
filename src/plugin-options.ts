@@ -7,6 +7,10 @@
 import { z } from "zod";
 import { plainObject } from "./config/plain-object.js";
 
+/** Shared with the pi adapter's environment parser so the bounds cannot drift. */
+export const PERSISTENCE_TTL_DEFAULT_DAYS = 7;
+export const PERSISTENCE_TTL_MAX_DAYS = 3650;
+
 // deidentify is valid only in redact mode; an invalid combination
 // makes the parse throw, and every entry path already fails closed on that.
 // transparent is the reversible pseudonymization mode (issue #22):
@@ -51,7 +55,7 @@ export const PluginOptionsSchema = z
       z.object({
         enabled: z.boolean().default(false),
         /** Session TTL in days; 0 = never expire (manual forget only). */
-        ttlDays: z.number().int().min(0).max(3650).default(7),
+        ttlDays: z.number().int().min(0).max(PERSISTENCE_TTL_MAX_DAYS).default(PERSISTENCE_TTL_DEFAULT_DAYS),
         /** Store path. Default: ~/.local/share/leakshield/SGP.db */
         path: z.string().min(1).optional(),
         /** Opt-in weaker fallback when no OS keychain is available. */

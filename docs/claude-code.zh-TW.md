@@ -32,7 +32,7 @@ LeakShield 透過本機 proxy 保護 Claude Code。Claude Code 把模型請求�
    leakshield --doctor
    ```
 
-   `Claude Code:` 區段會說明 `ANTHROPIC_BASE_URL` 來自哪裡（設定檔優先於 shell；專案 local 優先於專案，再優先於使用者，依 Claude Code 2.1.321 實測），以及該位址是否有 LeakShield proxy 回應。啟用 Bedrock、Vertex 或 Foundry，或設定了 `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST` 時會警告，因為這時 Claude Code 不會使用設定檔裡的 base URL。OpenCode 的各種結果維持原本的結束碼。沒有 OpenCode 的機器上，只有 Claude Code 指向執行中的 LeakShield proxy、且沒有 provider 或宿主設定繞過它時，結束碼才是 0；base URL 指向沒在執行的 proxy 時結束碼為 1。
+   `Claude Code:` 區段會說明 `ANTHROPIC_BASE_URL` 來自哪裡（設定檔優先於 shell；專案 local 優先於專案，再優先於使用者，依 Claude Code 2.1.321 實測），以及該位址是否有 LeakShield proxy 回應。啟用 Bedrock、Vertex 或 Foundry，或設定了 `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST` 時會警告，因為這時 Claude Code 不會使用設定檔裡的 base URL。OpenCode 的各種結果維持原本的結束碼。沒有 OpenCode 的機器上，只有 Claude Code 指向執行中的 LeakShield proxy、且沒有 provider 或宿主設定繞過它時，結束碼才是 0；base URL 指向沒在執行的 proxy 時結束碼為 1。`leakshield --doctor claude-code` 只跑這一段，且只有 proxy 健康時才 exit 0。
 
 `ANTHROPIC_BASE_URL` 指向 proxy 但 proxy 沒在執行時，Claude Code 的請求會失敗，不會改成直連 Anthropic，doctor 的結束碼為 1。
 

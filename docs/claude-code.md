@@ -32,7 +32,7 @@ Status: experimental. Verified with Claude Code 2.1.321 against a loopback stub 
    leakshield --doctor
    ```
 
-   The `Claude Code:` section says where `ANTHROPIC_BASE_URL` comes from (settings files win over the shell; project-local over project over user, as observed with Claude Code 2.1.321) and whether the LeakShield proxy answers there. It also warns when Bedrock, Vertex or Foundry is enabled, or when `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST` is set, because then Claude Code does not use the base URL from settings. Every OpenCode result keeps its exit code. On a machine without OpenCode, the doctor exits 0 only when Claude Code points at a running LeakShield proxy and no provider or host setting bypasses it; a base URL pointing at a proxy that is not running exits 1.
+   The `Claude Code:` section says where `ANTHROPIC_BASE_URL` comes from (settings files win over the shell; project-local over project over user, as observed with Claude Code 2.1.321) and whether the LeakShield proxy answers there. It also warns when Bedrock, Vertex or Foundry is enabled, or when `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST` is set, because then Claude Code does not use the base URL from settings. Every OpenCode result keeps its exit code. On a machine without OpenCode, the doctor exits 0 only when Claude Code points at a running LeakShield proxy and no provider or host setting bypasses it; a base URL pointing at a proxy that is not running exits 1. `leakshield --doctor claude-code` runs only this section and exits 0 only behind a healthy proxy.
 
 If the proxy is not running while `ANTHROPIC_BASE_URL` points at it, Claude Code's requests fail instead of going to Anthropic directly, and the doctor exits 1.
 

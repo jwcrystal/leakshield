@@ -17,6 +17,7 @@
 | 官方 `@rehydra/opencode` 的實際行為（原始碼） | [官方發布來源稽核 2026-10-11](2026-10-11-rehydra-current-source-audit.md) |
 | 各 transport 是否支援（Responses WS、AI SDK） | [Responses WS](2026-10-11-responses-ws-verification.md)、[AI SDK HTTP](2026-10-11-aisdk-http-verification.md) |
 | Claude Code 經本機 proxy 是否遮罩與還原 | [Claude Code proxy 驗證 2026-11-21](2026-11-21-claude-code-proxy.md) |
+| pi 行程內 extension：遮罩、工具還原、session 續用 | [pi extension 驗證 2026-11-23](2026-11-23-pi-extension.md) |
 
 ## 比較
 
@@ -35,6 +36,9 @@
 
 | 日期 | 檔案 | 狀態 |
 |---|---|---|
+| 11-23 | [pi extension：行程內遮罩、工具還原、session 續用（#98）](2026-11-23-pi-extension.md) | 現行 |
+| 11-23 | [pi adapter：受管啟動版（已由 extension 取代）](2026-11-23-pi-adapter.md) | 已被取代 |
+| 11-23 | [pi 1.6.0 fetch 攔截缺口稽核](2026-11-23-pi-fetch-gap-audit.md) | 現行 |
 | 11-21 | [Claude Code 本機 proxy：Claude Code 2.1.321 實機驗證（#86）](2026-11-21-claude-code-proxy.md) | 現行 |
 | 11-06 | [0.3.0 工具還原：OpenCode v2.2.5 實機驗證](2026-11-06-opencode-2.2.5-tool-restoration.md) | 現行 |
 | 10-14 | [容量修正驗證](2026-10-14-transparent-capacity-verification.md) | 現行 |

@@ -44,14 +44,22 @@ initWindowsEncoding();
 const args = process.argv;
 const isCliMode = args.includes("--cli");
 const isWebMode = args.includes("--web");
-const isDoctorMode = args.includes("--doctor");
+const isDoctorMode = args.some((arg) => arg === "--doctor" || arg.startsWith("--doctor="));
 const isForgetMode = args.includes("--forget");
+const piIndex = args.indexOf("--pi");
+const isPiSubcommand = piIndex === -1 && args[2] === "pi";
+const isPiMode = piIndex !== -1 || isPiSubcommand || args.includes("--pi-install");
 const valueOf = (flag: string): string | undefined => {
   const index = args.indexOf(flag);
   return index !== -1 && index + 1 < args.length ? args[index + 1] : undefined;
 };
 
-if (isHelpRequest(args)) {
+if (isPiMode) {
+  console.error("leakshield: `leakshield pi` was removed. pi now runs directly with the LeakShield extension loaded in-process.");
+  console.error("leakshield: add node_modules/leakshield/dist/pi/extension.js as the first entry of pi settings.extensions, or start pi with -e <path>.");
+  console.error("leakshield: check the setup with `leakshield --doctor pi`.");
+  process.exitCode = 2;
+} else if (isHelpRequest(args)) {
   console.log(HELP_TEXT);
 } else if (isForgetMode) {
   // W2/B5: active erasure of persisted mappings. Content-free output.
@@ -66,12 +74,8 @@ if (isHelpRequest(args)) {
   const { runClaudeCodeProxy } = await import("./claude-code/cli.js");
   process.exitCode = await runClaudeCodeProxy(args);
 } else if (isDoctorMode) {
-  const { runDoctor, createDoctorDeps, formatDoctorReport, doctorExitCode } = await import("./doctor.js");
-  const { runClaudeCodeDoctor, createClaudeCodeDoctorDeps } = await import("./claude-code/doctor.js");
-  const report = await runDoctor(createDoctorDeps());
-  report.claudeCode = await runClaudeCodeDoctor(createClaudeCodeDoctorDeps());
-  console.log(formatDoctorReport(report));
-  process.exitCode = doctorExitCode(report);
+  const { runDoctorCommand } = await import("./doctor-hosts.js");
+  process.exitCode = await runDoctorCommand(args);
 } else if (isWebMode) {
   const portIdx = args.indexOf("--port");
   const port = portIdx !== -1 ? parseInt(args[portIdx + 1], 10) || 3000 : 3000;

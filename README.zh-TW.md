@@ -20,7 +20,7 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 | 模式 | 啟動方式 | 適用情境 |
 |------|----------|----------|
 | OpenCode Plugin | 在 `opencode.json` 加入 `leakshield` 套件或 `dist` 目錄（OpenCode v2） | 自動且 fail-closed 地保護 OpenCode 模型輸入與工具輸出 |
-| pi adapter | `pi -e node_modules/leakshield/dist/pi/extension.js`（或放在 pi `settings.extensions` 第一項） | 遮罩 pi 的 provider 請求並還原 read/write/edit/bash 參數 |
+| pi adapter | `pi -e node_modules/leakshield/dist/adapters/pi/extension.js`（或放在 pi `settings.extensions` 第一項） | 遮罩 pi 的 provider 請求並還原 read/write/edit/bash 參數 |
 | CLI | `npm run scan -- --file ./path`（全域安裝或 `npm link` 後可用 `leakshield --file ./path`） | 明確的本機或 CI 掃描；不會把內容送到模型 |
 | Web UI | `npm run web` | 在 `http://localhost:3000` 手動以瀏覽器掃描 |
 
@@ -368,7 +368,7 @@ Proxy 會遮罩 Claude Code 送出的每個 Anthropic Messages 請求（含 `cou
 ### pi（行程內 extension）
 
 ```bash
-pi -e /path/to/node_modules/leakshield/dist/pi/extension.js   # 第一個載入
+pi -e /path/to/node_modules/leakshield/dist/adapters/pi/extension.js   # 第一個載入
 leakshield --doctor pi                                        # 檢查註冊、順序與 wire API
 ```
 

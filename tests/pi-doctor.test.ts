@@ -1,13 +1,13 @@
-// Component under test: pi doctor checks (src/pi/doctor.ts) and their effect
+// Component under test: pi doctor checks (src/adapters/pi/doctor.ts) and their effect
 // on the shared doctor exit code.
 import { describe, expect, it } from "vitest";
-import { doctorExitCode, type DoctorReport } from "../src/doctor.js";
+import { doctorExitCode, type DoctorReport } from "../src/doctor-report.js";
 import { piVerdict } from "../src/doctor-hosts.js";
-import { runPiDoctor, type PiDoctorDeps } from "../src/pi/doctor.js";
-import { resolvePiSelectedModel, type PiUserAgent } from "../src/pi/settings.js";
+import { runPiDoctor, type PiDoctorDeps } from "../src/adapters/pi/doctor.js";
+import { resolvePiSelectedModel, type PiUserAgent } from "../src/adapters/pi/settings.js";
 
 const AGENT = "/home/test/.pi/agent";
-const EXTENSION = "/pkg/dist/pi/extension.js";
+const EXTENSION = "/pkg/dist/adapters/pi/extension.js";
 
 function deps(files: Record<string, string>, overrides: Partial<PiDoctorDeps> = {}): PiDoctorDeps {
   return {
@@ -134,7 +134,7 @@ describe("pi doctor", () => {
   it("resolves a relative extension entry against the working directory", async () => {
     const checks = await runPiDoctor(
       deps(
-        agent({ defaultProvider: "anthropic", extensions: ["dist/pi/extension.js"] }, ANTHROPIC),
+        agent({ defaultProvider: "anthropic", extensions: ["dist/adapters/pi/extension.js"] }, ANTHROPIC),
         { cwd: "/pkg" },
       ),
     );

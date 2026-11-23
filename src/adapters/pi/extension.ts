@@ -11,8 +11,8 @@
  * Load order matters, because an extension loaded earlier can hold the raw
  * fetch; the doctor reports when LeakShield is not first.
  */
-import { loadConfig } from "../config/loader.js";
-import type { GuardConfig } from "../types.js";
+import { loadConfig } from "../../config/loader.js";
+import type { GuardConfig } from "../../types.js";
 import { createPiGuard, PROTECT_FAILED, type PiGuard, type PiGuardModel } from "./guard.js";
 import { piPersistenceOptions } from "./persistence.js";
 

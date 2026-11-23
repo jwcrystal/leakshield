@@ -1,7 +1,7 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { runClaudeCodeDoctor, type ClaudeCodeDoctorDeps, type ProxyProbe } from "../src/claude-code/doctor.js";
-import { doctorExitCode, formatDoctorReport, type DoctorReport } from "../src/doctor.js";
+import { runClaudeCodeDoctor, type ClaudeCodeDoctorDeps, type ProxyProbe } from "../src/adapters/claude-code/doctor.js";
+import { doctorExitCode, formatDoctorReport, type DoctorReport } from "../src/doctor-report.js";
 
 const HOME = "/home/u";
 const CWD = "/work/p";

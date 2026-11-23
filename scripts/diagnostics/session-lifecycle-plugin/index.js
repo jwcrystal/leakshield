@@ -1,7 +1,7 @@
 /** Synthetic host-only verification. Never calls a model or executes a tool. */
 import { renameSync, writeFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
-import { createTransparentSessionGuard } from "../../../dist/opencode-transparent.js";
+import { createTransparentSessionGuard } from "../../../dist/adapters/opencode/opencode-transparent.js";
 
 const EMAIL = "lifecycle-canary@example.org";
 const config = {

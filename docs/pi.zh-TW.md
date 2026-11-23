@@ -10,9 +10,9 @@ pi 每次請求才建立 provider client，並在當下解析 `fetch`（`options
 
 | 層 | 責任 |
 |---|---|
-| `src/pi/guard.ts` | 包住 `globalThis.fetch`：遮罩 provider 請求、在回覆中還原助理文字、讓無關的 fetch 流量直接通過、拒絕未知路由與看不到的傳輸 |
-| `src/pi/extension.ts` | 綁定 pi session 與模型；模型無法保護時擋下輸入與工具；在 `tool_call` 還原工具參數 |
-| `src/pi/tool-policy.ts` | pi 的 `HostToolPolicy`：read/write/edit/bash/powershell 欄位；未知與 MCP 工具一律拒絕 |
+| `src/adapters/pi/guard.ts` | 包住 `globalThis.fetch`：遮罩 provider 請求、在回覆中還原助理文字、讓無關的 fetch 流量直接通過、拒絕未知路由與看不到的傳輸 |
+| `src/adapters/pi/extension.ts` | 綁定 pi session 與模型；模型無法保護時擋下輸入與工具；在 `tool_call` 還原工具參數 |
+| `src/adapters/pi/tool-policy.ts` | pi 的 `HostToolPolicy`：read/write/edit/bash/powershell 欄位；未知與 MCP 工具一律拒絕 |
 
 pi 自己的 provider 流量不管 LeakShield 排在第幾個都會被守到：SDK 是每次請求才解析 `fetch`。順序影響的是其他 extension：比它早載入、且握有原始 fetch（或用它建立的 client）的 extension，送出的請求不會被遮罩。因此排第一是建議，不是 pi 本身的前提；不是第一個時 doctor 會回報。
 
@@ -22,14 +22,14 @@ pi 自己的 provider 流量不管 LeakShield 排在第幾個都會被守到：S
 
 ```json
 {
-  "extensions": ["/absolute/path/to/node_modules/leakshield/dist/pi/extension.js"]
+  "extensions": ["/absolute/path/to/node_modules/leakshield/dist/adapters/pi/extension.js"]
 }
 ```
 
 或用旗標啟動，`-e` 一定比 `settings.extensions` 先載入：
 
 ```bash
-pi -e /absolute/path/to/node_modules/leakshield/dist/pi/extension.js
+pi -e /absolute/path/to/node_modules/leakshield/dist/adapters/pi/extension.js
 ```
 
 這是唯一在結構上保證排第一的安裝方式，但 `--doctor pi` 看不到 CLI 旗標：只用 `-e` 時會回報 NOT VERIFIED。要讓檢查有意義，就把路徑註冊進 settings。
@@ -39,7 +39,7 @@ pi -e /absolute/path/to/node_modules/leakshield/dist/pi/extension.js
 ```bash
 npm ci
 npm run build
-pi -e "$PWD/dist/pi/extension.js"
+pi -e "$PWD/dist/adapters/pi/extension.js"
 ```
 
 然後檢查設定：

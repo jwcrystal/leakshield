@@ -13,8 +13,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { DoctorCheck } from "../doctor.js";
-import { loadConfig } from "../config/loader.js";
+import type { DoctorCheck } from "../../doctor-report.js";
+import { loadConfig } from "../../config/loader.js";
 import { piPersistenceOptions } from "./persistence.js";
 import {
   defaultPiAgentDir,
@@ -97,7 +97,7 @@ export async function runPiDoctor(deps: PiDoctorDeps): Promise<DoctorCheck[]> {
           id: "pi-extension",
           state: "fail",
           detail: `the extension is missing at ${extensionPath}; this build is incomplete.`,
-          fix: "Reinstall leakshield (the package must ship dist/pi/extension.js).",
+          fix: "Reinstall leakshield (the package must ship dist/adapters/pi/extension.js).",
         },
   );
 
@@ -205,7 +205,7 @@ export async function runPiDoctor(deps: PiDoctorDeps): Promise<DoctorCheck[]> {
 }
 
 /**
- * The extension ships next to this module in dist/pi/. A source checkout run
+ * The extension ships next to this module in dist/adapters/pi/. A source checkout run
  * through tsx uses the TypeScript file, which pi can load directly.
  */
 export function defaultPiExtensionPath(): string {

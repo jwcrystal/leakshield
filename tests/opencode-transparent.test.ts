@@ -13,7 +13,7 @@
 
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { createTransparentSessionGuard } from "../src/opencode-transparent.js";
+import { createTransparentSessionGuard } from "../src/adapters/opencode/opencode-transparent.js";
 import { PSEUDONYM_TOKEN_PREFIX } from "../src/decision/pseudonymization.js";
 import type { GuardConfig } from "../src/types.js";
 

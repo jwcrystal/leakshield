@@ -8,13 +8,11 @@
  */
 import {
   createDoctorDeps,
-  doctorExitCode,
-  formatDoctorReport,
   runDoctor,
-  type DoctorCheck,
-} from "./doctor.js";
-import { createClaudeCodeDoctorDeps, runClaudeCodeDoctor } from "./claude-code/doctor.js";
-import { createPiDoctorDeps, runPiDoctor } from "./pi/doctor.js";
+} from "./adapters/opencode/doctor.js";
+import { doctorExitCode, formatDoctorReport, type DoctorCheck } from "./doctor-report.js";
+import { createClaudeCodeDoctorDeps, runClaudeCodeDoctor } from "./adapters/claude-code/doctor.js";
+import { createPiDoctorDeps, runPiDoctor } from "./adapters/pi/doctor.js";
 
 export type DoctorTarget = "all" | "opencode" | "claude-code" | "pi";
 

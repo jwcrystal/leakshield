@@ -1,5 +1,5 @@
-import { loadConfig } from "../config/loader.js";
-import type { GuardConfig } from "../types.js";
+import { loadConfig } from "../../config/loader.js";
+import type { GuardConfig } from "../../types.js";
 import { DEFAULT_PROXY_PORT, DEFAULT_UPSTREAM, startClaudeCodeProxy } from "./proxy.js";
 
 export interface ClaudeCodeProxyArgs {

@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { DoctorCheck } from "../doctor.js";
+import type { DoctorCheck } from "../../doctor-report.js";
 import { DEFAULT_PROXY_HOST, DEFAULT_PROXY_PORT, HEALTH_PATH, HEALTH_SERVICE } from "./proxy.js";
 
 export type ProxyProbe = { ok: true; upstream: string | null } | { ok: false; reason: "unreachable" | "not-leakshield" };

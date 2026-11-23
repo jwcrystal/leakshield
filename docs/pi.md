@@ -10,9 +10,9 @@ pi builds its provider clients per request and resolves `fetch` at that point (`
 
 | Layer | Responsibility |
 |---|---|
-| `src/pi/guard.ts` | Wraps `globalThis.fetch`: masks provider requests, restores assistant text in the reply, passes unrelated fetch traffic through, refuses unknown routes and transports it cannot see |
-| `src/pi/extension.ts` | Binds the pi session and model, blocks input and tools when the model cannot be protected, restores tool arguments at `tool_call` |
-| `src/pi/tool-policy.ts` | pi's `HostToolPolicy`: read/write/edit/bash/powershell fields, unknown and MCP tools refused |
+| `src/adapters/pi/guard.ts` | Wraps `globalThis.fetch`: masks provider requests, restores assistant text in the reply, passes unrelated fetch traffic through, refuses unknown routes and transports it cannot see |
+| `src/adapters/pi/extension.ts` | Binds the pi session and model, blocks input and tools when the model cannot be protected, restores tool arguments at `tool_call` |
+| `src/adapters/pi/tool-policy.ts` | pi's `HostToolPolicy`: read/write/edit/bash/powershell fields, unknown and MCP tools refused |
 
 pi's own provider traffic is guarded wherever LeakShield sits in the load order: the SDKs resolve `fetch` per request. What position changes is other extensions: one loaded earlier that keeps the raw fetch (or a client built from it) reaches the provider unmasked. First position is therefore recommended, not required for pi itself, and the doctor reports when LeakShield is not first.
 
@@ -22,14 +22,14 @@ Add the extension to pi's `settings.json` (`~/.pi/agent/settings.json`). First p
 
 ```json
 {
-  "extensions": ["/absolute/path/to/node_modules/leakshield/dist/pi/extension.js"]
+  "extensions": ["/absolute/path/to/node_modules/leakshield/dist/adapters/pi/extension.js"]
 }
 ```
 
 Or start pi with the flag, which always loads before `settings.extensions`:
 
 ```bash
-pi -e /absolute/path/to/node_modules/leakshield/dist/pi/extension.js
+pi -e /absolute/path/to/node_modules/leakshield/dist/adapters/pi/extension.js
 ```
 
 The flag is the only setup that structurally guarantees first position, but `--doctor pi` cannot see CLI flags: it reports a `-e`-only install as NOT VERIFIED. Register the path in settings when you want the check to be meaningful.
@@ -39,7 +39,7 @@ From a checkout:
 ```bash
 npm ci
 npm run build
-pi -e "$PWD/dist/pi/extension.js"
+pi -e "$PWD/dist/adapters/pi/extension.js"
 ```
 
 Then check the setup:

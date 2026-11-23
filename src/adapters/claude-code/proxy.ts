@@ -18,9 +18,9 @@
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
-import { createGuardCore, PROTECT_FAILED_ERROR, type GuardCore } from "../core/session-guard.js";
-import { containsTokenPrefix, createPseudonymizer } from "../decision/pseudonymization.js";
-import type { GuardConfig } from "../types.js";
+import { createGuardCore, PROTECT_FAILED_ERROR, type GuardCore } from "../../core/session-guard.js";
+import { containsTokenPrefix, createPseudonymizer } from "../../decision/pseudonymization.js";
+import type { GuardConfig } from "../../types.js";
 
 export const DEFAULT_PROXY_HOST = "127.0.0.1";
 export const DEFAULT_PROXY_PORT = 8787;

@@ -50,7 +50,7 @@ leakshield --doctor pi
 
 `LEAKSHIELD_CONFIG` 指定 guard 設定檔，跟 Claude Code proxy 的 `--config` 一樣。沒設定時照一般搜尋順序（工作目錄的 `config/guard.config.yaml`，再找 `~/.leakshield/guard.config.yaml`）。
 
-extension 需要 Node.js 20 以上與已建置的 LeakShield 套件。Bun 打包的單檔執行檔不提供這個檔案；請用 npm 套件或 checkout。
+extension 需要 Node.js 22.19 以上（pi 1.6 的最低版本）與已建置的 LeakShield 套件。Bun 打包的單檔執行檔不提供這個檔案；請用 npm 套件或 checkout。
 
 ## Provider 支援
 

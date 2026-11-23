@@ -15,6 +15,7 @@ All notable changes are listed here.
 
 ### Fixed
 
+- Rebuilt model requests let fetch calculate their content length instead of setting the header explicitly. This fixes `invalid content-length header` with Node 22's native fetch and a host-installed Undici 8 dispatcher, reproduced in pi SDK embedding. The shared fix covers all three supported wire APIs. See [#118](https://github.com/jwcrystal/leakshield/issues/118).
 - Transparent mode no longer forwards original request bytes that parse to something other than what was scanned. A Chat Completions, Anthropic Messages or Responses body with a duplicate key (only the last occurrence survives `JSON.parse`) or invalid UTF-8 was forwarded byte-for-byte when masking changed nothing, so a secret in an earlier occurrence reached the provider unscanned. Any body that is not already its canonical `JSON.stringify` serialization is now forwarded as that serialization, even when nothing was masked: whitespace and `\u` escapes are normalized, and numbers are re-emitted as parsed (`1.0` becomes `1`, integers beyond 2^53 lose precision, which also closes the gap where such digits were scanned rounded but forwarded exact). A body that already is canonical keeps its original request. ([#93](https://github.com/jwcrystal/leakshield/pull/93))
 
 ## 0.3.1 — 2026-11-21

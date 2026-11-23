@@ -31,7 +31,9 @@ export function parseDoctorTarget(args: readonly string[]): DoctorTarget | { err
     const next = index === -1 ? undefined : args[index + 1];
     if (next !== undefined && !next.startsWith("-")) raw = next;
   }
-  if (raw === undefined || raw === "" || raw === "all") return "all";
+  if (raw === undefined) return "all";
+  if (raw.length === 0) return { error: "doctor target is missing; use opencode, claude-code, pi or all" };
+  if (raw === "all") return "all";
   if (TARGETS.has(raw)) return raw as DoctorTarget;
   return { error: `unknown doctor target "${raw}"; use opencode, claude-code, pi or all` };
 }
@@ -52,6 +54,9 @@ function printSection(title: string, checks: readonly DoctorCheck[], verdict: st
 /** A Claude Code check is protected only behind a healthy LeakShield proxy. */
 export function claudeCodeVerdict(checks: readonly DoctorCheck[]): { exit: number; verdict: string } {
   if (checks.some((check) => check.state === "fail")) return { exit: 1, verdict: "BROKEN" };
+  if (checks.every((check) => check.state === "skip")) {
+    return { exit: 1, verdict: "NOT INSTALLED — claude is not on PATH" };
+  }
   if (checks.some((check) => check.id === "claude-code-provider" || check.id === "claude-code-host-managed")) {
     return { exit: 1, verdict: "BYPASSED — a provider or host-managed setting skips the proxy" };
   }

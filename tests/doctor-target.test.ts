@@ -1,6 +1,6 @@
 // Component under test: per-host doctor dispatch (src/doctor-hosts.ts).
 import { describe, expect, it } from "vitest";
-import { claudeCodeVerdict, parseDoctorTarget, piVerdict } from "../src/doctor-hosts.js";
+import { claudeCodeVerdict, parseDoctorTarget, piVerdict, runDoctorCommand } from "../src/doctor-hosts.js";
 
 describe("doctor target parsing", () => {
   it("accepts a bare flag, a separated target and an inline target", () => {
@@ -15,9 +15,13 @@ describe("doctor target parsing", () => {
     expect(parseDoctorTarget(["--doctor", "--forget"])).toBe("all");
   });
 
-  it("refuses an unknown target instead of silently checking everything", () => {
-    const result = parseDoctorTarget(["--doctor", "nope"]);
-    expect(result).toMatchObject({ error: expect.stringContaining("unknown doctor target") });
+  it("refuses an unknown target instead of silently checking everything", async () => {
+    expect(parseDoctorTarget(["--doctor", "nope"])).toMatchObject({
+      error: expect.stringContaining("unknown doctor target"),
+    });
+    expect(parseDoctorTarget(["--doctor="])).toMatchObject({ error: expect.stringContaining("missing") });
+    expect(await runDoctorCommand(["--doctor", "nope"])).toBe(2);
+    expect(await runDoctorCommand(["--doctor=nope"])).toBe(2);
   });
 });
 
@@ -42,6 +46,10 @@ describe("per-host verdicts", () => {
         { id: "claude-code-proxy", state: "ok", detail: "proxy answers" },
       ]).exit,
     ).toBe(1);
+    expect(claudeCodeVerdict([{ id: "claude-code", state: "skip", detail: "not found" }])).toEqual({
+      exit: 1,
+      verdict: expect.stringContaining("NOT INSTALLED"),
+    });
   });
 
   it("treats pi as protected only inside a managed launch", () => {

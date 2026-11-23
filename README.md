@@ -270,7 +270,7 @@ The default `mode` is **`transparent`** (see [Transparent mode](docs/plugin/tran
 
 #### What `PARTIAL` means
 
-`leakshield --doctor` exits 0 for two statuses. They are install-level results, not a guarantee that nothing sensitive reaches a model.
+`leakshield --doctor` exits 0 for two statuses. They are install-level results, not a guarantee that nothing sensitive reaches a model. Pass `--doctor opencode`, `--doctor claude-code` or `--doctor pi` (also `--doctor=<host>`) to check one host with its own exit code.
 
 | Status | Setup | Meaning |
 |--------|-------|---------|

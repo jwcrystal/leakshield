@@ -266,7 +266,7 @@ LeakShield 只支援 OpenCode v2：v2 載入套件的 `id` + `setup(ctx)` 定義
 
 #### `PARTIAL` 的意思
 
-`leakshield --doctor` 在兩種狀態下 exit 0。它們是安裝層的結果，不保證敏感內容絕不會送到模型。
+`leakshield --doctor` 在兩種狀態下 exit 0。它們是安裝層的結果，不保證敏感內容絕不會送到模型。可用 `--doctor opencode`、`--doctor claude-code` 或 `--doctor pi`（也支援 `--doctor=<host>`）只檢查單一 host，exit code 只反映它。
 
 | 狀態 | 設定 | 意思 |
 |------|------|------|

@@ -129,7 +129,7 @@ If the LeakShield extension is installed in pi's settings but pi is started with
 - warning when plain `pi` would go straight to a real provider endpoint
 - whether this shell is inside a managed launch, with a health probe of the boundary
 
-`leakshield --doctor pi` checks only this section and exits 0 only when the shell is a managed launch with no failed check. `--doctor claude-code` and `--doctor opencode` do the same for the other hosts, so CI can check one integration without another host's state changing the result.
+`leakshield --doctor pi` checks only this section and exits 0 only when the shell is a managed launch with no failed check. `--doctor claude-code` and `--doctor opencode` do the same for the other hosts, so CI can check one integration without another host's state changing the result. Use `--doctor pi`, not `leakshield pi --doctor`, which passes the flag to pi.
 
 ## Limitations
 

@@ -11,7 +11,7 @@
 
 Four supported modes:
 - **OpenCode Plugin**: The enforced ingress gate for OpenCode. Use this when OpenCode sends content to a model.
-- **pi adapter**: A managed launcher and extension that protect the pi coding agent through a loopback provider boundary.
+- **pi adapter**: An in-process pi extension that guards the agent's provider requests through the shared wire core.
 - **CLI**: Manual or CI scanning of text, files, and directories; supports redaction.
 - **Web UI**: Local browser interface and REST endpoint for manual scanning.
 
@@ -20,7 +20,7 @@ MCP server mode has been removed. It depended on the model voluntarily calling a
 | Mode | Start it with | Use it for |
 |------|---------------|------------|
 | OpenCode Plugin | Add the `leakshield` package or the `dist` directory to `opencode.json` (OpenCode v2) | Automatic, fail-closed protection for OpenCode model inputs and tool outputs |
-| pi adapter | `leakshield pi --provider <id>` | Managed pi launch with masked provider requests and restored read/write/edit/bash arguments |
+| pi adapter | `pi -e node_modules/leakshield/dist/pi/extension.js` (or first in pi `settings.extensions`) | Masked pi provider requests and restored read/write/edit/bash arguments |
 | CLI | `npm run scan -- --file ./path` (or `leakshield --file ./path` after a global install / `npm link`) | Explicit local or CI scans; it never sends content to a model |
 | Web UI | `npm run web` | Manual browser scans at `http://localhost:3000` |
 
@@ -30,7 +30,7 @@ MCP server mode has been removed. It depended on the model voluntarily calling a
 
 - Transparent mode has been verified on OpenCode v2.0.28 with local loopback providers, and once against a real OpenAI model. The 0.3.0 tool restoration was rechecked on OpenCode v2.2.5 with a loopback provider, the OpenChamber render tool and `rtk` ([record](docs/evidence/2026-11-06-opencode-2.2.5-tool-restoration.md)). It is **not** a guarantee that nothing sensitive reaches a model: the recommended hook-first setup is reported as `PARTIAL` by `--doctor`, and content added after the plugin's hooks or sent by permitted tools (curl, remote MCP) is outside its coverage.
 - Claude Code is supported through a local proxy (`leakshield --claude-code-proxy`, then `ANTHROPIC_BASE_URL`), verified with Claude Code 2.1.321 against a loopback stub upstream ([record](docs/evidence/2026-11-21-claude-code-proxy.md)). It masks model requests and restores assistant text, but does not restore placeholders at tool execution yet: see [Claude Code](docs/claude-code.md).
-- pi is supported through `leakshield pi`, which routes the agent's only provider through a loopback boundary and restores read/write/edit/bash arguments locally. Verified against pi 1.6.0 with a recording stub upstream ([record](docs/evidence/2026-11-23-pi-adapter.md)); no real provider credentials were available, and OAuth-only accounts are not supported. See [pi adapter](docs/pi.md).
+- pi is supported through an in-process extension that wraps the agent's `fetch`, masks the three wire APIs it supports, and restores read/write/edit/bash arguments locally. Verified against pi 1.6.0 with a recording stub upstream ([record](docs/evidence/2026-11-23-pi-extension.md)); providers whose transport bypasses fetch (Codex WebSocket, Bedrock) are refused, and OAuth-only accounts are not supported. See [pi adapter](docs/pi.md).
 - Not yet verified: OS-keychain custody on Windows and Linux (macOS verified 2026-10-20), a real Anthropic provider, long histories on other providers, long-running use ([#26](https://github.com/jwcrystal/leakshield/issues/26)).
 - Defaults may still change during `0.x`; see the [changelog](CHANGELOG.md).
 - Verification records: [docs/evidence](docs/evidence/README.md). Report vulnerabilities privately: [SECURITY.md](SECURITY.md). License: [Apache-2.0](LICENSE).
@@ -369,15 +369,14 @@ The proxy masks every Anthropic Messages request Claude Code sends (and `count_t
 
 ---
 
-### pi (managed launcher)
+### pi (in-process extension)
 
 ```bash
-leakshield --pi-install                            # optional: register the extension in pi's settings
-leakshield pi --provider commandcode --continue    # run pi behind the loopback boundary
-leakshield --doctor                                # the "pi:" section checks the wiring
+pi -e /path/to/node_modules/leakshield/dist/pi/extension.js   # load it first
+leakshield --doctor pi                                        # checks registration, order and wire API
 ```
 
-pi's provider hooks fail open on errors and compaction bypasses them, so the launcher writes a generated agent directory whose only provider is a loopback boundary. Every provider request is masked there before the upstream credential is added; the pi child never receives that credential. The extension restores `read`, `write`, `edit`, `bash` and `powershell` arguments at the local execution boundary, restores assistant display text, and keeps pi session files in the user's normal session directory, so `--continue`, `--resume` and `--session` keep working. Verified against pi 1.6.0 with a recording stub; no real provider credentials were available for this change, and OAuth-only accounts are not supported. See [pi adapter](docs/pi.md), including the limitations (ambient extensions and project trust are disabled, and plain `pi` without the launcher is refused by the extension rather than protected).
+pi resolves `fetch` when it builds a provider client, including compaction and branch summaries, so an extension that wraps `globalThis.fetch` covers the same traffic the OpenCode plugin covers through its wire hook. Every provider request is masked in-process; assistant text is restored in the reply, and `read`, `write`, `edit`, `bash` and `powershell` arguments are restored at the local execution boundary. Session files stay with pi, so `--continue`, `--resume` and `--session` keep working. Verified against pi 1.6.0 with a recording stub; providers that bypass fetch (Codex WebSocket, Bedrock, Google auth) are refused, OAuth-only accounts are not supported, and the extension has to load first. See [pi adapter](docs/pi.md).
 
 ---
 

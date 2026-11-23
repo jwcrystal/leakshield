@@ -48,22 +48,19 @@ const isDoctorMode = args.some((arg) => arg === "--doctor" || arg.startsWith("--
 const isForgetMode = args.includes("--forget");
 const piIndex = args.indexOf("--pi");
 const isPiSubcommand = piIndex === -1 && args[2] === "pi";
-const isPiMode = piIndex !== -1 || isPiSubcommand;
-const isPiInstallMode = args.includes("--pi-install");
+const isPiMode = piIndex !== -1 || isPiSubcommand || args.includes("--pi-install");
 const valueOf = (flag: string): string | undefined => {
   const index = args.indexOf(flag);
   return index !== -1 && index + 1 < args.length ? args[index + 1] : undefined;
 };
 
-if (isHelpRequest(args) && !isPiMode) {
+if (isPiMode) {
+  console.error("leakshield: `leakshield pi` was removed. pi now runs directly with the LeakShield extension loaded in-process.");
+  console.error("leakshield: add node_modules/leakshield/dist/pi/extension.js as the first entry of pi settings.extensions, or start pi with -e <path>.");
+  console.error("leakshield: check the setup with `leakshield --doctor pi`.");
+  process.exitCode = 2;
+} else if (isHelpRequest(args)) {
   console.log(HELP_TEXT);
-} else if (isPiInstallMode) {
-  const { runPiInstall } = await import("./pi/cli.js");
-  process.exitCode = runPiInstall(args);
-} else if (isPiMode) {
-  const { runPi } = await import("./pi/cli.js");
-  const piArgs = piIndex !== -1 ? args.slice(piIndex + 1) : args.slice(3);
-  process.exitCode = await runPi(piArgs);
 } else if (isForgetMode) {
   // W2/B5: active erasure of persisted mappings. Content-free output.
   const { runForget } = await import("./forget.js");

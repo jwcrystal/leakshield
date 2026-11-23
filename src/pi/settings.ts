@@ -1,14 +1,12 @@
 /**
- * pi user settings as inputs to the managed launcher.
+ * pi user settings as inputs to the extension and the doctor.
  *
- * The launcher reads the user's agent directory (settings.json and
- * models.json) for the selected model, the session directory and the provider
- * declaration. It never reuses that directory as the child's config directory:
- * the child gets a generated directory whose only provider is the loopback
- * boundary, so an ambient provider entry or extension cannot route around it.
+ * The extension protects the process it runs in; it never rewrites pi's agent
+ * directory. This module only reads that configuration to answer what the
+ * doctor needs: which provider and model are selected, which wire API they
+ * use, and where the extension has to be registered.
  */
 import path from "node:path";
-import type { PiApi } from "./proxy.js";
 
 export interface PiModelEntry {
   id?: string;
@@ -47,6 +45,8 @@ const SUPPORTED_APIS: ReadonlySet<string> = new Set([
   "openai-responses",
   "anthropic-messages",
 ]);
+
+export type PiApi = "openai-completions" | "openai-responses" | "anthropic-messages";
 
 export function isSupportedPiApi(value: string): value is PiApi {
   return SUPPORTED_APIS.has(value);
@@ -125,114 +125,40 @@ export function loadPiUserAgent(
   return { agentDir, settings, providers };
 }
 
-/** Resolves pi's `apiKey` syntax: literal, `$NAME`, or `!command` (refused). */
-export function resolveApiKeySpec(
-  spec: string | undefined,
-  env: Readonly<Record<string, string | undefined>>,
-  seen?: Set<string>,
-): string | undefined {
-  if (spec === undefined) return undefined;
-  if (spec.startsWith("!")) {
-    throw new Error("pi models.json apiKey commands are not run by the LeakShield launcher; use a literal or $ENV value");
-  }
-  if (spec.startsWith("$")) {
-    const name = spec.slice(1);
-    seen?.add(name);
-    const value = env[name];
-    return value !== undefined && value.length > 0 ? value : undefined;
-  }
-  return spec.length > 0 ? spec : undefined;
-}
-
-export interface PiProviderResolution {
+export interface PiSelectedModel {
   provider: string;
-  upstream: { baseUrl: string; api: PiApi; apiKey?: string; headers?: Record<string, string> };
-  /** Model ids pi may request, when the provider entry declares them. */
-  models: string[];
-  /** Safe metadata for the declared models, copied without baseUrl or credentials. */
-  modelEntries: PiModelEntry[];
-  /** Forwards the user's model selection, including its `:thinking` suffix. */
   model?: string;
-  /** Environment names read for credentials; the child must not inherit them. */
-  envNames: string[];
+  api?: string;
+  baseUrl?: string;
 }
 
-export interface PiProviderResolutionInput {
-  agent: PiUserAgent;
-  env: Readonly<Record<string, string | undefined>>;
-  provider?: string;
-  model?: string;
-  upstreamOverride?: string;
-  apiOverride?: string;
-}
-
-function declaredModels(entry: PiProviderEntry | undefined): PiModelEntry[] {
-  if (entry?.models === undefined) return [];
-  const models: PiModelEntry[] = [];
-  for (const model of entry.models) {
-    if (isRecord(model) && typeof model.id === "string" && model.id.length > 0) models.push(model);
+/**
+ * The provider/model pi would start with. `defaultModel` may name a model id
+ * or provider/id; a model entry's `api` overrides the provider's.
+ */
+export function resolvePiSelectedModel(agent: PiUserAgent, env: Readonly<Record<string, string | undefined>>): PiSelectedModel | null {
+  const configured = env.PI_PROVIDER ?? agent.settings.defaultProvider;
+  let model = agent.settings.defaultModel;
+  let provider = configured;
+  if (model !== undefined && model.includes("/")) {
+    const slash = model.indexOf("/");
+    provider = provider ?? model.slice(0, slash);
+    model = model.slice(slash + 1);
   }
-  return models;
-}
-
-export function resolvePiProvider(input: PiProviderResolutionInput): PiProviderResolution {
-  const { agent, env } = input;
-  const model = input.model ?? agent.settings.defaultModel;
-  const provider = input.provider;
-  if (provider === undefined || provider.length === 0) {
-    throw new Error(
-      "no pi provider selected; pass --provider <id> naming a provider declared in pi's models.json",
-    );
-  }
+  if (provider === undefined || provider.length === 0) return null;
   const entry = agent.providers[provider];
-  if (entry === undefined) {
-    throw new Error(
-      `pi provider "${provider}" is not declared in pi's models.json; declare it with baseUrl, api and apiKey`,
-    );
-  }
-  /** Every environment name the credential resolution actually read. */
-  const envNames = new Set<string>();
-
-  const baseUrl = input.upstreamOverride ?? entry.baseUrl;
-  if (baseUrl === undefined) {
-    throw new Error(`pi provider "${provider}" has no known upstream; pass --upstream <url> and --api <api>`);
-  }
-  const api = input.apiOverride ?? entry.api;
-  if (api === undefined) {
-    throw new Error(`pi provider "${provider}" declares no api; pass --api (openai-completions, openai-responses, anthropic-messages)`);
-  }
-  if (!isSupportedPiApi(api)) {
-    throw new Error(
-      `pi provider "${provider}" uses api "${api}", which this LeakShield adapter does not speak; use a supported provider or --api`,
-    );
-  }
-
-  const apiKey = resolveApiKeySpec(entry.apiKey, env, envNames);
-
-  const headers: Record<string, string> = {};
-  for (const [name, spec] of Object.entries(entry.headers ?? {})) {
-    const value = resolveApiKeySpec(spec, env, envNames);
-    if (value !== undefined) headers[name] = value;
-  }
-
+  if (entry === undefined) return { provider, model };
+  const declared = entry.models?.find((candidate) => candidate.id === model);
   return {
     provider,
-    upstream: { baseUrl, api, apiKey, headers: Object.keys(headers).length > 0 ? headers : undefined },
-    models: declaredModels(entry).map((model) => model.id as string),
-    modelEntries: declaredModels(entry),
     model,
-    envNames: [...envNames],
+    api: declared?.api ?? entry.api,
+    baseUrl: declared?.baseUrl ?? entry.baseUrl,
   };
 }
 
-/** Session storage stays with the user so `--continue` and `--session` keep working. */
-export function resolveSessionDir(
-  agent: PiUserAgent,
-  env: Readonly<Record<string, string | undefined>>,
-  cwd: string,
-): string {
-  const override = env.PI_CODING_AGENT_SESSION_DIR;
-  if (override !== undefined && override.length > 0) return path.resolve(cwd, override);
-  if (agent.settings.sessionDir !== undefined) return path.resolve(cwd, agent.settings.sessionDir);
-  return path.join(agent.agentDir, "sessions");
+/** Resolves an extension entry against the working directory, the agent directory and as given. */
+export function resolveExtensionEntry(entry: string, cwd: string, agentDir: string): string[] {
+  const candidates = [path.resolve(cwd, entry), path.resolve(agentDir, entry), entry];
+  return [...new Set(candidates)];
 }

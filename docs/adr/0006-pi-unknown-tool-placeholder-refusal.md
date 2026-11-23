@@ -18,7 +18,7 @@ Issue #98 也明確要求：「Unknown executable tools must refuse placeholders
 ## Decision
 
 - pi adapter 只還原八個內建工具的參數；其餘工具若含 placeholder 就拒絕，不嘗試推測欄位。
-- 這個拒絕發生在 `src/pi/proxy.ts` 的 `/control/tool`，也就是本機執行邊界；extension 收到拒絕後 block 該次 tool call。
+- 這個拒絕發生在 `src/pi/tool-policy.ts` 的 `assertPiToolBoundary`，由 `src/pi/guard.ts` 在 `tool_call` 的本機執行邊界呼叫；extension 收到拒絕後 block 該次 tool call。
 - 不含 placeholder 的未知工具照常執行。
 - 若某個自訂工具確定是本機唯讀、且欄位語意可證明安全，應把它加進 adapter 的已知名單並補測試，而不是放寬成「所有未知工具都還原」。
 

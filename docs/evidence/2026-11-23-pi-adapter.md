@@ -1,5 +1,8 @@
 # Production pi adapter: managed launch, tools and sessions
 
+> **Superseded 2026-11-23:** the loopback proxy and managed launcher described here were removed from this branch; pi now runs with the in-process fetch guard. See [2026-11-23-pi-extension.md](2026-11-23-pi-extension.md) and the [gap audit](2026-11-23-pi-fetch-gap-audit.md).
+
+
 > Scope note: the real-pi runs below were made on commits before `ae33512`,
 > before the adapter scope trim. The trimmed `scripts/e2e/run-pi-adapter.mjs`
 > and `scripts/e2e/run-pi-wire.mjs` have not been re-run against real pi.

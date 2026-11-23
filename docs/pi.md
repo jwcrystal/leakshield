@@ -1,79 +1,66 @@
 # pi adapter
 
-LeakShield protects the [pi coding agent](https://github.com/earendil-works/pi) by running it against a loopback provider boundary. Placeholders replace sensitive values before any provider request, and local tools receive the original values only at their execution boundary.
+LeakShield protects the [pi coding agent](https://github.com/earendil-works/pi) with an in-process extension. The extension wraps `globalThis.fetch` before any provider client is built, so every model request on the three supported wire APIs is masked by the shared core, and placeholders are restored only where they are safe: assistant display text and local tool arguments.
 
-Verified against pi **1.6.0**. The launcher accepts `>= 1.6.0 < 2.0.0`; only 1.6.0 is covered by the runtime evidence.
+Verified against pi **1.6.0**. The doctor accepts `>= 1.6.0 < 2.0.0`; only 1.6.0 has runtime evidence.
 
-## Why a proxy, not only an extension
+## How it works
 
-pi's extension hooks are useful but not enforceable for egress:
-
-- `before_provider_request` continues with the original payload when a handler throws or rejects.
-- Compaction, branch summarization and other background calls use a different provider path that can bypass the payload hook.
-- A disabled extension, a `--no-extensions` run or a project package cannot be stopped by a callback.
-
-The adapter therefore uses both layers:
+pi builds its provider clients per request and resolves `fetch` at that point (`options.fetch ?? globalThis.fetch`), including compaction and branch summaries. Wrapping the global fetch therefore covers the same traffic the [OpenCode plugin](README.md#opencode-plugin-recommended) covers through its wire hook, with no proxy and no launcher.
 
 | Layer | Responsibility |
 |---|---|
-| Loopback provider boundary (`src/pi/proxy.ts`) | Masks every provider request, holds the session mapping, forwards with the upstream credential, refuses unsupported routes/models and failed masking |
-| pi extension (`src/pi/extension.ts`) | Supplies the pi session identity, restores placeholders for local tools, restores assistant display text |
+| `src/pi/guard.ts` | Wraps `globalThis.fetch`: masks provider requests, restores assistant text in the reply, passes unrelated fetch traffic through, refuses unknown routes and transports it cannot see |
+| `src/pi/extension.ts` | Binds the pi session and model, blocks input and tools when the model cannot be protected, restores tool arguments at `tool_call` |
+| `src/pi/tool-policy.ts` | pi's `HostToolPolicy`: read/write/edit/bash/powershell fields, unknown and MCP tools refused |
 
-`leakshield pi` writes a generated agent directory whose only provider is the boundary, starts pi with ambient extension discovery and project trust disabled, and never gives the child the upstream credential.
+An extension that runs *before* LeakShield can hold the raw fetch. Load order is therefore part of the setup, and the doctor reports it.
 
 ## Install
 
-Requires Node.js 20 or later and a built LeakShield package.
+Add the extension as the **first** entry of pi's `settings.json` (`~/.pi/agent/settings.json`):
 
-```bash
-npm install -g leakshield
-leakshield --pi-install   # optional: register the extension in ~/.pi/agent/settings.json
+```json
+{
+  "extensions": ["/absolute/path/to/node_modules/leakshield/dist/pi/extension.js"]
+}
 ```
 
-`--pi-install` writes the extension path into the user's pi settings additively and preserves unrelated fields. The managed launcher loads the extension explicitly, so installation is only needed for the fail-closed guard when someone runs plain `pi`.
+Or start pi with the flag, which always loads before `settings.extensions`:
+
+```bash
+pi -e /absolute/path/to/node_modules/leakshield/dist/pi/extension.js
+```
 
 From a checkout:
 
 ```bash
 npm ci
 npm run build
-node dist/cli.js pi --provider commandcode --continue
+pi -e "$PWD/dist/pi/extension.js"
 ```
 
-## Start pi through the boundary
+Then check the setup:
 
 ```bash
-leakshield pi --provider commandcode --continue
-leakshield pi --provider commandcode -p "review this diff"
-leakshield --pi --provider commandcode   # same launcher
+leakshield --doctor pi
 ```
 
-Launcher options (everything else is passed to pi):
+`LEAKSHIELD_CONFIG` selects the guard config file, the same way `--config` does for the Claude Code proxy. Without it, the usual discovery applies (`config/guard.config.yaml` in the working directory, then `~/.leakshield/guard.config.yaml`).
 
-| Option | Meaning |
-|---|---|
-| `--provider <id>` | **Required.** pi provider to protect; must be declared in pi's `models.json` with an `apiKey` |
-| `--model <pattern>` | Forwarded to pi; accepts `provider/id` and `:thinking` |
-| `--upstream <url>` | Override the provider API base (https, or loopback http) |
-| `--api <api>` | `openai-completions`, `openai-responses` or `anthropic-messages` |
-| `--config <path>` | `guard.config.yaml` instead of discovery |
-| `--control-port <port>` | Boundary port; defaults to an ephemeral loopback port |
-
-The launcher prints nothing that contains a credential.
+The extension needs Node.js 20 or later and a built LeakShield package. It is not served from the standalone Bun binaries; use the npm package or a checkout.
 
 ## Provider support
 
-The boundary speaks the three pi wire protocols it has shared Core support for:
+The guard speaks the three pi wire APIs it has shared Core support for:
 
 | pi `api` | Endpoint | Verified |
 |---|---|---|
-| `openai-completions` | `POST …/chat/completions` | unit + real pi process + real CommandCode provider |
+| `openai-completions` | `POST …/chat/completions` | unit + real pi process (stub) |
 | `anthropic-messages` | `POST …/messages` | unit + real pi process (stub) |
 | `openai-responses` | `POST …/responses` | unit + real pi process (stub) |
 
-A provider declared in pi's `models.json` is used as-is (base URL and API), including its declared model list. The provider must be declared there with an `apiKey`; `--upstream` and `--api` only override its base URL and API. Built-in provider selection (pi's catalog metadata and env-var credentials) was removed from the adapter and is tracked in #106.
-
-Example: Command Code is declared as a custom provider (verified with `deepseek/deepseek-v4.1-flash`):
+Any provider declared in pi's `models.json` or built into pi works as long as its API is one of these. Example custom provider:
 
 ```json
 {
@@ -88,56 +75,54 @@ Example: Command Code is declared as a custom provider (verified with `deepseek/
 }
 ```
 
-The launcher copies only safe model metadata into the generated config; `baseUrl`, `apiKey` and `headers` from that entry stay out of the pi child.
+Other APIs (`openai-codex-responses`, `bedrock-converse-stream`, `google-generative-ai`, Azure responses, …) do not send provider traffic through fetch. The extension cannot guard them, so it refuses the run when the selected model uses one. OAuth-only accounts are out of scope.
 
 ### Credentials
 
-The upstream credential comes only from the selected provider's `apiKey` in pi's `models.json`: a literal, or `$ENV_NAME` naming an environment variable. A `!command` value is refused and never executed. Environment variables are not read implicitly, and API keys saved by `pi auth login` are not consulted; if `apiKey` is absent or its `$ENV` variable is unset, the launcher refuses to start.
-
-OAuth-only accounts are not supported by the managed route. One real CommandCode request was verified (`deepseek/deepseek-v4.1-flash` through a custom `models.json` entry). Anthropic, OpenAI and OpenRouter work only once declared in `models.json` like any other provider; the adapter verifies their three wire formats by unit test rather than by live per-provider runs. The credential value is never passed to the pi child: its provider API key is the short-lived loopback token.
+pi keeps its own credential and configuration. The extension runs inside the pi process, so unlike the Claude Code proxy it cannot separate the upstream credential from the agent process: a tool that can read the environment or `models.json` can read it too. This matches the OpenCode plugin, which also runs in-process; LeakShield's scope is the model boundary, not secret isolation from the host.
 
 ## What is protected
 
-- Every provider request that reaches the configured route: system prompt, conversation history, tool results, and the summarization requests that compaction and branch summaries send. Automatic compaction and branch summarization were not run against the production launcher; their request shape is unit-tested.
-- Streaming replies pass through unchanged, so model-facing history keeps placeholders. The assistant display is restored locally through `pi.registerMarkdownTransformer`; stored messages are not rewritten.
+- Every provider request on the selected model's origin: system prompt, conversation history, tool results, and summarization requests. Automatic compaction was run against real pi 1.6.0; branch summarization uses the same `completeSummarization` path and is covered by that transport.
+- A `POST` to the provider origin on a route the guard cannot classify is refused. So are masking failures, a missing session, an unsupported API, and a core that cannot be built.
+- Assistant text in the reply is restored for display. Stored history keeps whatever pi received; the next request is masked again.
 - Tool arguments at execution time:
   - `read` (`path`, `offset`, `limit`), `grep`, `find`, `ls`: restored; an unresolved placeholder may stay literal because it can only match nothing.
   - `write` (`path`, `content`), `edit` (`path`, `edits[].oldText/newText`): restored; an incomplete restoration refuses the call.
   - `bash` and `powershell`: restored only in complete argument words where the original is shell-safe; command position, option injection, quoting and metacharacters refuse the call.
   - Shell restoration follows the same literal-argument subset as the OpenCode plugin: a placeholder may be a complete unquoted or whole-word quoted argument, a `curl`/`http` embedded value, or sit before a single trailing `>`/`>>` with a static filename. Pipelines, command chaining, expansions, `<`/`2>` redirection and a tokenized redirect target refuse the call. Token-free commands are unchanged.
   - Unknown, MCP and custom tools: a placeholder refuses the call. Their arguments may be forwarded to a remote service outside this session's mapping.
-- Unknown routes, models, malformed bodies, missing session identity, a wrong loopback token, failed masking, and upstream redirects are refused before any upstream request.
 
 ## Sessions
 
-Session files stay in the user's normal session directory, so `--continue`, `--resume`, `--session` and `/tree` keep working. The boundary scopes mappings by the pi session id that the extension supplies.
-
-Mappings are process-lifetime. A resumed session's old placeholders stay literal; `write`, `edit` and shell (`bash`, `powershell`) calls that need one are refused, and read-only tools degrade to a no-match. Persistent mappings are tracked in #105.
-
-## Unmanaged pi fails closed
-
-If the LeakShield extension is installed in pi's settings but pi is started without the launcher, the extension refuses input and every tool call with a message that says to use `leakshield pi`. It cannot block a provider request by itself, and it does not pretend to.
+Session files stay where pi keeps them, so `--continue`, `--resume`, `--session` and `/tree` keep working. Mappings are process-lifetime: a resumed session's old placeholders stay literal, `write`/`edit`/shell calls that need one are refused, and read-only tools degrade to a no-match. Persistent mappings are tracked in #105.
 
 ## Doctor
 
 `leakshield --doctor` reports a `pi:` section:
 
-- pi binary and supported version
-- extension file present
-- pi `settings.json` / `models.json` readable
-- provider selected through `PI_PROVIDER` (skipped when unset), and whether its `models.json` `apiKey` is available (never its value)
-- warning when plain `pi` would go straight to a real provider endpoint
-- whether this shell is inside a managed launch, with a health probe of the boundary
+- pi binary and a supported version
+- the extension file is present
+- the guard config loads
+- pi `settings.json` / `models.json` are readable
+- LeakShield is registered in `settings.extensions`, and whether it is first
+- the selected provider/model uses one of the three fetch APIs
 
-`leakshield --doctor pi` checks only this section and exits 0 only when the shell is a managed launch with no failed check. `--doctor claude-code` and `--doctor opencode` do the same for the other hosts, so CI can check one integration without another host's state changing the result. Use `--doctor pi`; `leakshield pi` requires `--provider` and treats the remaining arguments as pi arguments, so `leakshield pi --doctor` does not run the doctor.
+`leakshield --doctor pi` checks only this section. It exits 0 only when the extension is registered and no check failed; a load-order warning keeps exit 0 but says LeakShield is not first. `--doctor claude-code` and `--doctor opencode` do the same for the other hosts.
 
 ## Limitations
 
-- Plain `pi` without the launcher is not protected; the extension only refuses locally.
-- `--no-extensions` is always passed by the launcher, so pi's built-in extensions (MCP, codemode, tool search) and project packages are not loaded. The launcher refuses extra `-e`/`--extension` flags for the same reason: an extension can open its own connection and bypass the boundary.
-- Project trust is disabled (`--no-approve`) for the managed run; project `.pi` resources do not load.
-- Providers outside the three wire protocols (`google-generative-ai`, Bedrock, Vertex, Codex responses) are refused.
+- A `pi` run without the extension is not protected. Nothing can fail closed in a process that never loaded the guard.
+- `pi --no-extensions` disables it, as do `-ne` and a project that overrides settings. The doctor reports the settings state, not a running process.
+- An extension loaded before LeakShield can keep the raw fetch; load LeakShield first. An extension loaded after it sees the guard.
+- Providers outside the three wire APIs are refused, not guarded.
+- A model switch is checked on `model_select`; a switch made through a path that skips that event would be caught by the guard's per-request model check only if the new model uses a supported API.
 - Images and attachments follow LeakShield's `block` policy in this adapter; they are replaced rather than forwarded.
 - This is a model-boundary control, not an OS egress firewall. Any local process, including a user shell, can still send data directly; the OpenCode plugin has the same scope, so OS-level egress is a deployment concern rather than a host-adapter gap.
-- The standalone release binaries (`leakshield`, built with Bun) cannot serve the pi extension file from inside the binary. Use the npm package (or a checkout) for the pi adapter; `--doctor` reports the missing extension.
-- Interactive TUI rendering was not part of this change's runtime verification; the transformer is exercised by unit tests and print mode.
+- Interactive TUI rendering was not part of the runtime verification; print mode and the wire scripts cover the transport.
+
+## Verification
+
+- `node scripts/e2e/run-pi-wire.mjs <pi> openai-completions|anthropic-messages|openai-responses` — real pi, recording stub, one request per format, placeholder at the stub, restored display.
+- `node scripts/e2e/run-pi-extension.mjs <pi>` — real pi, scripted read → write → edit → bash → `--continue`, with the original values reaching only the local tools.
+- Record and transport audit: [2026-11-23-pi-extension.md](evidence/2026-11-23-pi-extension.md) and [2026-11-23-pi-fetch-gap-audit.md](evidence/2026-11-23-pi-fetch-gap-audit.md).

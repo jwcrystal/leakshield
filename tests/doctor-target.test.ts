@@ -52,23 +52,30 @@ describe("per-host verdicts", () => {
     });
   });
 
-  it("treats pi as protected only inside a managed launch", () => {
+  it("treats pi as protected only with a registered extension", () => {
     expect(
       piVerdict([
         { id: "pi", state: "ok", detail: "1.6.0" },
-        { id: "pi-launcher", state: "ok", detail: "managed launch active" },
+        { id: "pi-extension-registered", state: "ok", detail: "first" },
       ]),
     ).toEqual({ exit: 0, verdict: expect.stringContaining("PROTECTED") });
     expect(
       piVerdict([
         { id: "pi", state: "ok", detail: "1.6.0" },
-        { id: "pi-launcher", state: "warn", detail: "not managed" },
+        { id: "pi-extension-registered", state: "warn", detail: "second" },
+      ]),
+    ).toEqual({ exit: 0, verdict: expect.stringContaining("not the first") });
+    expect(
+      piVerdict([
+        { id: "pi", state: "ok", detail: "1.6.0" },
+        { id: "pi-extension-registered", state: "fail", detail: "missing" },
       ]).exit,
     ).toBe(1);
     expect(
       piVerdict([
         { id: "pi", state: "ok", detail: "1.6.0" },
-        { id: "pi-launcher", state: "fail", detail: "dead boundary" },
+        { id: "pi-provider", state: "fail", detail: "websocket" },
+        { id: "pi-extension-registered", state: "ok", detail: "first" },
       ]).exit,
     ).toBe(1);
     expect(piVerdict([{ id: "pi", state: "skip", detail: "not found" }])).toEqual({

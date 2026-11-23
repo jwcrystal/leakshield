@@ -66,16 +66,23 @@ export function claudeCodeVerdict(checks: readonly DoctorCheck[]): { exit: numbe
   return { exit: 1, verdict: "NOT PROTECTED — Claude Code is not behind the proxy" };
 }
 
-/** A pi check is protected only inside a managed launch with no failed check. */
+/** An installed pi extension protects the process; load order is a caveat. */
 export function piVerdict(checks: readonly DoctorCheck[]): { exit: number; verdict: string } {
-  if (checks.some((check) => check.state === "fail")) return { exit: 1, verdict: "BROKEN" };
-  if (checks.some((check) => check.id === "pi-launcher" && check.state === "ok")) {
-    return { exit: 0, verdict: "PROTECTED — this shell is a managed pi launch" };
-  }
   if (checks.every((check) => check.state === "skip")) {
     return { exit: 1, verdict: "NOT INSTALLED — pi is not on PATH" };
   }
-  return { exit: 1, verdict: "NOT PROTECTED — run pi with `leakshield pi`" };
+  const registered = checks.find((check) => check.id === "pi-extension-registered");
+  if (registered?.state === "fail") {
+    return { exit: 1, verdict: "NOT PROTECTED — register the extension in pi settings.extensions" };
+  }
+  if (checks.some((check) => check.state === "fail")) return { exit: 1, verdict: "BROKEN" };
+  if (registered?.state === "ok") {
+    return { exit: 0, verdict: "PROTECTED — the extension guards pi's provider requests" };
+  }
+  if (registered?.state === "warn") {
+    return { exit: 0, verdict: "PROTECTED — LeakShield is not the first extension loaded" };
+  }
+  return { exit: 1, verdict: "NOT PROTECTED — no LeakShield extension check ran" };
 }
 
 export async function runDoctorCommand(args: readonly string[]): Promise<number> {

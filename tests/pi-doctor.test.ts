@@ -2,20 +2,22 @@
 // on the shared doctor exit code.
 import { describe, expect, it } from "vitest";
 import { doctorExitCode, type DoctorReport } from "../src/doctor.js";
+import { piVerdict } from "../src/doctor-hosts.js";
 import { runPiDoctor, type PiDoctorDeps } from "../src/pi/doctor.js";
 
 const AGENT = "/home/test/.pi/agent";
+const EXTENSION = "/pkg/dist/pi/extension.js";
 
 function deps(files: Record<string, string>, overrides: Partial<PiDoctorDeps> = {}): PiDoctorDeps {
   return {
     piVersion: () => "1.6.0",
     env: { HOME: "/home/test" },
     readFile: (filePath) => files[filePath] ?? null,
-    fileExists: () => true,
+    fileExists: (filePath) => filePath === EXTENSION,
     home: "/home/test",
     cwd: "/work",
-    extensionPath: () => "/pkg/dist/pi/extension.js",
-    probeProxy: async () => ({ ok: true, upstream: "https://api.anthropic.com" }),
+    extensionPath: () => EXTENSION,
+    checkConfig: () => null,
     ...overrides,
   };
 }
@@ -24,12 +26,16 @@ function stateOf(checks: Awaited<ReturnType<typeof runPiDoctor>>, id: string): s
   return checks.find((check) => check.id === id)?.state;
 }
 
-const SETTINGS = JSON.stringify({ defaultModel: "claude-test" });
-const MODELS = JSON.stringify({
-  providers: {
-    anthropic: { baseUrl: "https://api.anthropic.com", api: "anthropic-messages", apiKey: "$ANTHROPIC_API_KEY" },
-  },
-});
+function agent(settings: Record<string, unknown>, models: Record<string, unknown> = {}): Record<string, string> {
+  return {
+    [`${AGENT}/settings.json`]: JSON.stringify(settings),
+    [`${AGENT}/models.json`]: JSON.stringify({ providers: models }),
+  };
+}
+
+const ANTHROPIC = {
+  anthropic: { baseUrl: "https://api.anthropic.com", api: "anthropic-messages", apiKey: "$ANTHROPIC_API_KEY" },
+};
 
 describe("pi doctor", () => {
   it("skips when pi is not installed", async () => {
@@ -39,157 +45,98 @@ describe("pi doctor", () => {
 
   it("fails an unsupported pi version before anything else", async () => {
     const checks = await runPiDoctor(deps({}, { piVersion: () => "2.1.0" }));
-    expect(stateOf(checks, "pi-version")).toBe("fail");
+    expect(stateOf(checks, "pi")).toBe("fail");
     expect(stateOf(checks, "pi-extension")).toBeUndefined();
   });
 
-  it("reports the extension, provider and credential without reading the secret", async () => {
+  it("reports a registered first extension and a supported model as protected", async () => {
     const checks = await runPiDoctor(
-      deps(
-        { [`${AGENT}/settings.json`]: SETTINGS, [`${AGENT}/models.json`]: MODELS },
-        {
-          env: { HOME: "/home/test", PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-ant-secret-value" },
-          fileExists: () => false,
-        },
-      ),
+      deps(agent({ defaultProvider: "anthropic", defaultModel: "claude-test", extensions: [EXTENSION] }, ANTHROPIC)),
     );
-    expect(stateOf(checks, "pi-extension")).toBe("fail");
+    expect(stateOf(checks, "pi-extension")).toBe("ok");
+    expect(stateOf(checks, "pi-config")).toBe("ok");
+    expect(stateOf(checks, "pi-extension-registered")).toBe("ok");
     expect(stateOf(checks, "pi-provider")).toBe("ok");
-    expect(stateOf(checks, "pi-credential")).toBe("ok");
     expect(JSON.stringify(checks)).not.toContain("sk-ant-secret-value");
+    expect(piVerdict(checks)).toEqual({ exit: 0, verdict: expect.stringContaining("PROTECTED") });
   });
 
-  it("skips the provider check when no provider is selected", async () => {
+  it("fails when the extension is not registered in pi settings", async () => {
+    const checks = await runPiDoctor(deps(agent({ defaultProvider: "anthropic" }, ANTHROPIC)));
+    expect(stateOf(checks, "pi-extension-registered")).toBe("fail");
+    expect(piVerdict(checks)).toEqual({ exit: 1, verdict: expect.stringContaining("NOT PROTECTED") });
+  });
+
+  it("warns when another extension loads before LeakShield", async () => {
     const checks = await runPiDoctor(
-      deps({ [`${AGENT}/settings.json`]: SETTINGS, [`${AGENT}/models.json`]: MODELS }),
+      deps(agent({ defaultProvider: "anthropic", extensions: ["/other/before.js", EXTENSION] }, ANTHROPIC)),
     );
-    expect(stateOf(checks, "pi-provider")).toBe("skip");
-    expect(checks.find((check) => check.id === "pi-provider")?.detail).toContain("`leakshield pi` requires --provider");
-    expect(stateOf(checks, "pi-credential")).toBeUndefined();
+    expect(stateOf(checks, "pi-extension-registered")).toBe("warn");
+    expect(piVerdict(checks)).toEqual({ exit: 0, verdict: expect.stringContaining("not the first") });
   });
 
-  it("warns when PI_PROVIDER names a provider outside models.json", async () => {
+  it("resolves a relative extension entry against the working directory", async () => {
     const checks = await runPiDoctor(
       deps(
-        { [`${AGENT}/settings.json`]: SETTINGS, [`${AGENT}/models.json`]: MODELS },
-        { env: { HOME: "/home/test", PI_PROVIDER: "missing" } },
+        agent({ defaultProvider: "anthropic", extensions: ["dist/pi/extension.js"] }, ANTHROPIC),
+        { cwd: "/pkg" },
       ),
+    );
+    expect(stateOf(checks, "pi-extension-registered")).toBe("ok");
+  });
+
+  it("fails a model whose transport does not go through fetch", async () => {
+    const checks = await runPiDoctor(
+      deps(agent({ defaultProvider: "codex", extensions: [EXTENSION] }, {
+        codex: { baseUrl: "https://chatgpt.com/backend-api", api: "openai-codex-responses" },
+      })),
+    );
+    expect(stateOf(checks, "pi-provider")).toBe("fail");
+    expect(piVerdict(checks).exit).toBe(1);
+  });
+
+  it("warns when the provider declares no api", async () => {
+    const checks = await runPiDoctor(
+      deps(agent({ defaultProvider: "builtin", extensions: [EXTENSION] }, {
+        builtin: { baseUrl: "https://api.example.test" },
+      })),
     );
     expect(stateOf(checks, "pi-provider")).toBe("warn");
-    expect(checks.find((check) => check.id === "pi-provider")?.detail).toContain('"missing" is not declared');
-    expect(stateOf(checks, "pi-credential")).toBeUndefined();
   });
 
-  it("resolves the provider from generated settings only inside a managed launch", async () => {
-    const generated = "/tmp/leakshield-pi/run-1/agent";
-    const files = {
-      [`${generated}/settings.json`]: JSON.stringify({ defaultProvider: "anthropic" }),
-      [`${generated}/models.json`]: JSON.stringify({
-        providers: {
-          anthropic: {
-            baseUrl: "http://127.0.0.1:4321",
-            api: "anthropic-messages",
-            apiKey: "$LEAKSHIELD_PI_TOKEN",
-          },
-        },
-      }),
-    };
-    const checks = await runPiDoctor(
-      deps(files, {
-        env: {
-          HOME: "/home/test",
-          PI_CODING_AGENT_DIR: generated,
-          LEAKSHIELD_PI_URL: "http://127.0.0.1:4321",
-          LEAKSHIELD_PI_TOKEN: "t".repeat(48),
-        },
-      }),
-    );
-    expect(stateOf(checks, "pi-provider")).toBe("ok");
-    expect(checks.find((check) => check.id === "pi-provider")?.detail).toContain("anthropic");
-    expect(stateOf(checks, "pi-credential")).toBe("ok");
-    expect(stateOf(checks, "pi-launcher")).toBe("ok");
+  it("fails a broken agent directory and an unloadable guard config", async () => {
+    const broken = await runPiDoctor(deps({ [`${AGENT}/settings.json`]: "{oops" }));
+    expect(stateOf(broken, "pi-settings")).toBe("fail");
 
-    const outside = await runPiDoctor(
-      deps(files, { env: { HOME: "/home/test", PI_CODING_AGENT_DIR: generated } }),
-    );
-    expect(stateOf(outside, "pi-provider")).toBe("skip");
+    const config = await runPiDoctor(deps({}, { checkConfig: () => "bad rule" }));
+    expect(stateOf(config, "pi-config")).toBe("fail");
   });
 
-  it("warns when no credential is available and when this is not a managed launch", async () => {
-    const checks = await runPiDoctor(
-      deps({
-        [`${AGENT}/settings.json`]: SETTINGS,
-        [`${AGENT}/models.json`]: JSON.stringify({
-          providers: { anthropic: { baseUrl: "https://api.anthropic.com", api: "anthropic-messages" } },
-        }),
-      }, { env: { HOME: "/home/test", PI_PROVIDER: "anthropic" } }),
-    );
-    expect(stateOf(checks, "pi-credential")).toBe("warn");
-    expect(checks.find((check) => check.id === "pi-credential")?.fix).toContain("in pi's models.json");
-    expect(stateOf(checks, "pi-launcher")).toBe("warn");
+  it("reports a missing extension build and a missing binary", async () => {
+    const missing = await runPiDoctor(deps({}, { fileExists: () => false }));
+    expect(stateOf(missing, "pi-extension")).toBe("fail");
+    expect(stateOf(missing, "pi")).toBe("ok");
   });
 
-  it("warns that plain pi stays unprotected when models.json names real endpoints", async () => {
-    const checks = await runPiDoctor(
-      deps({
-        [`${AGENT}/models.json`]: JSON.stringify({
-          providers: { custom: { baseUrl: "https://api.example.test/v1", api: "openai-completions", models: [{ id: "m" }] } },
-        }),
-      }),
-    );
-    expect(stateOf(checks, "pi-route")).toBe("warn");
-  });
-
-  it("fails malformed pi configuration instead of guessing", async () => {
-    const checks = await runPiDoctor(deps({ [`${AGENT}/settings.json`]: "{oops" }));
-    expect(stateOf(checks, "pi-settings")).toBe("fail");
-  });
-
-  it("accepts an active boundary and rejects a dead or foreign one", async () => {
-    const active = await runPiDoctor(
-      deps(
-        { [`${AGENT}/settings.json`]: SETTINGS },
-        { env: { HOME: "/home/test", ANTHROPIC_API_KEY: "k", LEAKSHIELD_PI_URL: "http://127.0.0.1:4321" } },
-      ),
-    );
-    expect(stateOf(active, "pi-launcher")).toBe("ok");
-
-    const dead = await runPiDoctor(
-      deps(
-        { [`${AGENT}/settings.json`]: SETTINGS },
-        { env: { HOME: "/home/test", LEAKSHIELD_PI_URL: "http://127.0.0.1:4321" }, probeProxy: async () => ({ ok: false, reason: "unreachable" }) },
-      ),
-    );
-    expect(stateOf(dead, "pi-launcher")).toBe("fail");
-
-    const foreign = await runPiDoctor(
-      deps({}, { env: { HOME: "/home/test", LEAKSHIELD_PI_URL: "http://127.0.0.1:4321" }, probeProxy: async () => ({ ok: false, reason: "not-leakshield" }) }),
-    );
-    expect(stateOf(foreign, "pi-launcher")).toBe("fail");
-
-    const remote = await runPiDoctor(deps({}, { env: { HOME: "/home/test", LEAKSHIELD_PI_URL: "https://example.test" } }));
-    expect(stateOf(remote, "pi-launcher")).toBe("fail");
-  });
-
-  it("lets a managed pi launch satisfy the HOST_MISSING fallback", () => {
+  it("lets a registered pi extension satisfy the HOST_MISSING fallback", () => {
     const report: DoctorReport = {
       status: "HOST_MISSING",
       hostVersion: null,
       hostGeneration: null,
       configPath: null,
       checks: [],
-      pi: [{ id: "pi-launcher", state: "ok", detail: "managed launch active" }],
+      pi: [{ id: "pi-extension-registered", state: "ok", detail: "first" }],
     };
     expect(doctorExitCode(report)).toBe(0);
     expect(
-      doctorExitCode({ ...report, pi: [{ id: "pi-launcher", state: "warn", detail: "not managed" }] }),
+      doctorExitCode({ ...report, pi: [{ id: "pi-extension-registered", state: "fail", detail: "missing" }] }),
     ).toBe(1);
     expect(
-      doctorExitCode({ ...report, pi: [{ id: "pi-version", state: "fail", detail: "unsupported" }] }),
+      doctorExitCode({ ...report, pi: [{ id: "pi", state: "fail", detail: "unsupported" }] }),
     ).toBe(1);
   });
 
-  it("does not fail a protected OpenCode run for an inactive broken pi setup", async () => {
+  it("does not fail a protected OpenCode run for a broken pi setup", () => {
     const protectedRun: DoctorReport = {
       status: "PROTECTED",
       hostVersion: "2.2.5",
@@ -197,16 +144,8 @@ describe("pi doctor", () => {
       configPath: "/work/opencode.json",
       checks: [],
     };
-    // Real report shape: a broken agent directory still emits a `pi-launcher:
-    // warn` row because this is not a managed launch.
-    const checks = await runPiDoctor(
-      deps({ [`${AGENT}/settings.json`]: "{oops" }, { env: { HOME: "/home/test" } }),
-    );
-    expect(stateOf(checks, "pi-settings")).toBe("fail");
-    expect(stateOf(checks, "pi-launcher")).toBe("warn");
-    expect(doctorExitCode({ ...protectedRun, pi: checks })).toBe(0);
     expect(
-      doctorExitCode({ ...protectedRun, pi: [{ id: "pi-launcher", state: "fail", detail: "dead boundary" }] }),
-    ).toBe(1);
+      doctorExitCode({ ...protectedRun, pi: [{ id: "pi-extension-registered", state: "fail", detail: "missing" }] }),
+    ).toBe(0);
   });
 });

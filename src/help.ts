@@ -9,8 +9,6 @@ Usage:
                                       use --doctor pi, not pi --doctor
   leakshield --doctor=<host>          Same target, inline form
   leakshield --claude-code-proxy      Start the local proxy for Claude Code (see below)
-  leakshield --pi [...]               Run the pi coding agent behind the LeakShield boundary
-  leakshield --pi-install             Register the LeakShield extension in pi's settings
   leakshield --forget --all           Delete all persisted transparent-mode mappings
   leakshield --forget --session <id>  Delete persisted mappings for one session
   leakshield --help                   Show this help
@@ -39,10 +37,10 @@ Claude Code proxy options (then set ANTHROPIC_BASE_URL=http://127.0.0.1:<port>):
   --config <path>                LeakShield config file (default: discovered from the working directory)
   --attachments block|allow      Refuse (default) or pass images/documents through unscanned
 
-pi options (leakshield --pi --help lists them all):
-  --provider <id>                pi provider to protect (required; must be a
-                                 provider declared in models.json)
-  --model <provider/id>          Model passed to pi
+pi (the LeakShield extension runs inside pi; see docs/pi.md):
+  Register node_modules/leakshield/dist/pi/extension.js as the first entry of
+  pi settings.extensions, or start pi with -e <path>. Check it with
+  leakshield --doctor pi; LEAKSHIELD_CONFIG selects the guard config file.
 
 Forget options:
   --path <file>                  Mapping store location (default: ~/.local/share/leakshield/SGP.db)

@@ -4,7 +4,7 @@
 Application layer for the scanner: configuration, rule engine, decision model, pseudonymization, OpenCode plugin hooks, and the CLI / Web transports.
 
 ## Design
-- Entrypoints: `index.ts` (OpenCode plugin, re-exports `opencode.ts`), `cli.ts` (CLI / Web / doctor / forget / `--claude-code-proxy` / `--pi`), and `pi/extension.ts` (pi extension, registered by `leakshield --pi-install`).
+- Entrypoints: `index.ts` (OpenCode plugin, re-exports `opencode.ts`), `cli.ts` (CLI / Web / doctor / forget / `--claude-code-proxy`), and `pi/extension.ts` (pi extension, registered in pi `settings.extensions` or loaded with `-e`).
 - Subdirectories:
   - `config/` — YAML config loading and validation.
   - `rules/` — built-in and dynamic rules, encoding-aware detection, unicode checks, exact `.env` values.
@@ -15,7 +15,7 @@ Application layer for the scanner: configuration, rule engine, decision model, p
   - `utils/` — file collection, path security, Windows console encoding.
 - `core/` — host-independent wire layer: `wire.ts` (Chat/Anthropic/Responses mask and restore), `sse-recovery.ts`, `ws.ts` (Responses WebSocket frames), `tool-restore-policy.ts` (per-field tool restore rules), `session-guard.ts` (`createGuardCore`: session mapping, request masking, reply and tool restoration, persistence). With `decision/`, `scanner/`, `rules/`, `config/` and `types.ts` it must not import any `opencode*` module (`tests/core-boundary.test.ts`).
 - `claude-code/` — proxy adapter: `proxy.ts` (Anthropic Messages masking and restoration), `cli.ts` (`--claude-code-proxy`), `doctor.ts`.
-- `pi/` — pi adapter: `proxy.ts` (loopback provider boundary for Chat Completions, Anthropic Messages and Responses, plus display/tool control endpoints), `extension.ts` (pi hook surface: session header, tool restoration, display transformer, unmanaged fail-closed), `tool-policy.ts` (pi built-in classification and unknown-tool refusal), `settings.ts` (pi `settings.json`/`models.json` inputs and provider resolution), `launcher.ts` (`leakshield pi` generated agent directory, child environment, cleanup), `cli.ts`, `doctor.ts`.
+- `pi/` — pi adapter: `guard.ts` (in-process fetch boundary: masking, reply restoration, route and API refusal, tool restoration), `extension.ts` (pi hook surface: session/model binding, input and tool refusal), `tool-policy.ts` (pi built-in classification and unknown-tool refusal), `settings.ts` (pi `settings.json`/`models.json` reads and model selection), `doctor.ts`.
 - Plugin modules: `opencode.ts` (plugin entry; `server` is a fail-closed stub for unsupported v1 hosts), `opencode-v2.ts` (v2), `opencode-transparent*.ts` (OpenCode hook registration over `core/`: transparent pseudonymization over HTTP/SSE, WebSocket, AI SDK), `opencode-hooks.ts`, `opencode-env-tools.ts` / `env-queries.ts` (opt-in read-only env queries), `plugin-options.ts`, `doctor.ts`, `forget.ts`.
 - MCP server mode no longer exists.
 

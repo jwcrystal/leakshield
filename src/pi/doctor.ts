@@ -1,10 +1,12 @@
 /**
  * pi adapter checks for `leakshield --doctor`.
  *
- * They answer whether the machine can run the managed boundary (pi present at
- * a supported version, extension built, user provider resolvable) and whether
- * the current shell is actually inside a managed launch. Like the Claude Code
- * checks, they never read or print a credential value.
+ * In-process protection has no launcher to inspect, so the checks answer the
+ * questions that decide whether pi will actually run behind the guard: is the
+ * extension built, is it registered ahead of every other extension, does the
+ * guard config load, and does the selected model use a wire API that goes
+ * through fetch. Like the Claude Code checks, they never read or print a
+ * credential value.
  */
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -12,16 +14,18 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DoctorCheck } from "../doctor.js";
-import { MINIMUM_PI_MINOR, parsePiVersion } from "./launcher.js";
-import { PI_HEALTH_PATH, PI_HEALTH_SERVICE } from "./proxy.js";
+import { loadConfig } from "../config/loader.js";
 import {
   defaultPiAgentDir,
+  isSupportedPiApi,
   loadPiUserAgent,
-  resolvePiProvider,
+  resolveExtensionEntry,
+  resolvePiSelectedModel,
   type PiUserAgent,
 } from "./settings.js";
 
-export type PiProxyProbe = { ok: true; upstream: string | null } | { ok: false; reason: "unreachable" | "not-leakshield" };
+export const MINIMUM_PI_MINOR = 6;
+const PI_API_LIST = "openai-completions, openai-responses or anthropic-messages";
 
 export interface PiDoctorDeps {
   piVersion(): string | null;
@@ -31,20 +35,38 @@ export interface PiDoctorDeps {
   home: string;
   cwd: string;
   extensionPath(): string;
-  probeProxy(baseUrl: string): Promise<PiProxyProbe>;
+  /** Loads the guard config the extension would use. */
+  checkConfig(): string | null;
 }
 
-function isLoopbackUrl(raw: string): boolean {
-  try {
-    const host = new URL(raw).hostname;
-    return host === "127.0.0.1" || host === "localhost" || host === "[::1]";
-  } catch {
-    return false;
-  }
+export function parsePiVersion(raw: string): { major: number; minor: number } | null {
+  const match = /^(\d+)\.(\d+)/.exec(raw.trim());
+  if (match === null) return null;
+  return { major: Number(match[1]), minor: Number(match[2]) };
 }
 
 function agentDirOf(deps: PiDoctorDeps): string {
   return deps.env.PI_CODING_AGENT_DIR ?? defaultPiAgentDir(deps.home);
+}
+
+function samePath(left: string, right: string): boolean {
+  try {
+    return fs.realpathSync(left) === fs.realpathSync(right);
+  } catch {
+    return path.resolve(left) === path.resolve(right);
+  }
+}
+
+/** Index of the LeakShield entry in `settings.extensions`, or -1. */
+export function extensionIndex(
+  agent: PiUserAgent,
+  extensionPath: string,
+  cwd: string,
+): number {
+  const entries = (agent.settings.extensions ?? []).filter((entry): entry is string => typeof entry === "string");
+  return entries.findIndex((entry) =>
+    resolveExtensionEntry(entry, cwd, agent.agentDir).some((candidate) => samePath(candidate, extensionPath)),
+  );
 }
 
 export async function runPiDoctor(deps: PiDoctorDeps): Promise<DoctorCheck[]> {
@@ -54,12 +76,13 @@ export async function runPiDoctor(deps: PiDoctorDeps): Promise<DoctorCheck[]> {
     checks.push({ id: "pi", state: "skip", detail: "pi binary not found on PATH; pi checks skipped." });
     return checks;
   }
-  if (parsePiVersion(version) === null) {
+  const parsed = parsePiVersion(version);
+  if (parsed === null || parsed.major !== 1 || parsed.minor < MINIMUM_PI_MINOR) {
     checks.push({
-      id: "pi-version",
+      id: "pi",
       state: "fail",
       detail: `pi ${version} is not supported; this adapter needs >= 1.${MINIMUM_PI_MINOR} < 2.`,
-      fix: "Upgrade pi, then rerun `leakshield --pi`.",
+      fix: "Upgrade pi before relying on the LeakShield extension.",
     });
     return checks;
   }
@@ -68,12 +91,24 @@ export async function runPiDoctor(deps: PiDoctorDeps): Promise<DoctorCheck[]> {
   const extensionPath = deps.extensionPath();
   checks.push(
     deps.fileExists(extensionPath)
-      ? { id: "pi-extension", state: "ok", detail: `managed extension ${extensionPath}` }
+      ? { id: "pi-extension", state: "ok", detail: `extension ${extensionPath}` }
       : {
           id: "pi-extension",
           state: "fail",
-          detail: `the managed extension is missing at ${extensionPath}; this build is incomplete.`,
+          detail: `the extension is missing at ${extensionPath}; this build is incomplete.`,
           fix: "Reinstall leakshield (the package must ship dist/pi/extension.js).",
+        },
+  );
+
+  const configError = deps.checkConfig();
+  checks.push(
+    configError === null
+      ? { id: "pi-config", state: "ok", detail: "guard configuration loads" }
+      : {
+          id: "pi-config",
+          state: "fail",
+          detail: `guard configuration could not be loaded: ${configError}`,
+          fix: "Fix the guard config, or point LEAKSHIELD_CONFIG at the intended file. pi exits instead of running unprotected.",
         },
   );
 
@@ -88,110 +123,65 @@ export async function runPiDoctor(deps: PiDoctorDeps): Promise<DoctorCheck[]> {
       fix: "Fix the JSON, or rerun with PI_CODING_AGENT_DIR pointing at the intended agent directory.",
     });
   }
+
   if (agent !== null) {
-    const configured = deps.env.PI_PROVIDER;
-    const managed = deps.env.LEAKSHIELD_PI_URL !== undefined;
-    const selected =
-      configured !== undefined && configured.length > 0
-        ? configured
-        : managed
-          ? agent.settings.defaultProvider
-          : undefined;
-    if (selected === undefined || selected.length === 0) {
+    const index = extensionIndex(agent, extensionPath, deps.cwd);
+    if (index === -1) {
+      checks.push({
+        id: "pi-extension-registered",
+        state: "fail",
+        detail: "LeakShield is not in pi settings.extensions, so a plain `pi` run is not protected.",
+        fix: `Add "${extensionPath}" as the first entry of settings.extensions, or start pi with -e "${extensionPath}".`,
+      });
+    } else if (index > 0) {
+      const earlier = (agent.settings.extensions ?? [])
+        .slice(0, index)
+        .map((entry) => String(entry))
+        .join(", ");
+      checks.push({
+        id: "pi-extension-registered",
+        state: "warn",
+        detail: `LeakShield is extension #${index + 1}; ${earlier} loads first and can keep the raw fetch.`,
+        fix: "Move the LeakShield entry to the top of settings.extensions, or pass it with -e.",
+      });
+    } else {
+      checks.push({
+        id: "pi-extension-registered",
+        state: "ok",
+        detail: "LeakShield is the first configured extension",
+      });
+    }
+
+    const selected = resolvePiSelectedModel(agent, deps.env);
+    if (selected === null) {
       checks.push({
         id: "pi-provider",
         state: "skip",
-        detail: "no provider selected; `leakshield pi` requires --provider",
+        detail: "no provider selected in settings; the guard checks the model at session start.",
+      });
+    } else if (selected.api === undefined) {
+      checks.push({
+        id: "pi-provider",
+        state: "warn",
+        detail: `${selected.provider}${selected.model !== undefined ? ` / ${selected.model}` : ""} declares no api; a built-in provider default applies.`,
+        fix: `Declare "api" in pi's models.json (${PI_API_LIST}), or confirm the model at runtime.`,
+      });
+    } else if (!isSupportedPiApi(selected.api)) {
+      checks.push({
+        id: "pi-provider",
+        state: "fail",
+        detail: `${selected.provider}${selected.model !== undefined ? ` / ${selected.model}` : ""} uses api ${selected.api}, which does not go through fetch; the extension refuses the run.`,
+        fix: `Select a model with ${PI_API_LIST}, or keep this provider for a host that can guard it.`,
       });
     } else {
-      let provider: string | undefined;
-      let model: string | undefined;
-      let credential: boolean | undefined;
-      try {
-        const resolution = resolvePiProvider({ agent, env: deps.env, provider: selected });
-        provider = resolution.provider;
-        model = resolution.model;
-        credential = resolution.upstream.apiKey !== undefined;
-      } catch (error) {
-        checks.push({
-          id: "pi-provider",
-          state: "warn",
-          detail: `pi provider could not be resolved: ${error instanceof Error ? error.message : String(error)}`,
-          fix: "Declare the provider in pi's models.json with baseUrl, api and apiKey.",
-        });
-      }
-      if (provider !== undefined && credential !== undefined) {
-        checks.push({
-          id: "pi-provider",
-          state: "ok",
-          detail: `${provider}${model !== undefined ? ` / ${model}` : ""}`,
-        });
-        checks.push(
-          credential
-            ? { id: "pi-credential", state: "ok", detail: `a credential is available for ${provider} (value not read).` }
-            : {
-                id: "pi-credential",
-                state: "warn",
-                detail: `no apiKey in pi's models.json for ${provider}.`,
-                fix: `set "apiKey" for ${provider} in pi's models.json (a literal or "$ENV_NAME").`,
-              },
-        );
-      }
-    }
-    // An entry that names a real upstream is expected; it becomes a bypass only
-    // when pi runs without the launcher.
-    const realEndpoints = Object.entries(agent.providers).filter(
-      ([, entry]) => typeof entry.baseUrl === "string" && !isLoopbackUrl(entry.baseUrl),
-    );
-    if (realEndpoints.length > 0 && deps.env.LEAKSHIELD_PI_URL === undefined) {
       checks.push({
-        id: "pi-route",
-        state: "warn",
-        detail: `pi's own models.json configures ${realEndpoints.map(([id]) => id).join(", ")}; a plain \`pi\` run sends provider requests directly and is not protected.`,
-        fix: "Start pi with `leakshield --pi` (or `leakshield pi`), which routes its only provider through the loopback boundary.",
+        id: "pi-provider",
+        state: "ok",
+        detail: `${selected.provider}${selected.model !== undefined ? ` / ${selected.model}` : ""} (${selected.api})`,
       });
     }
   }
 
-  const launchUrl = deps.env.LEAKSHIELD_PI_URL;
-  if (launchUrl === undefined) {
-    checks.push({
-      id: "pi-launcher",
-      state: "warn",
-      detail: "LEAKSHIELD_PI_URL is not set in this shell; this is not a managed pi launch.",
-      fix: "Run `leakshield --pi` to start pi behind the provider boundary.",
-    });
-  } else if (!isLoopbackUrl(launchUrl)) {
-    checks.push({
-      id: "pi-launcher",
-      state: "fail",
-      detail: "LEAKSHIELD_PI_URL is not a loopback address; the extension refuses it.",
-      fix: "Start pi through `leakshield --pi` instead of setting the environment by hand.",
-    });
-  } else {
-    const probe = await deps.probeProxy(launchUrl);
-    if (probe.ok) {
-      checks.push({
-        id: "pi-launcher",
-        state: "ok",
-        detail: `managed launch active, boundary forwards to ${probe.upstream ?? "the configured provider"}`,
-      });
-    } else if (probe.reason === "unreachable") {
-      checks.push({
-        id: "pi-launcher",
-        state: "fail",
-        detail: `LEAKSHIELD_PI_URL=${launchUrl} points at a local address where nothing answers; provider requests will fail.`,
-        fix: "Restart pi through `leakshield --pi`.",
-      });
-    } else {
-      checks.push({
-        id: "pi-launcher",
-        state: "fail",
-        detail: `the service at ${launchUrl} is not the LeakShield pi boundary.`,
-        fix: "Unset LEAKSHIELD_PI_URL and start pi through `leakshield --pi`.",
-      });
-    }
-  }
   return checks;
 }
 
@@ -231,17 +221,12 @@ export function createPiDoctorDeps(extensionPath: string = defaultPiExtensionPat
     home: os.homedir(),
     cwd: process.cwd(),
     extensionPath: () => extensionPath,
-    async probeProxy(baseUrl) {
+    checkConfig() {
       try {
-        const response = await fetch(new URL(PI_HEALTH_PATH, baseUrl), { signal: AbortSignal.timeout(2000) });
-        const body: unknown = await response.json().catch(() => null);
-        if (response.ok && typeof body === "object" && body !== null && (body as { service?: unknown }).service === PI_HEALTH_SERVICE) {
-          const upstream = (body as { upstream?: unknown }).upstream;
-          return { ok: true, upstream: typeof upstream === "string" ? upstream : null };
-        }
-        return { ok: false, reason: "not-leakshield" };
-      } catch {
-        return { ok: false, reason: "unreachable" };
+        loadConfig(process.env.LEAKSHIELD_CONFIG, process.cwd());
+        return null;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
       }
     },
   };

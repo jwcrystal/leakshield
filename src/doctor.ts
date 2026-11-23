@@ -1016,21 +1016,19 @@ export function formatDoctorReport(report: DoctorReport): string {
 
 /**
  * The OpenCode status decides as before. Only when OpenCode is absent
- * (HOST_MISSING) can Claude Code or a managed pi launch make the run pass,
- * unless a provider or host setting bypasses it; a failed Claude Code check, or
- * a pi failure while a managed pi launch is active, fails the run whatever
- * OpenCode reports. An inactive pi configuration does not fail a protected
- * OpenCode run.
+ * (HOST_MISSING) can Claude Code or an installed pi extension make the run
+ * pass, unless a provider or host setting bypasses it; a failed Claude Code
+ * check, or a pi failure once LeakShield is registered for pi, fails the run
+ * whatever OpenCode reports. An inactive pi configuration does not fail a
+ * protected OpenCode run.
  */
 export function doctorExitCode(report: DoctorReport): number {
   const claudeCode = report.claudeCode ?? [];
   const pi = report.pi ?? [];
   if (claudeCode.some((check) => check.state === "fail")) return 1;
-  // pi checks are supplementary unless this is a managed pi shell (launcher ok
-  // or failed) or OpenCode is absent; a broken ~/.pi must not fail an otherwise
-  // protected OpenCode run, and a `pi-launcher: warn` row means "not managed".
-  const piInUse = pi.some((check) => check.id === "pi-launcher" && check.state !== "warn");
-  if (pi.some((check) => check.state === "fail") && (report.status === "HOST_MISSING" || piInUse)) return 1;
+  // pi checks are supplementary: a broken ~/.pi must not fail an otherwise
+  // protected OpenCode run. They decide the run only when OpenCode is absent.
+  if (pi.some((check) => check.state === "fail") && report.status === "HOST_MISSING") return 1;
   if (report.status === "PROTECTED" || report.status === "PARTIAL") return 0;
   if (report.status !== "HOST_MISSING") return 1;
   // A bypassing provider or host-managed endpoint means requests may not reach
@@ -1038,6 +1036,7 @@ export function doctorExitCode(report: DoctorReport): number {
   const bypassed = claudeCode.some((check) => check.id === "claude-code-provider" || check.id === "claude-code-host-managed");
   if (bypassed) return 1;
   const claudeCodeProtected = claudeCode.some((check) => check.id === "claude-code-proxy" && check.state === "ok");
-  const piProtected = pi.some((check) => check.id === "pi-launcher" && check.state === "ok");
+  const piProtected = pi.some((check) => check.id === "pi-extension-registered" && check.state === "ok")
+    && !pi.some((check) => check.state === "fail");
   return claudeCodeProtected || piProtected ? 0 : 1;
 }

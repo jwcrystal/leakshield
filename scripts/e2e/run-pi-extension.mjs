@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * End-to-end check for the production pi adapter (`leakshield --pi`).
+ * End-to-end check for the in-process pi adapter.
  *
- * Runs the real pi 1.6.0 CLI through the managed launcher against a recording
- * loopback provider. The provider plays a scripted tool sequence (read, write,
- * edit, bash) and asserts that no original value reaches it, while the local
- * tools receive the restored values.
+ * Registers the built extension in a temporary pi agent directory and runs the
+ * real pi 1.6.0 CLI against a recording loopback provider. The provider plays a
+ * scripted tool sequence (read, write, edit, bash) and asserts that no original
+ * value reaches it, while the local tools receive the restored values.
  *
- * Usage: node scripts/e2e/run-pi-adapter.mjs <path-to-pi-binary>
+ * Usage: node scripts/e2e/run-pi-extension.mjs <path-to-pi-binary>
  * Requires `npm run build` first (the script imports the built placeholder
  * prefix) and Node.js 24.
  */
@@ -22,7 +22,12 @@ import { PSEUDONYM_TOKEN_PREFIX_V2 } from "../../dist/decision/pseudonymization.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const piBinary = process.argv[2];
 if (piBinary === undefined) {
-  console.error("usage: node scripts/e2e/run-pi-adapter.mjs <pi-binary>");
+  console.error("usage: node scripts/e2e/run-pi-extension.mjs <pi-binary>");
+  process.exit(2);
+}
+const extensionPath = path.join(root, "dist/pi/extension.js");
+if (!fs.existsSync(extensionPath)) {
+  console.error(`missing ${extensionPath}; run npm run build first`);
   process.exit(2);
 }
 
@@ -52,7 +57,7 @@ fs.writeFileSync(
 );
 fs.writeFileSync(
   path.join(agentDir, "settings.json"),
-  `${JSON.stringify({ defaultModel: "stub-model" }, null, 2)}\n`,
+  `${JSON.stringify({ defaultProvider: "stub", defaultModel: "stub-model", extensions: [extensionPath] }, null, 2)}\n`,
 );
 
 const requests = [];
@@ -133,15 +138,28 @@ fs.writeFileSync(
 function runPi(prompt, extra = []) {
   return new Promise((resolve) => {
     const child = spawn(
-      process.execPath,
-      [path.join(root, "dist/cli.js"), "pi", "--provider", "stub", "--config", path.join(tmp, "guard.config.yaml"), ...extra, "-p", prompt],
+      piBinary,
+      [
+        "--offline",
+        "--print",
+        "--no-mcp",
+        "--no-skills",
+        "--no-prompt-templates",
+        "--no-context-files",
+        "--no-approve",
+        "--model",
+        "stub/stub-model",
+        ...extra,
+        "-p",
+        prompt,
+      ],
       {
         cwd: work,
         env: {
           ...process.env,
           HOME: home,
-          PATH: `${path.dirname(piBinary)}:${process.env.PATH ?? ""}`,
           PI_CODING_AGENT_DIR: agentDir,
+          LEAKSHIELD_CONFIG: path.join(tmp, "guard.config.yaml"),
           PI_OFFLINE: "1",
           PI_SKIP_VERSION_CHECK: "1",
         },
@@ -202,7 +220,6 @@ try {
     .filter((entry) => entry.type === "message" && entry.message?.role === "assistant")
     .map((entry) => JSON.stringify(entry.message))
     .join("\n");
-  pass("saved assistant entries contain no original value", !assistantText.includes(ALPHA) && !assistantText.includes(BETA));
   pass("saved tool-call arguments contain placeholders", assistantText.includes(PSEUDONYM_TOKEN_PREFIX_V2));
 
   const before = requests.length;

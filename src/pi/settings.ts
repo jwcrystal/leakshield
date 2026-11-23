@@ -133,17 +133,26 @@ export interface PiSelectedModel {
 }
 
 /**
- * The provider/model pi would start with. `defaultModel` may name a model id
- * or provider/id; a model entry's `api` overrides the provider's.
+ * The provider/model pi would start with. With a configured provider,
+ * `defaultModel` is a model id and may itself contain slashes. Without one it
+ * may be provider/id; like pi's resolver, the longest declared provider id
+ * followed by "/" wins.
  */
 export function resolvePiSelectedModel(agent: PiUserAgent, env: Readonly<Record<string, string | undefined>>): PiSelectedModel | null {
   const configured = env.PI_PROVIDER ?? agent.settings.defaultProvider;
+  const providerConfigured = configured !== undefined && configured.length > 0;
+  let provider = providerConfigured ? configured : undefined;
   let model = agent.settings.defaultModel;
-  let provider = configured;
-  if (model !== undefined && model.includes("/")) {
-    const slash = model.indexOf("/");
-    provider = provider ?? model.slice(0, slash);
-    model = model.slice(slash + 1);
+  if (!providerConfigured && model !== undefined) {
+    let best: string | undefined;
+    for (const id of Object.keys(agent.providers)) {
+      if (id.length === 0 || !model.toLowerCase().startsWith(`${id.toLowerCase()}/`)) continue;
+      if (best === undefined || id.length > best.length) best = id;
+    }
+    if (best !== undefined) {
+      provider = best;
+      model = model.slice(best.length + 1);
+    }
   }
   if (provider === undefined || provider.length === 0) return null;
   const entry = agent.providers[provider];

@@ -292,6 +292,7 @@ See [Wire protection](docs/plugin/wire-protection.md) for both levels.
 - [Mapping persistence](docs/plugin/persistence.md): opt-in encrypted storage, key custody, erasure
 - [Capacity and lifecycle](docs/plugin/capacity.md): budgets, session limits, retention
 - [Readonly env queries](docs/plugin/env-queries.md): opt-in tools that answer configuration questions without returning values
+- [Host capability matrix](docs/host-capabilities.md): per-host declaration of which model egress and surfaces are protected, refused, absent, or outside interception, and the invariants a new adapter must satisfy
 
 #### Persistence risk notes (read before enabling)
 

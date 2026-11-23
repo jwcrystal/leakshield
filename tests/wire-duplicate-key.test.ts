@@ -144,7 +144,7 @@ describe.each(routes)("$name remasker forwards the scanned value", (route) => {
     const { event, original, forwarded } = await send(hook, route.url, pretty);
     expect(event.request).not.toBe(original);
     expect(forwarded).toBe(route.single("hello"));
-    expect((event.request as Request).headers.get("content-length")).toBe(String(new TextEncoder().encode(forwarded).length));
+    expect((event.request as Request).headers.get("content-length")).toBeNull();
   });
 
   it("rebuilds an unchanged body whose bytes are not valid UTF-8", async () => {

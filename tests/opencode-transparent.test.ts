@@ -2057,9 +2057,7 @@ describe("transparent http.request wire mask", () => {
     expect(rebuilt.headers.get("x-trace")).toBe("trace-1");
     expect(rebuilt.headers.get("content-type")).toBe("application/json");
     expect(rebuilt.headers.get("content-encoding")).toBe(null);
-    expect(rebuilt.headers.get("content-length")).toBe(
-      String(new TextEncoder().encode(JSON.stringify(wire)).length),
-    );
+    expect(rebuilt.headers.get("content-length")).toBeNull();
   });
 
   it("retains the original request object when nothing changes", async () => {

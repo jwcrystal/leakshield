@@ -14,11 +14,11 @@ pi 每次請求才建立 provider client，並在當下解析 `fetch`（`options
 | `src/pi/extension.ts` | 綁定 pi session 與模型；模型無法保護時擋下輸入與工具；在 `tool_call` 還原工具參數 |
 | `src/pi/tool-policy.ts` | pi 的 `HostToolPolicy`：read/write/edit/bash/powershell 欄位；未知與 MCP 工具一律拒絕 |
 
-比 LeakShield 先載入的 extension 可能握有原始 fetch。因此載入順序屬於安裝的一部分，doctor 會回報。
+pi 自己的 provider 流量不管 LeakShield 排在第幾個都會被守到：SDK 是每次請求才解析 `fetch`。順序影響的是其他 extension：比它早載入、且握有原始 fetch（或用它建立的 client）的 extension，送出的請求不會被遮罩。因此排第一是建議，不是 pi 本身的前提；不是第一個時 doctor 會回報。
 
 ## 安裝
 
-把 extension 放在 pi `settings.json`（`~/.pi/agent/settings.json`）的**第一個**項目：
+把 extension 加進 pi `settings.json`（`~/.pi/agent/settings.json`）。建議排在第一個，讓更早載入的 extension 拿不到原始 fetch：
 
 ```json
 {
@@ -114,7 +114,7 @@ session 檔留在 pi 原本的位置，`--continue`、`--resume`、`--session` �
 
 - 沒載入 extension 的 `pi` 不受保護。沒載入 guard 的行程無法 fail closed。
 - `pi --no-extensions`、`-ne` 或專案覆寫設定都會停用它。doctor 回報的是設定狀態，不是執行中的行程。
-- 比 LeakShield 先載入的 extension 可能握有原始 fetch；請把 LeakShield 排第一。比它晚載入的 extension 會看到 guard。
+- pi 自己的請求不管載入順序都會被守到。比 LeakShield 先載入的 extension 可能握有原始 fetch（或用它建立的 client），送出的請求不會被遮罩；比它晚載入的會看到 guard。把 LeakShield 排第一就排除前一種情況。
 - 三種 wire API 以外的 provider 一律拒絕，不嘗試保護。
 - 換模型會在 `model_select` 檢查；若某條路徑跳過該事件，guard 只在請求當下能依新模型是否為支援 API 判斷。
 - 圖片與附件在此 adapter 採 LeakShield 的 `block` 政策，會被替換而不是轉送。

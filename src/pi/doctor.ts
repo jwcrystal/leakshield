@@ -141,7 +141,7 @@ export async function runPiDoctor(deps: PiDoctorDeps): Promise<DoctorCheck[]> {
       checks.push({
         id: "pi-extension-registered",
         state: "warn",
-        detail: `LeakShield is extension #${index + 1}; ${earlier} loads first and can keep the raw fetch.`,
+        detail: `LeakShield is extension #${index + 1}; ${earlier} loads first and can keep the raw fetch. pi's own requests are still guarded.`,
         fix: "Move the LeakShield entry to the top of settings.extensions, or pass it with -e.",
       });
     } else {

@@ -14,11 +14,11 @@ pi builds its provider clients per request and resolves `fetch` at that point (`
 | `src/pi/extension.ts` | Binds the pi session and model, blocks input and tools when the model cannot be protected, restores tool arguments at `tool_call` |
 | `src/pi/tool-policy.ts` | pi's `HostToolPolicy`: read/write/edit/bash/powershell fields, unknown and MCP tools refused |
 
-An extension that runs *before* LeakShield can hold the raw fetch. Load order is therefore part of the setup, and the doctor reports it.
+pi's own provider traffic is guarded wherever LeakShield sits in the load order: the SDKs resolve `fetch` per request. What position changes is other extensions: one loaded earlier that keeps the raw fetch (or a client built from it) reaches the provider unmasked. First position is therefore recommended, not required for pi itself, and the doctor reports when LeakShield is not first.
 
 ## Install
 
-Add the extension as the **first** entry of pi's `settings.json` (`~/.pi/agent/settings.json`):
+Add the extension to pi's `settings.json` (`~/.pi/agent/settings.json`). First position is recommended so that an extension loaded earlier cannot hold the raw fetch:
 
 ```json
 {
@@ -114,7 +114,7 @@ Session files stay where pi keeps them, so `--continue`, `--resume`, `--session`
 
 - A `pi` run without the extension is not protected. Nothing can fail closed in a process that never loaded the guard.
 - `pi --no-extensions` disables it, as do `-ne` and a project that overrides settings. The doctor reports the settings state, not a running process.
-- An extension loaded before LeakShield can keep the raw fetch; load LeakShield first. An extension loaded after it sees the guard.
+- pi's own requests are guarded regardless of load position. An extension loaded before LeakShield can keep the raw fetch (or a client built from it) and reach the provider unmasked; one loaded after it sees the guard. Loading LeakShield first removes the earlier case.
 - Providers outside the three wire APIs are refused, not guarded.
 - A model switch is checked on `model_select`; a switch made through a path that skips that event would be caught by the guard's per-request model check only if the new model uses a supported API.
 - Images and attachments follow LeakShield's `block` policy in this adapter; they are replaced rather than forwarded.

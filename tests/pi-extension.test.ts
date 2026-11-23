@@ -12,7 +12,6 @@ import leakshieldPiExtension, {
 import { PI_SESSION_HEADER, startPiProxy, type PiProxy } from "../src/pi/proxy.js";
 
 const SECRET = ["PI", "EXT", "SECRET"].join("_");
-const UNKNOWN = ["[SGP2", ":API_KEY-aaaa-bbbb-cccc]"].join("");
 const SESSION = "pi-extension-session";
 const TOKEN = new RegExp(`${PSEUDONYM_TOKEN_PREFIX_V2.replace(/[[\]]/g, "\\$&")}[^\\]]+\\]`);
 
@@ -88,14 +87,14 @@ async function boundary(): Promise<{ proxy: PiProxy; upstreamBody: () => string 
   return { proxy, upstreamBody: () => body };
 }
 
-async function mint(proxy: PiProxy, upstreamBody: () => string): Promise<string> {
+async function mint(proxy: PiProxy, upstreamBody: () => string, session = SESSION): Promise<string> {
   const response = await proxy.handle(
     new Request(`${proxy.url}/chat/completions`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${proxy.token}`,
-        [PI_SESSION_HEADER]: SESSION,
+        [PI_SESSION_HEADER]: session,
       },
       body: JSON.stringify({ model: "stub-model", messages: [{ role: "user", content: `use ${SECRET}` }] }),
     }),
@@ -184,6 +183,9 @@ describe("pi extension managed mode", () => {
     leakshieldPiExtension(pi.api);
     expect(pi.transformerOptions).toEqual({ messageTypes: ["assistant", "assistant-thinking"] });
     const token = await mint(proxy, upstreamBody);
+    // A token minted in another session has no mapping here; derive it from a
+    // real mint instead of pasting an unminted literal (CONTRIBUTING).
+    const foreign = await mint(proxy, upstreamBody, "other-session");
     const stored = `your value is ${token}`;
 
     const message = { role: "assistant", content: [{ type: "text", text: stored }] };
@@ -192,7 +194,7 @@ describe("pi extension managed mode", () => {
     // The stored message is untouched: only rendering substitutes.
     expect(message.content[0]?.text).toBe(stored);
     expect(pi.transform("plain text")).toBe("plain text");
-    expect(pi.transform(`unknown ${UNKNOWN}`)).toBe(`unknown ${UNKNOWN}`);
+    expect(pi.transform(`unknown ${foreign}`)).toBe(`unknown ${foreign}`);
   });
 
   it("seeds display substitutions from a resumed session's saved entries", async () => {

@@ -2,7 +2,7 @@
 
 LeakShield protects the [pi coding agent](https://github.com/earendil-works/pi) by running it against a loopback provider boundary. Placeholders replace sensitive values before any provider request, and local tools receive the original values only at their execution boundary.
 
-Verified against pi **1.6.0**. Supported version range: `>= 1.6.0 < 2.0.0`.
+Verified against pi **1.6.0**. The launcher accepts `>= 1.6.0 < 2.0.0`; only 1.6.0 is covered by the runtime evidence.
 
 ## Why a proxy, not only an extension
 
@@ -71,8 +71,8 @@ The boundary speaks the three pi wire protocols it has shared Core support for:
 | pi `api` | Endpoint | Verified |
 |---|---|---|
 | `openai-completions` | `POST …/chat/completions` | unit + real pi process + real CommandCode provider |
-| `anthropic-messages` | `POST …/messages` | unit |
-| `openai-responses` | `POST …/responses` | unit |
+| `anthropic-messages` | `POST …/messages` | unit + real pi process (stub) |
+| `openai-responses` | `POST …/responses` | unit + real pi process (stub) |
 
 Built-in providers with known metadata can be selected by id:
 
@@ -109,7 +109,7 @@ OAuth-only accounts are not supported by the managed route. One real CommandCode
 
 ## What is protected
 
-- Every provider request on the configured route: system prompt, conversation history, tool results, and the summarization requests that compaction and branch summaries issue.
+- Every provider request that reaches the configured route: system prompt, conversation history, tool results, and the summarization requests that compaction and branch summaries send. Automatic compaction and branch summarization were not run against the production launcher; their request shape is unit-tested.
 - Streaming replies pass through unchanged, so model-facing history keeps placeholders. The assistant display is restored locally through `pi.registerMarkdownTransformer`; stored messages are not rewritten.
 - Tool arguments at execution time:
   - `read` (`path`, `offset`, `limit`), `grep`, `find`, `ls`: restored; an unresolved placeholder may stay literal because it can only match nothing.
@@ -144,7 +144,7 @@ If the LeakShield extension is installed in pi's settings but pi is started with
 ## Limitations
 
 - Plain `pi` without the launcher is not protected; the extension only refuses locally.
-- `--no-extensions` is always passed by the launcher, so pi's built-in extensions (MCP, codemode, tool search) and project packages are not loaded. Pass an explicit `--extension` yourself if you accept the egress risk.
+- `--no-extensions` is always passed by the launcher, so pi's built-in extensions (MCP, codemode, tool search) and project packages are not loaded. The launcher refuses extra `-e`/`--extension` flags for the same reason: an extension can open its own connection and bypass the boundary.
 - Project trust is disabled (`--no-approve`) for the managed run; project `.pi` resources do not load.
 - Providers outside the three wire protocols (`google-generative-ai`, Bedrock, Vertex, Codex responses) are refused.
 - Images and attachments follow LeakShield's `block` policy in this adapter; they are replaced rather than forwarded.

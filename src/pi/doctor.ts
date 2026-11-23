@@ -15,6 +15,7 @@ import type { DoctorCheck } from "../doctor.js";
 import { MINIMUM_PI_MINOR, parsePiVersion } from "./launcher.js";
 import { PI_HEALTH_PATH, PI_HEALTH_SERVICE } from "./proxy.js";
 import {
+  defaultPiAgentDir,
   loadPiUserAgent,
   providerFromModel,
   resolvePiProvider,
@@ -44,7 +45,7 @@ function isLoopbackUrl(raw: string): boolean {
 }
 
 function agentDirOf(deps: PiDoctorDeps): string {
-  return deps.env.PI_CODING_AGENT_DIR ?? path.join(deps.home, ".pi", "agent");
+  return deps.env.PI_CODING_AGENT_DIR ?? defaultPiAgentDir(deps.home);
 }
 
 export async function runPiDoctor(deps: PiDoctorDeps): Promise<DoctorCheck[]> {

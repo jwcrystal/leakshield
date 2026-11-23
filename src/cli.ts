@@ -57,6 +57,13 @@ const valueOf = (flag: string): string | undefined => {
 
 if (isHelpRequest(args) && !isPiMode) {
   console.log(HELP_TEXT);
+} else if (isPiInstallMode) {
+  const { runPiInstall } = await import("./pi/cli.js");
+  process.exitCode = runPiInstall(args);
+} else if (isPiMode) {
+  const { runPi } = await import("./pi/cli.js");
+  const piArgs = piIndex !== -1 ? args.slice(piIndex + 1) : args.slice(3);
+  process.exitCode = await runPi(piArgs);
 } else if (isForgetMode) {
   // W2/B5: active erasure of persisted mappings. Content-free output.
   const { runForget } = await import("./forget.js");
@@ -69,13 +76,6 @@ if (isHelpRequest(args) && !isPiMode) {
 } else if (args.includes("--claude-code-proxy")) {
   const { runClaudeCodeProxy } = await import("./claude-code/cli.js");
   process.exitCode = await runClaudeCodeProxy(args);
-} else if (isPiInstallMode) {
-  const { runPiInstall } = await import("./pi/cli.js");
-  process.exitCode = runPiInstall(args);
-} else if (isPiMode) {
-  const { runPi } = await import("./pi/cli.js");
-  const piArgs = piIndex !== -1 ? args.slice(piIndex + 1) : args.slice(3);
-  process.exitCode = await runPi(piArgs);
 } else if (isDoctorMode) {
   const { runDoctor, createDoctorDeps, formatDoctorReport, doctorExitCode } = await import("./doctor.js");
   const { runClaudeCodeDoctor, createClaudeCodeDoctorDeps } = await import("./claude-code/doctor.js");

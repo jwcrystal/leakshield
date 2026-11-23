@@ -184,7 +184,38 @@ describe("pi provider boundary", () => {
     await proxy.close();
   });
 
-  it("refuses unsupported routes, malformed bodies and query strings", async () => {
+  it("accepts the loopback credential as x-api-key for Anthropic", async () => {
+    const { sent, fetchImpl } = fakeUpstream(() => Response.json({ ok: true }));
+    const proxy = makeProxy({ api: "anthropic-messages", baseUrl: "https://api.example.test", fetch: fetchImpl });
+    const response = await proxy.handle(
+      new Request("http://127.0.0.1:9999/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": proxy.token,
+          [PI_SESSION_HEADER]: "session-a",
+        },
+        body: JSON.stringify({ model: "stub-model", max_tokens: 8, messages: [{ role: "user", content: `use ${SECRET}` }] }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(sent[0]?.headers.get("x-api-key")).toBe(UPSTREAM_KEY);
+    expect(sent[0]?.body).not.toContain(SECRET);
+    await proxy.close();
+  });
+
+  it("forwards provider query parameters without changing the host", async () => {
+    const { sent, fetchImpl } = fakeUpstream(() => Response.json({ ok: true }));
+    const proxy = makeProxy({ fetch: fetchImpl });
+    const response = await proxy.handle(
+      proxyRequest(proxy, "/chat/completions?beta=true", chatBody(`use ${SECRET}`)),
+    );
+    expect(response.status).toBe(200);
+    expect(sent[0]?.url).toBe("https://api.example.test/v1/chat/completions?beta=true");
+    await proxy.close();
+  });
+
+  it("refuses unsupported routes and malformed bodies", async () => {
     const { sent, fetchImpl } = fakeUpstream(() => Response.json({ ok: true }));
     const proxy = makeProxy({ fetch: fetchImpl });
     expect((await proxy.handle(proxyRequest(proxy, "/embeddings", { model: "stub-model", input: "x" }))).status).toBe(400);
@@ -196,6 +227,19 @@ describe("pi provider boundary", () => {
     ).toBe(400);
     expect(sent).toHaveLength(0);
     await proxy.close();
+  });
+
+  it("refuses a non-loopback listen host", () => {
+    expect(() =>
+      createPiProxy({
+        config: testConfig(),
+        upstream: { baseUrl: "https://api.example.test/v1", api: "openai-completions", apiKey: UPSTREAM_KEY },
+        models: ["stub-model"],
+        host: "0.0.0.0",
+        fetch: (async () => Response.json({ ok: true })) as unknown as typeof fetch,
+        log: quiet,
+      }),
+    ).toThrow("loopback");
   });
 
   it("fails closed when masking fails", async () => {

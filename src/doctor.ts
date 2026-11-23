@@ -1024,7 +1024,10 @@ export function doctorExitCode(report: DoctorReport): number {
   const claudeCode = report.claudeCode ?? [];
   const pi = report.pi ?? [];
   if (claudeCode.some((check) => check.state === "fail")) return 1;
-  if (pi.some((check) => check.state === "fail")) return 1;
+  // pi checks are supplementary unless this is a managed pi shell or OpenCode
+  // is absent; a broken ~/.pi must not fail an otherwise protected OpenCode run.
+  const piInUse = pi.some((check) => check.id === "pi-launcher");
+  if (pi.some((check) => check.state === "fail") && (report.status === "HOST_MISSING" || piInUse)) return 1;
   if (report.status === "PROTECTED" || report.status === "PARTIAL") return 0;
   if (report.status !== "HOST_MISSING") return 1;
   // A bypassing provider or host-managed endpoint means requests may not reach

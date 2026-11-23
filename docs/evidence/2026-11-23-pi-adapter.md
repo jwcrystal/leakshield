@@ -76,6 +76,41 @@ Defect found by this run and fixed: the HTTP server treated Node's normal
 fetch after the body was read (HTTP 502). The server now aborts only on an early
 response close or request abort (`src/pi/proxy.ts`).
 
+## Wire-format runs through real pi
+
+`node scripts/e2e/run-pi-wire.mjs <pi> <api>` runs one text turn through the
+managed launcher for each API:
+
+| API | Result |
+|---|---|
+| `openai-completions` | exit 0; one request; no canary; placeholder present |
+| `anthropic-messages` | exit 0; one request; no canary; placeholder present |
+| `openai-responses` | exit 0; one request; no canary; placeholder present |
+
+This run found a real defect: pi's Anthropic provider sends the configured
+loopback key as `x-api-key`, not as `Authorization: Bearer`. The boundary's
+credential check now accepts both forms, and the Anthropic route forwards
+`?beta=true`-style provider parameters to the fixed upstream host. Both are
+covered by tests.
+
+## Hooks the adapter uses
+
+Only the hooks below are registered; the adapter does not depend on
+`before_provider_request`, `context`, `before_agent_start` or `tool_result`
+ordering.
+
+| Hook | Use | Evidence |
+|---|---|---|
+| `before_provider_headers` | add the pi session id; the boundary refuses a request without it | unit + real pi run (every provider request) |
+| `tool_call` | restore or refuse at the local execution boundary | unit + real pi run (read/write/edit/bash) |
+| `message_end` | collect placeholders for the display transformer | unit |
+| `session_start` / `session_shutdown` | seed and clear the display cache | unit + resumed-session run |
+| `input` | refuse unmanaged pi | unit |
+| `registerMarkdownTransformer` | restore display text only | unit |
+
+Research PR #100 also observed `before_provider_headers` firing on the
+compaction path; the boundary masks independently of the hook result.
+
 ## Real provider run (CommandCode)
 
 One real request was executed to close the gap the stub cannot close: a real
@@ -139,9 +174,16 @@ policy or terminal rendering.
 | `tests/pi-launcher.test.ts` | argument ownership, version gate, generated agent directory, credential scrubbing, session reuse, persistence options, cleanup on failure |
 | `tests/pi-doctor.test.ts` | version/extension/settings/provider/credential/launch/route checks and exit-code integration |
 
-Full suite: **68 files, 1,830 tests passed**. `tsc --noEmit`, `npm run build`
+Full suite: **68 files, 1,838 tests passed**. `tsc --noEmit`, `npm run build`
 and `npm pack --dry-run` pass; the tarball contains `dist/pi/*` and the `pi`
 manifest.
+
+## Fail-closed failure scenarios
+
+- Missing or wrong loopback credential, missing session header, unsupported route or model, malformed body, masking failure and upstream redirect are refused by `src/pi/proxy.ts` before any upstream fetch; `tests/pi-proxy.test.ts` asserts zero upstream calls.
+- Hook throw/reject: research PR #100 proved pi continues with the original payload. In the production route that request has no session header, so the boundary refuses it; a hook failure cannot produce an unbound request.
+- Disabled extension: same outcome, because the session header is absent.
+- Direct-provider bypass (a plain `pi` run with its own config) is outside the adapter's scope; see the parity note.
 
 ## Parity with the OpenCode plugin
 
@@ -167,7 +209,7 @@ refusal provide that at the same host scope.
 Protected and exercised:
 
 - managed launch, generated config, child credential scrubbing
-- provider request masking on all three wire formats (unit) and Chat Completions through a real pi process
+- provider request masking on all three wire formats: unit tests, real pi stub runs (`run-pi-wire.mjs`), and Chat Completions through a real CommandCode provider
 - one real CommandCode provider request with a length oracle: the model saw a 33-character placeholder, not the 14-character original
 - custom provider via `models.json` + `--upstream`/`--api` (CommandCode)
 - compaction/summarization-shaped requests on the same route (unit)
@@ -179,7 +221,7 @@ Protected and exercised:
 
 Not exercised, or outside the adapter's scope:
 
-- Anthropic, OpenAI and OpenRouter real-service runs: pi owns provider clients; the adapter verifies the three wire formats by unit test and one live smoke. Anthropic's `x-api-key` header path is unit-tested only.
+- Anthropic, OpenAI and OpenRouter real-service runs: pi owns provider clients; all three wire formats have real-pi stub runs, and one live smoke covers CommandCode. Anthropic's `x-api-key` injection is exercised against the stub and unit tests, but not against a live Anthropic service.
 - automatic compaction, branch summarization and interactive TUI rendering are pi host behaviors; the adapter masks the shared provider route and supplies display text, but does not test pi's compaction policy or terminal rendering. Research PR #100 covered manual compaction and a PTY render.
 - OAuth-only accounts (pi's credential feature, not implemented by this adapter); Google/Bedrock/Vertex/Codex wire formats are not supported
 - direct-provider bypass by a user who runs plain `pi` without the launcher or removes the extension; this is the same class as disabling the OpenCode plugin and needs a deployment egress policy, not another adapter feature

@@ -60,6 +60,7 @@ function carriesPlaceholder(value: unknown, depth: number): boolean {
  * Unknown and extension tools cannot be classified, so a placeholder must not
  * reach them: their arguments may be forwarded to a remote service that never
  * saw the pseudonymized session. Known pi built-ins go through the core.
+ * This deliberately overrides ADR-0001 for the pi host; see ADR-0006.
  */
 export function assertPiToolBoundary(rawTool: string, input: unknown): void {
   if (PI_KNOWN_TOOLS.has(rawTool.toLowerCase())) return;

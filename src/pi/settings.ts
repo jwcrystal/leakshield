@@ -109,6 +109,11 @@ function stringField(record: Record<string, unknown>, key: string, label: string
   return value;
 }
 
+/** pi's default agent directory for a home path. */
+export function defaultPiAgentDir(home: string): string {
+  return path.join(home, ".pi", "agent");
+}
+
 /** Reads the user's pi agent configuration. Throws on malformed JSON. */
 export function loadPiUserAgent(
   agentDir: string,
@@ -161,13 +166,16 @@ export function loadPiUserAgent(
 export function resolveApiKeySpec(
   spec: string | undefined,
   env: Readonly<Record<string, string | undefined>>,
+  seen?: Set<string>,
 ): string | undefined {
   if (spec === undefined) return undefined;
   if (spec.startsWith("!")) {
     throw new Error("pi models.json apiKey commands are not run by the LeakShield launcher; use a literal or $ENV value");
   }
   if (spec.startsWith("$")) {
-    const value = env[spec.slice(1)];
+    const name = spec.slice(1);
+    seen?.add(name);
+    const value = env[name];
     return value !== undefined && value.length > 0 ? value : undefined;
   }
   return spec.length > 0 ? spec : undefined;
@@ -182,6 +190,8 @@ export interface PiProviderResolution {
   modelEntries: PiModelEntry[];
   /** Forwards the user's model selection, including its `:thinking` suffix. */
   model?: string;
+  /** Environment names read for credentials; the child must not inherit them. */
+  envNames: string[];
 }
 
 export interface PiProviderResolutionInput {
@@ -214,6 +224,8 @@ export function resolvePiProvider(input: PiProviderResolutionInput): PiProviderR
   }
   const entry = agent.providers[provider];
   const builtin = PI_BUILTIN_PROVIDERS[provider];
+  /** Every environment name the credential resolution actually read. */
+  const envNames = new Set<string>();
 
   const baseUrl = input.upstreamOverride ?? entry?.baseUrl ?? builtin?.baseUrl;
   if (baseUrl === undefined) {
@@ -229,20 +241,19 @@ export function resolvePiProvider(input: PiProviderResolutionInput): PiProviderR
     );
   }
 
-  let apiKey = resolveApiKeySpec(entry?.apiKey, env);
-  if (apiKey === undefined) {
-    for (const name of builtin?.env ?? []) {
-      const value = env[name];
-      if (value !== undefined && value.length > 0) {
-        apiKey = value;
-        break;
-      }
+  let apiKey = resolveApiKeySpec(entry?.apiKey, env, envNames);
+  for (const name of builtin?.env ?? []) {
+    envNames.add(name);
+    if (apiKey !== undefined) continue;
+    const value = env[name];
+    if (value !== undefined && value.length > 0) {
+      apiKey = value;
     }
   }
 
   const headers: Record<string, string> = {};
   for (const [name, spec] of Object.entries(entry?.headers ?? {})) {
-    const value = resolveApiKeySpec(spec, env);
+    const value = resolveApiKeySpec(spec, env, envNames);
     if (value !== undefined) headers[name] = value;
   }
 
@@ -252,6 +263,7 @@ export function resolvePiProvider(input: PiProviderResolutionInput): PiProviderR
     models: declaredModels(entry).map((model) => model.id as string),
     modelEntries: declaredModels(entry),
     model,
+    envNames: [...envNames],
   };
 }
 

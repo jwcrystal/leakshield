@@ -116,4 +116,20 @@ describe("pi doctor", () => {
       doctorExitCode({ ...report, pi: [{ id: "pi-version", state: "fail", detail: "unsupported" }] }),
     ).toBe(1);
   });
+
+  it("does not fail a protected OpenCode run for an inactive broken pi setup", () => {
+    const protectedRun: DoctorReport = {
+      status: "PROTECTED",
+      hostVersion: "2.2.5",
+      hostGeneration: "v2",
+      configPath: "/work/opencode.json",
+      checks: [],
+    };
+    expect(
+      doctorExitCode({ ...protectedRun, pi: [{ id: "pi-settings", state: "fail", detail: "bad json" }] }),
+    ).toBe(0);
+    expect(
+      doctorExitCode({ ...protectedRun, pi: [{ id: "pi-launcher", state: "fail", detail: "dead boundary" }] }),
+    ).toBe(1);
+  });
 });

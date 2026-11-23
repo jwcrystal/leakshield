@@ -62,6 +62,7 @@ describe("pi settings", () => {
     });
     expect(resolution.models).toEqual(["m1"]);
     expect(resolution.modelEntries[0]?.contextWindow).toBe(200000);
+    expect(resolution.envNames.sort()).toEqual(["LOCAL_KEY", "LOCAL_ORG"]);
   });
 
   it("resolves a built-in provider from its API key environment variable", () => {

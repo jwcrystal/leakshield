@@ -142,11 +142,17 @@ function sessionOf(request: Request): string | null {
   return value !== null && SESSION_SHAPE.test(value) ? value : null;
 }
 
-function bearerOf(request: Request): string | null {
+function credentialOf(request: Request): string | null {
   const value = request.headers.get("authorization");
-  if (value === null) return null;
-  const match = /^Bearer ([A-Za-z0-9._-]{16,})$/.exec(value);
-  return match?.[1] ?? null;
+  if (value !== null) {
+    const match = /^Bearer ([A-Za-z0-9._-]{16,})$/.exec(value);
+    if (match?.[1] !== undefined) return match[1];
+  }
+  // pi's Anthropic provider sends the configured apiKey as x-api-key, not as
+  // a Bearer token; both identify the same loopback credential.
+  const key = request.headers.get("x-api-key");
+  if (key !== null && /^[A-Za-z0-9._-]{16,}$/.test(key)) return key;
+  return null;
 }
 
 function sameSecret(left: string, right: string): boolean {
@@ -211,7 +217,9 @@ function targetOf(base: URL, incoming: URL): URL {
   const incomingPath = incoming.pathname;
   target.pathname =
     basePath !== "" && !incomingPath.startsWith(`${basePath}/`) ? `${basePath}${incomingPath}` : incomingPath;
-  target.search = "";
+  // pi's providers add request parameters (for example Anthropic's ?beta=true).
+  // The host is fixed by the launcher, so the query cannot redirect the call.
+  target.search = incoming.search;
   target.hash = "";
   return target;
 }
@@ -247,6 +255,8 @@ interface BuiltProxy {
 }
 
 function buildProxy(options: PiProxyOptions): BuiltProxy {
+  const host = options.host ?? "127.0.0.1";
+  if (!isLoopback(host)) throw new Error("the pi proxy must listen on a loopback address");
   const upstreamBase = parsePiUpstream(options.upstream.baseUrl);
   const api = options.upstream.api;
   const models = new Set((options.models ?? []).map((model) => model.trim()).filter((model) => model.length > 0));
@@ -405,7 +415,7 @@ function buildProxy(options: PiProxyOptions): BuiltProxy {
         { status: 200, headers: { "content-type": "application/json" } },
       );
     }
-    const credential = bearerOf(request);
+    const credential = credentialOf(request);
     if (credential === null || !sameSecret(credential, token)) return refuse(UNAUTHORIZED);
     if (pathname === PI_DISPLAY_PATH || pathname === PI_TOOL_PATH) return control(request);
     return provider(request);
@@ -413,7 +423,8 @@ function buildProxy(options: PiProxyOptions): BuiltProxy {
 
   const proxy: PiProxy = {
     get url() {
-      return `http://127.0.0.1:${port}`;
+      const display = host.includes(":") ? `[${host}]` : host;
+      return `http://${display}:${port}`;
     },
     get port() {
       return port;

@@ -13,8 +13,10 @@
 import path from "node:path";
 import { defaultStorePath } from "../decision/mapping-key.js";
 import type { GuardConfig } from "../types.js";
+import { PI_LAUNCH_TOKEN_ENV, PI_LAUNCH_URL_ENV } from "./extension.js";
 import type { PiProxy, PiProxyOptions } from "./proxy.js";
 import {
+  defaultPiAgentDir,
   loadPiUserAgent,
   resolvePiProvider,
   resolveSessionDir,
@@ -22,8 +24,6 @@ import {
   type PiProviderResolution,
 } from "./settings.js";
 
-export const PI_EXTENSION_ENV_URL = "LEAKSHIELD_PI_URL";
-export const PI_EXTENSION_ENV_TOKEN = "LEAKSHIELD_PI_TOKEN";
 export const SUPPORTED_PI_MAJOR = 1;
 export const MINIMUM_PI_MINOR = 6;
 
@@ -122,8 +122,20 @@ export function parseLauncherArgs(args: readonly string[]): ParsedLauncherArgs {
     "--persist-path",
   ]);
   const ownedBoolean = new Set(["--persist", "--persist-keyfile"]);
+  const separator = args.indexOf("--");
+  const ownArgs = separator === -1 ? args : args.slice(0, separator);
   for (let index = 0; index < args.length; index++) {
     const arg = args[index] as string;
+    if (arg === "--") {
+      launcher.piArgs.push(...args.slice(index));
+      break;
+    }
+    if (arg === "-e" || arg === "--extension" || arg.startsWith("--extension=")) {
+      return {
+        launcher,
+        error: "the managed launch refuses additional extensions; they can open their own network connection and bypass the boundary",
+      };
+    }
     if (ownedBoolean.has(arg)) continue;
     if (ownedWithValue.has(arg)) {
       index += 1;
@@ -132,16 +144,16 @@ export function parseLauncherArgs(args: readonly string[]): ParsedLauncherArgs {
     launcher.piArgs.push(arg);
   }
 
-  launcher.provider = valueOf(args, "--provider");
-  launcher.model = valueOf(args, "--model");
-  launcher.upstream = valueOf(args, "--upstream");
-  launcher.api = valueOf(args, "--api");
-  launcher.configPath = valueOf(args, "--config");
-  launcher.persist = args.includes("--persist");
-  launcher.persistKeyfile = args.includes("--persist-keyfile");
-  launcher.persistPath = valueOf(args, "--persist-path");
+  launcher.provider = valueOf(ownArgs, "--provider");
+  launcher.model = valueOf(ownArgs, "--model");
+  launcher.upstream = valueOf(ownArgs, "--upstream");
+  launcher.api = valueOf(ownArgs, "--api");
+  launcher.configPath = valueOf(ownArgs, "--config");
+  launcher.persist = ownArgs.includes("--persist");
+  launcher.persistKeyfile = ownArgs.includes("--persist-keyfile");
+  launcher.persistPath = valueOf(ownArgs, "--persist-path");
 
-  const rawPort = valueOf(args, "--control-port");
+  const rawPort = valueOf(ownArgs, "--control-port");
   if (rawPort !== undefined) {
     const port = Number(rawPort);
     if (!Number.isInteger(port) || port < 0 || port > 65535) {
@@ -149,7 +161,7 @@ export function parseLauncherArgs(args: readonly string[]): ParsedLauncherArgs {
     }
     launcher.controlPort = port;
   }
-  const rawTtl = valueOf(args, "--persist-ttl-days");
+  const rawTtl = valueOf(ownArgs, "--persist-ttl-days");
   if (rawTtl !== undefined) {
     const ttl = Number(rawTtl);
     if (!Number.isInteger(ttl) || ttl < 0 || ttl > 3650) {
@@ -192,7 +204,7 @@ export function buildManagedFiles(
   const provider: Record<string, unknown> = {
     baseUrl: options.proxyUrl,
     api: resolution.upstream.api,
-    apiKey: `$${PI_EXTENSION_ENV_TOKEN}`,
+    apiKey: `$${PI_LAUNCH_TOKEN_ENV}`,
   };
   if (resolution.modelEntries.length > 0) {
     provider.models = resolution.modelEntries.map(projectModel);
@@ -235,17 +247,19 @@ function childEnv(
   agentDir: string,
   sessionDir: string,
   proxy: PiProxy,
+  resolvedEnvNames: readonly string[],
 ): Record<string, string> {
+  const scrub = new Set<string>([...CHILD_SCRUBBED_ENV, ...resolvedEnvNames]);
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(deps.env)) {
     if (value === undefined) continue;
-    if ((CHILD_SCRUBBED_ENV as readonly string[]).includes(name)) continue;
+    if (scrub.has(name)) continue;
     env[name] = value;
   }
   env.PI_CODING_AGENT_DIR = agentDir;
   env.PI_CODING_AGENT_SESSION_DIR = sessionDir;
-  env[PI_EXTENSION_ENV_URL] = proxy.url;
-  env[PI_EXTENSION_ENV_TOKEN] = proxy.token;
+  env[PI_LAUNCH_URL_ENV] = proxy.url;
+  env[PI_LAUNCH_TOKEN_ENV] = proxy.token;
   return env;
 }
 
@@ -302,7 +316,7 @@ export async function runPiLauncher(args: readonly string[], deps: PiLauncherDep
     return 1;
   }
 
-  const agentDir = deps.env.PI_CODING_AGENT_DIR ?? path.join(deps.home, ".pi", "agent");
+  const agentDir = deps.env.PI_CODING_AGENT_DIR ?? defaultPiAgentDir(deps.home);
   let agent;
   try {
     agent = loadPiUserAgent(agentDir, deps.readFile);
@@ -386,18 +400,26 @@ export async function runPiLauncher(args: readonly string[], deps: PiLauncherDep
 
     // Ambient discovery stays off: an unlisted extension or project package
     // could open its own connection and bypass the boundary. The explicit -e
-    // path is still loaded, and these flags go last so they win over user args.
-    // pi requires --model whenever --provider is given; without a model the
-    // generated settings.json defaultProvider is the selection instead.
+    // path is still loaded, and these flags go before any user `--` separator
+    // so pi reads them as options; `--` and later messages stay untouched.
+    const separator = launcher.piArgs.indexOf("--");
+    const beforeSeparator = separator === -1 ? launcher.piArgs : launcher.piArgs.slice(0, separator);
+    const afterSeparator = separator === -1 ? [] : launcher.piArgs.slice(separator);
     const piArgs = [
-      ...launcher.piArgs,
+      ...beforeSeparator,
       ...(resolution.model !== undefined ? ["--provider", resolution.provider, "--model", resolution.model] : []),
       "--no-extensions",
       "--extension",
       deps.extensionPath(),
       "--no-approve",
+      ...afterSeparator,
     ];
-    return await deps.runChild(bin, piArgs, childEnv(deps, managedAgentDir, sessionDir, proxy), deps.cwd);
+    return await deps.runChild(
+      bin,
+      piArgs,
+      childEnv(deps, managedAgentDir, sessionDir, proxy, resolution.envNames),
+      deps.cwd,
+    );
   } finally {
     await proxy.close();
     deps.rmrf(runDir);

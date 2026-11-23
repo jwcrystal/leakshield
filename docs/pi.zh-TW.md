@@ -2,7 +2,7 @@
 
 LeakShield 讓 [pi coding agent](https://github.com/earendil-works/pi) 改走本機 loopback provider 邊界：任何送往 provider 的請求先換成 placeholder，本機工具只在執行邊界拿回原值。
 
-已用 pi **1.6.0** 實機驗證；支援範圍 `>= 1.6.0 < 2.0.0`。
+已用 pi **1.6.0** 實機驗證；啟動器接受 `>= 1.6.0 < 2.0.0`，但只有 1.6.0 有實機證據。
 
 ## 為什麼不能只靠 extension
 
@@ -69,8 +69,8 @@ leakshield --pi --provider openai   # 等價寫法
 | pi `api` | 端點 | 驗證 |
 |---|---|---|
 | `openai-completions` | `POST …/chat/completions` | 單元測試 + 真實 pi 行程 + 真實 CommandCode provider |
-| `anthropic-messages` | `POST …/messages` | 單元測試 |
-| `openai-responses` | `POST …/responses` | 單元測試 |
+| `anthropic-messages` | `POST …/messages` | 單元測試 + 真實 pi 行程（stub） |
+| `openai-responses` | `POST …/responses` | 單元測試 + 真實 pi 行程（stub） |
 
 可直接用 id 指定已知內建 provider：
 
@@ -107,7 +107,7 @@ pi `models.json` 中宣告的 provider 會照其 base URL、API 與模型清單�
 
 ## 保護範圍
 
-- 設定路由上的每個 provider 請求：system prompt、對話歷史、工具結果，以及 compaction／branch summary 發出的摘要請求。
+- 設定路由上的每個 provider 請求：system prompt、對話歷史、工具結果，以及 compaction／branch summary 發出的摘要請求。自動 compaction 與 branch summarization 尚未在正式啟動器上實跑；請求形狀由單元測試覆蓋。
 - 串流回覆原樣通過，模型端歷史保持 placeholder；助理顯示文字由 `pi.registerMarkdownTransformer` 在本機還原，儲存訊息不改寫。
 - 工具執行邊界的參數：
   - `read`（`path`、`offset`、`limit`）、`grep`、`find`、`ls`：還原；未解析的 placeholder 可保持字面，因為只會 match 不到。
@@ -142,7 +142,7 @@ Session 檔留在使用者原本的目錄，`--continue`、`--resume`、`--sessi
 ## 限制
 
 - 不經啟動器的 `pi` 沒有保護；extension 只能在本機拒絕。
-- 啟動器固定加 `--no-extensions`，因此 pi 內建 extension（MCP、codemode、tool search）與專案套件不會載入。若自行加 `--extension`，等於接受該程式碼的出口風險。
+- 啟動器固定加 `--no-extensions`，因此 pi 內建 extension（MCP、codemode、tool search）與專案套件不會載入。啟動器也拒絕額外的 `-e`／`--extension`，因為 extension 可以自行連線、繞過邊界。
 - 受管執行固定加 `--no-approve`，專案 `.pi` 資源不載入。
 - 三種 wire protocol 之外的 provider（`google-generative-ai`、Bedrock、Vertex、Codex responses）一律拒絕。
 - 圖片與附件沿用 LeakShield 的 `block` 政策，會被替換而非轉送。

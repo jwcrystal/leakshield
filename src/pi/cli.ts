@@ -10,6 +10,7 @@ import type { GuardConfig } from "../types.js";
 import { defaultPiExtensionPath } from "./doctor.js";
 import { installPiExtension, runPiLauncher, type PiLauncherDeps } from "./launcher.js";
 import { startPiProxy } from "./proxy.js";
+import { defaultPiAgentDir } from "./settings.js";
 
 function withEncodingDetection(config: GuardConfig): GuardConfig {
   return { ...config, settings: { ...config.settings, encoding_detection: true } };
@@ -55,9 +56,9 @@ function runChild(bin: string, args: readonly string[], env: Record<string, stri
       cleanup();
       resolve(1);
     });
-    child.once("exit", (code, signal) => {
+    child.once("exit", (code) => {
       cleanup();
-      resolve(code ?? (signal === null ? 1 : 1));
+      resolve(code ?? 1);
     });
   });
 }
@@ -129,7 +130,9 @@ Plain \`pi\` is not protected. If the LeakShield extension is installed in
 pi's settings, it refuses input until pi runs through this launcher.`;
 
 export async function runPi(args: readonly string[]): Promise<number> {
-  if (args.includes("--help") || args.includes("-h")) {
+  const separator = args.indexOf("--");
+  const launcherArgs = separator === -1 ? args : args.slice(0, separator);
+  if (launcherArgs.includes("--help") || launcherArgs.includes("-h")) {
     console.log(PI_USAGE);
     return 0;
   }
@@ -138,7 +141,7 @@ export async function runPi(args: readonly string[]): Promise<number> {
 
 export function runPiInstall(args: readonly string[]): number {
   const deps = createPiLauncherDeps();
-  const agentDir = deps.env.PI_CODING_AGENT_DIR ?? path.join(deps.home, ".pi", "agent");
+  const agentDir = deps.env.PI_CODING_AGENT_DIR ?? defaultPiAgentDir(deps.home);
   const result = installPiExtension(deps, agentDir);
   if (!result.ok) {
     console.error(`leakshield: ${result.reason}`);

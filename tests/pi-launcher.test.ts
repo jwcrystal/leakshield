@@ -115,6 +115,19 @@ describe("pi launcher argument parsing", () => {
     expect(parseLauncherArgs(["--persist-ttl-days", "-1"]).error).toContain("--persist-ttl-days");
   });
 
+  it("stops owning flags at the pi `--` separator", () => {
+    const parsed = parseLauncherArgs(["--continue", "--", "--persist", "hello"]);
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.launcher.persist).toBe(false);
+    expect(parsed.launcher.piArgs).toEqual(["--continue", "--", "--persist", "hello"]);
+  });
+
+  it("refuses extra extensions before the separator only", () => {
+    expect(parseLauncherArgs(["-e", "extra.ts"]).error).toContain("refuses additional extensions");
+    expect(parseLauncherArgs(["--extension=extra.ts"]).error).toContain("refuses additional extensions");
+    expect(parseLauncherArgs(["--", "-e", "message"]).error).toBeUndefined();
+  });
+
   it("accepts pi 1.6 and later within major 1 only", () => {
     expect(parsePiVersion("1.6.0")).toBe("1.6.0");
     expect(parsePiVersion("pi 1.9.3 (build)")).toBe("1.9.3");
@@ -256,6 +269,48 @@ describe("pi managed launch", () => {
       defaultProvider?: string;
     };
     expect(settings.defaultProvider).toBe("anthropic");
+  });
+
+  it("scrubs every environment name the credential resolution read", async () => {
+    const { deps, recorded } = harness(
+      {
+        "/home/test/.pi/agent/settings.json": JSON.stringify({ defaultProvider: "local" }),
+        "/home/test/.pi/agent/models.json": JSON.stringify({
+          providers: {
+            local: {
+              baseUrl: "https://local.test/v1",
+              api: "openai-completions",
+              apiKey: "$LOCAL_KEY",
+              headers: { "x-org": "$LOCAL_ORG" },
+              models: [{ id: "m1" }],
+            },
+          },
+        }),
+      },
+      { env: { HOME, LOCAL_KEY: "sk-local", LOCAL_ORG: "org-1", PATH: "/usr/bin" } },
+    );
+    expect(await runPiLauncher([], deps)).toBe(0);
+    expect(recorded.proxyOptions?.upstream.apiKey).toBe("sk-local");
+    expect(recorded.childEnv).not.toHaveProperty("LOCAL_KEY");
+    expect(recorded.childEnv).not.toHaveProperty("LOCAL_ORG");
+  });
+
+  it("keeps mandatory flags before the pi message separator", async () => {
+    const { deps, recorded } = harness({ "/home/test/.pi/agent/settings.json": ANTHROPIC_SETTINGS });
+    expect(await runPiLauncher(["--", "--persist", "message"], deps)).toBe(0);
+    expect(recorded.childArgs).toEqual([
+      "--provider",
+      "anthropic",
+      "--model",
+      "claude-test",
+      "--no-extensions",
+      "--extension",
+      EXTENSION,
+      "--no-approve",
+      "--",
+      "--persist",
+      "message",
+    ]);
   });
 
   it("falls back to pi's own credential resolution", async () => {

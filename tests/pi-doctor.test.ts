@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { doctorExitCode, type DoctorReport } from "../src/doctor.js";
 import { piVerdict } from "../src/doctor-hosts.js";
 import { runPiDoctor, type PiDoctorDeps } from "../src/pi/doctor.js";
+import { resolvePiSelectedModel, type PiUserAgent } from "../src/pi/settings.js";
 
 const AGENT = "/home/test/.pi/agent";
 const EXTENSION = "/pkg/dist/pi/extension.js";
@@ -40,6 +41,57 @@ function agent(settings: Record<string, unknown>, models: Record<string, unknown
 const ANTHROPIC = {
   anthropic: { baseUrl: "https://api.anthropic.com", api: "anthropic-messages", apiKey: "$ANTHROPIC_API_KEY" },
 };
+
+function userAgent(settings: Record<string, unknown>, providers: Record<string, unknown>): PiUserAgent {
+  return { agentDir: AGENT, settings, providers } as PiUserAgent;
+}
+
+describe("pi selected model resolution", () => {
+  it("keeps a literal slash model id when a provider is configured", () => {
+    const agent = userAgent(
+      { defaultProvider: "commandcode", defaultModel: "deepseek/deepseek-v4.1-flash" },
+      { commandcode: { api: "openai-completions", baseUrl: "https://api.example.test/v1", models: [
+        { id: "deepseek/deepseek-v4.1-flash", api: "bedrock-converse-stream" },
+      ] } },
+    );
+    expect(resolvePiSelectedModel(agent, {})).toEqual({
+      provider: "commandcode",
+      model: "deepseek/deepseek-v4.1-flash",
+      api: "bedrock-converse-stream",
+      baseUrl: "https://api.example.test/v1",
+    });
+  });
+
+  it("splits provider/id only when no provider is configured", () => {
+    const agent = userAgent(
+      { defaultModel: "stub/stub-model" },
+      { stub: { api: "openai-completions", baseUrl: "https://api.example.test/v1", models: [{ id: "stub-model" }] } },
+    );
+    expect(resolvePiSelectedModel(agent, {})).toEqual({
+      provider: "stub",
+      model: "stub-model",
+      api: "openai-completions",
+      baseUrl: "https://api.example.test/v1",
+    });
+  });
+
+  it("prefers the longest declared provider id", () => {
+    const agent = userAgent(
+      { defaultModel: "a/b/model" },
+      {
+        a: { api: "openai-completions" },
+        "a/b": { api: "anthropic-messages" },
+      },
+    );
+    expect(resolvePiSelectedModel(agent, {})?.provider).toBe("a/b");
+    expect(resolvePiSelectedModel(agent, {})?.model).toBe("model");
+  });
+
+  it("returns null when no provider can be derived", () => {
+    const agent = userAgent({ defaultModel: "stub-model" }, { stub: { api: "openai-completions" } });
+    expect(resolvePiSelectedModel(agent, {})).toBeNull();
+  });
+});
 
 describe("pi doctor", () => {
   it("skips when pi is not installed", async () => {
@@ -93,6 +145,24 @@ describe("pi doctor", () => {
     const checks = await runPiDoctor(
       deps(agent({ defaultProvider: "codex", extensions: [EXTENSION] }, {
         codex: { baseUrl: "https://chatgpt.com/backend-api", api: "openai-codex-responses" },
+      })),
+    );
+    expect(stateOf(checks, "pi-provider")).toBe("fail");
+    expect(piVerdict(checks).exit).toBe(1);
+  });
+
+  it("uses the model-level api override for a literal slash id", async () => {
+    const checks = await runPiDoctor(
+      deps(agent({
+        defaultProvider: "commandcode",
+        defaultModel: "deepseek/deepseek-v4.1-flash",
+        extensions: [EXTENSION],
+      }, {
+        commandcode: {
+          baseUrl: "https://api.example.test/v1",
+          api: "openai-completions",
+          models: [{ id: "deepseek/deepseek-v4.1-flash", api: "bedrock-converse-stream" }],
+        },
       })),
     );
     expect(stateOf(checks, "pi-provider")).toBe("fail");

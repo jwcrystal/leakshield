@@ -65,6 +65,20 @@ ok   resumed session history stays masked
 ok   resumed session loaded prior history
 ```
 
+### Refusal of unguarded background operations
+
+Real pi, a conversation on the stub model, then `set_model` to a
+`bedrock-converse-stream` model and RPC `compact`:
+
+```text
+ok   conversation used the fetch-guarded model
+ok   provider never received the canary
+ok   model switch to the Bedrock API succeeded
+ok   manual compaction was refused (Compaction cancelled)
+ok   compaction sent no request
+ok   a prompt after the switch did not reach the provider
+```
+
 ### Background requests
 
 Automatic compaction was run against real pi with a small context window: three
@@ -74,7 +88,7 @@ triggered at runtime (`/tree` has no RPC command). See the gap audit.
 
 ### Build and tests
 
-- `npx vitest run`: 67 files, 1,822 tests pass.
+- `npx vitest run`: 68 files, 1,823 tests pass.
 - `npx tsc --noEmit`, `npm run build`, `npm pack --dry-run`.
 
 ## What this does not prove

@@ -86,6 +86,7 @@ pi keeps its own credential and configuration. The extension runs inside the pi 
 ## What is protected
 
 - Every provider request on the selected model's origin: system prompt, conversation history, tool results, and summarization requests. Automatic compaction was run against real pi 1.6.0; branch summarization uses the same `completeSummarization` path and is covered by that transport.
+- Manual compaction (`/compact`, RPC `compact`) and `/tree` branch summarization are cancelled when the selected model cannot be guarded: they call the model without an `input` or `before_agent_start` event, so the fetch guard alone would not stop a fetch-bypassing transport.
 - A `POST` to the provider origin on a route the guard cannot classify is refused. So are masking failures, a missing session, an unsupported API, and a core that cannot be built. Read-only `GET`/`HEAD` requests (model catalogs, response lookups) pass through: they carry no conversation, and refusing them would break providers like OpenRouter and Copilot.
 - Assistant text in the reply is restored for display. Stored history keeps whatever pi received; the next request is masked again.
 - Tool arguments at execution time:
@@ -143,4 +144,5 @@ With the store enabled, a later process can restore placeholders from earlier se
 
 - `node scripts/e2e/run-pi-wire.mjs <pi> openai-completions|anthropic-messages|openai-responses` — real pi, recording stub, one request per format, placeholder at the stub, restored display.
 - `node scripts/e2e/run-pi-extension.mjs <pi>` — real pi, scripted read → write → edit → bash → `--continue`, with the original values reaching only the local tools.
+- `node scripts/e2e/run-pi-compaction-refusal.mjs <pi>` — real pi, a conversation on a guarded model, then a switch to a `bedrock-converse-stream` model: manual compaction is cancelled and nothing reaches the provider.
 - Record and transport audit: [2026-11-23-pi-extension.md](evidence/2026-11-23-pi-extension.md) and [2026-11-23-pi-fetch-gap-audit.md](evidence/2026-11-23-pi-fetch-gap-audit.md).

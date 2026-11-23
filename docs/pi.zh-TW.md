@@ -86,6 +86,7 @@ pi 保留自己的憑證與設定。extension 跑在 pi 行程內，所以不像
 ## 保護範圍
 
 - 所選模型 origin 上的每個 provider 請求：system prompt、對話歷史、工具結果與摘要請求。自動 compaction 已用真實 pi 1.6.0 跑過；branch summarization 走同一個 `completeSummarization`，由同一條傳輸涵蓋。
+- 手動 compaction（`/compact`、RPC `compact`）與 `/tree` 分支摘要，在模型無法保護時會直接取消：它們不會經過 `input` 或 `before_agent_start`，光靠 fetch guard 擋不住不經 fetch 的傳輸。
 - 送往 provider origin、但 guard 無法分類的 `POST` 會被拒絕。遮罩失敗、沒有 session、API 不支援、core 建不起來時也一樣。唯讀的 `GET`/`HEAD`（模型目錄、查詢回覆）直接通過：它們不帶對話內容，拒絕會弄壞 OpenRouter、Copilot 這類 provider 的目錄功能。
 - 回覆中的助理文字會還原供顯示。pi 收到什麼就存什麼，下一個請求會再遮罩一次。
 - 工具參數在執行時還原：
@@ -143,4 +144,5 @@ mapping 預設只在行程存活期間有效：resume 後的舊 placeholder 維�
 
 - `node scripts/e2e/run-pi-wire.mjs <pi> openai-completions|anthropic-messages|openai-responses`：真實 pi + 錄製 stub，每種格式一個請求，stub 只看到 placeholder，顯示有還原。
 - `node scripts/e2e/run-pi-extension.mjs <pi>`：真實 pi，腳本化 read → write → edit → bash → `--continue`，原值只到得了本機工具。
+- `node scripts/e2e/run-pi-compaction-refusal.mjs <pi>`：真實 pi，先在受保護模型上建立對話，再切到 `bedrock-converse-stream`；手動 compaction 會被取消，provider 收不到任何請求。
 - 紀錄與傳輸稽核：[2026-11-23-pi-extension.md](evidence/2026-11-23-pi-extension.md) 與 [2026-11-23-pi-fetch-gap-audit.md](evidence/2026-11-23-pi-fetch-gap-audit.md)。

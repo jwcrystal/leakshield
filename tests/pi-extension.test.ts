@@ -156,6 +156,21 @@ describe("pi extension", () => {
     expect(result).toEqual({ block: true, reason: "LeakShield cannot protect this model", terminate: true });
   });
 
+  it("cancels manual compaction and tree summarization when the run is refused", async () => {
+    const notices: string[] = [];
+    const pi = fakePi();
+    leakshieldPiExtension(pi.api);
+    const refusedCtx = context(notices, { api: "bedrock-converse-stream" });
+    await pi.emit("session_start", {}, refusedCtx);
+    expect(await pi.emit("session_before_compact", { reason: "manual" }, refusedCtx)).toEqual({ cancel: true });
+    expect(await pi.emit("session_before_tree", {}, refusedCtx)).toEqual({ cancel: true });
+
+    const supported = context(notices);
+    await pi.emit("session_start", {}, supported);
+    expect(await pi.emit("session_before_compact", { reason: "manual" }, supported)).toBeUndefined();
+    expect(await pi.emit("session_before_tree", {}, supported)).toBeUndefined();
+  });
+
   it("re-reads the model at agent start", async () => {
     const notices: string[] = [];
     const pi = fakePi();

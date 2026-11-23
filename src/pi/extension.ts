@@ -119,6 +119,13 @@ export default function leakshieldPiExtension(pi: PiExtensionApi): void {
     applyModel(ctx.model, ctx);
   });
 
+  const refused = (ctx: PiContext | undefined): { cancel: true } | undefined => {
+    const reason = refusal ?? (guard.core === null ? PROTECT_FAILED : null);
+    if (reason === null) return undefined;
+    announce(ctx, reason);
+    return { cancel: true };
+  };
+
   pi.on("input", (_event, ctx) => {
     // Extension-authored input is refused too: it can start a model request on
     // an API the guard cannot see, which would transmit the prompt unmasked.
@@ -127,6 +134,11 @@ export default function leakshieldPiExtension(pi: PiExtensionApi): void {
     announce(ctx, reason);
     return { action: "handled" };
   });
+
+  // Manual compaction and /tree summarization invoke the model without an
+  // input or before_agent_start event, so they need their own refusal gate.
+  pi.on("session_before_compact", (_event, ctx) => refused(ctx));
+  pi.on("session_before_tree", (_event, ctx) => refused(ctx));
 
   pi.on("tool_call", (event, _ctx) => {
     const toolEvent = event as unknown as PiToolCallEvent;

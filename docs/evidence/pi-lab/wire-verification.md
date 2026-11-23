@@ -1,5 +1,7 @@
 # Core-owned wire protection and shared mapping experiment
 
+> The fixture scripts were removed from the tree after the gate closed. To reproduce, restore them from commit `ae33512`: `git checkout ae33512 -- 'docs/evidence/pi-lab/*.mjs' docs/evidence/pi-provider-boundary.mjs`.
+
 Subsequent [lifecycle and interactive-display verification](lifecycle-verification.md) adds optional persistence and pi-session binding to this lab and tests actual terminal rendering. This report records the original wire experiment.
 
 The new loopback wire proxy resolves the tested manual compaction gap. Actual pi 1.6.0 compaction completes successfully and both summarization requests contain only masked values. A single Core instance in the proxy owns the mapping used by extension preparation, local display and tool restoration.

@@ -1,5 +1,7 @@
 # Issue #98 provider boundary runtime evidence
 
+> **Superseded for the adapter decision.** This record shows why a hook-only adapter fails open. The gate was closed with a loopback transport boundary instead; see [2026-11-23-pi-adapter.md](2026-11-23-pi-adapter.md). The fixture can be restored from commit `ae33512`.
+
 **Blocked.** Pi 1.6.0 sends the original request after both a synchronous hook exception and a rejected Promise. On both paths the loopback provider returned a streamed response and the CLI exited successfully. The pi adapter implementation stopped at this decision gate.
 
 ## Environment and reproduction

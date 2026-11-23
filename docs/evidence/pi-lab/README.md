@@ -1,5 +1,7 @@
 # pi 1.6.0 loopback prototype
 
+> The fixture scripts were removed from the tree after the gate closed. To reproduce, restore them from commit `ae33512`: `git checkout ae33512 -- 'docs/evidence/pi-lab/*.mjs' docs/evidence/pi-provider-boundary.mjs`.
+
 The latest [managed provider/startup/routing test](managed-verification.md) exercises an isolated launcher with two authenticated loopback configurations, credential separation and override refusal.
 
 The latest [installation, lifecycle and interactive-display tests](lifecycle-verification.md) cover local installation, encrypted mapping recovery, bound-session refusal and actual pi terminal rendering.

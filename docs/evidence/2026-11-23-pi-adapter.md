@@ -1,5 +1,18 @@
 # Production pi adapter: managed launch, tools and sessions
 
+> Scope note: the real-pi runs below were made on commits before `ae33512`,
+> before the adapter scope trim. The trimmed `scripts/e2e/run-pi-adapter.mjs`
+> and `scripts/e2e/run-pi-wire.mjs` have not been re-run against real pi.
+> Removed by the trim:
+>
+> - `--persist`: the persisted-run results below describe removed code (tracked in #105).
+> - Built-in provider selection, provider inference and the env-var / `pi auth`
+>   credential fallbacks (tracked in #106). `--provider` is now required and must
+>   name a provider declared in pi's `models.json` with an `apiKey`;
+>   `--upstream`/`--api` only override that entry.
+> - The `leakshield/pi` package export and the package `pi` manifest. The
+>   launcher loads the extension by path.
+
 Date: 2026-11-23
 Ticket: [#98](https://github.com/jwcrystal/leakshield/issues/98)
 Predecessor: PR [#100](https://github.com/jwcrystal/leakshield/pull/100) (research fixtures)
@@ -41,7 +54,6 @@ npm run build
 runtime="$(mktemp -d)"
 npm install --prefix "$runtime" --save-exact @earendil-works/pi-coding-agent@1.6.0
 node scripts/e2e/run-pi-adapter.mjs "$runtime/node_modules/.bin/pi"
-node scripts/e2e/run-pi-adapter.mjs "$runtime/node_modules/.bin/pi" --persist
 npx vitest run
 npx tsc --noEmit
 npm pack --dry-run
@@ -170,13 +182,13 @@ policy or terminal rendering.
 | `tests/pi-proxy.test.ts` | three provider routes, base-path joining, credential separation, session binding, model/route/malformed-body refusal, masking failure, redirect refusal, upstream failure, incremental streaming, display and tool control endpoints, cross-session isolation, health |
 | `tests/pi-tool-policy.test.ts` | read/write/edit/shell restoration, unsafe shell positions, metacharacter originals, missing mappings, degraded read, unknown tools |
 | `tests/pi-extension.test.ts` | loopback config validation, unmanaged fail-closed behavior, session header, real control round-trips, display transformer, resumed-session seeding |
-| `tests/pi-settings.test.ts` | pi settings/models parsing, provider resolution, credential order, unsupported APIs, `$ENV`/`!command`, session directory |
-| `tests/pi-launcher.test.ts` | argument ownership, version gate, generated agent directory, credential scrubbing, session reuse, persistence options, cleanup on failure |
+| `tests/pi-settings.test.ts` | pi settings/models parsing, provider resolution (models.json only), unsupported APIs, `$ENV`/`!command`, session directory |
+| `tests/pi-launcher.test.ts` | argument ownership, version gate, generated agent directory, credential scrubbing, session reuse, refused `--persist*` flags, cleanup on failure |
 | `tests/pi-doctor.test.ts` | version/extension/settings/provider/credential/launch/route checks and exit-code integration |
 
-Full suite: **68 files, 1,839 tests passed**. `tsc --noEmit`, `npm run build`
-and `npm pack --dry-run` pass; the tarball contains `dist/pi/*` and the `pi`
-manifest.
+Full suite after the trim: **68 files, all tests passed** (see the PR for the
+current count). `tsc --noEmit`, `npm run build` and `npm pack --dry-run` pass;
+the tarball contains `dist/pi/*`. The package `pi` manifest was removed by the trim.
 
 ## Fail-closed failure scenarios
 

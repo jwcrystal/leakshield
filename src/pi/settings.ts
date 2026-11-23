@@ -2,10 +2,10 @@
  * pi user settings as inputs to the managed launcher.
  *
  * The launcher reads the user's agent directory (settings.json and
- * models.json) to learn which provider and model they intend to use. It never
- * reuses that directory as the child's config directory: the child gets a
- * generated directory whose only provider is the loopback boundary, so an
- * ambient provider entry or extension cannot route around it.
+ * models.json) for the selected model, the session directory and the provider
+ * declaration. It never reuses that directory as the child's config directory:
+ * the child gets a generated directory whose only provider is the loopback
+ * boundary, so an ambient provider entry or extension cannot route around it.
  */
 import path from "node:path";
 import type { PiApi } from "./proxy.js";
@@ -28,8 +28,8 @@ export interface PiProviderEntry {
 }
 
 export interface PiUserSettings {
-  defaultProvider?: string;
   defaultModel?: string;
+  defaultProvider?: string;
   sessionDir?: string;
   extensions?: unknown[];
   packages?: unknown[];
@@ -42,48 +42,11 @@ export interface PiUserAgent {
   providers: Record<string, PiProviderEntry>;
 }
 
-export interface PiUpstreamDefaults {
-  baseUrl: string;
-  api: PiApi;
-  env: readonly string[];
-}
-
-/**
- * pi 1.6.0 catalog metadata for providers whose wire protocol this adapter
- * speaks. Providers missing here need explicit `--upstream` and `--api`.
- */
-export const PI_BUILTIN_PROVIDERS: Readonly<Record<string, PiUpstreamDefaults>> = {
-  anthropic: { baseUrl: "https://api.anthropic.com", api: "anthropic-messages", env: ["ANTHROPIC_API_KEY"] },
-  openai: { baseUrl: "https://api.openai.com/v1", api: "openai-responses", env: ["OPENAI_API_KEY"] },
-  openrouter: { baseUrl: "https://openrouter.ai/api/v1", api: "openai-completions", env: ["OPENROUTER_API_KEY"] },
-  groq: { baseUrl: "https://api.groq.com/openai/v1", api: "openai-completions", env: ["GROQ_API_KEY"] },
-  deepseek: { baseUrl: "https://api.deepseek.com", api: "openai-completions", env: ["DEEPSEEK_API_KEY"] },
-  together: { baseUrl: "https://api.together.ai/v1", api: "openai-completions", env: ["TOGETHER_API_KEY"] },
-  cerebras: { baseUrl: "https://api.cerebras.ai/v1", api: "openai-completions", env: ["CEREBRAS_API_KEY"] },
-  baseten: { baseUrl: "https://inference.baseten.co/v1", api: "openai-completions", env: ["BASETEN_API_KEY"] },
-  nvidia: { baseUrl: "https://integrate.api.nvidia.com/v1", api: "openai-completions", env: ["NVIDIA_API_KEY"] },
-  xai: { baseUrl: "https://api.x.ai/v1", api: "openai-responses", env: ["XAI_API_KEY"] },
-  moonshotai: { baseUrl: "https://api.moonshot.ai/v1", api: "openai-completions", env: ["MOONSHOT_API_KEY"] },
-  "moonshotai-cn": { baseUrl: "https://api.moonshot.cn/v1", api: "openai-completions", env: ["MOONSHOT_API_KEY"] },
-  minimax: { baseUrl: "https://api.minimax.io/anthropic", api: "anthropic-messages", env: ["MINIMAX_API_KEY"] },
-  "minimax-cn": { baseUrl: "https://api.minimaxi.com/anthropic", api: "anthropic-messages", env: ["MINIMAX_CN_API_KEY"] },
-  fireworks: { baseUrl: "https://api.fireworks.ai/inference", api: "anthropic-messages", env: ["FIREWORKS_API_KEY"] },
-  zai: { baseUrl: "https://api.z.ai/api/coding/paas/v4", api: "openai-completions", env: ["ZAI_API_KEY"] },
-};
-
 const SUPPORTED_APIS: ReadonlySet<string> = new Set([
   "openai-completions",
   "openai-responses",
   "anthropic-messages",
 ]);
-
-/** pi accepts `provider/model` and an optional `:thinking` suffix. */
-export function providerFromModel(model: string | undefined): string | undefined {
-  if (model === undefined) return undefined;
-  const slash = model.indexOf("/");
-  if (slash <= 0) return undefined;
-  return model.slice(0, slash);
-}
 
 export function isSupportedPiApi(value: string): value is PiApi {
   return SUPPORTED_APIS.has(value);
@@ -124,11 +87,11 @@ export function loadPiUserAgent(
   if (settingsValue !== undefined && !isRecord(settingsValue)) throw new Error("pi settings.json must be a JSON object");
   const settings: PiUserSettings = {};
   if (settingsValue !== undefined) {
-    const provider = stringField(settingsValue, "defaultProvider", "pi settings.json");
     const model = stringField(settingsValue, "defaultModel", "pi settings.json");
+    const defaultProvider = stringField(settingsValue, "defaultProvider", "pi settings.json");
     const sessionDir = stringField(settingsValue, "sessionDir", "pi settings.json");
-    if (provider !== undefined) settings.defaultProvider = provider;
     if (model !== undefined) settings.defaultModel = model;
+    if (defaultProvider !== undefined) settings.defaultProvider = defaultProvider;
     if (sessionDir !== undefined) settings.sessionDir = sessionDir;
     if (settingsValue.extensions !== undefined) {
       if (!Array.isArray(settingsValue.extensions)) throw new Error("pi settings.json.extensions must be an array");
@@ -215,23 +178,26 @@ function declaredModels(entry: PiProviderEntry | undefined): PiModelEntry[] {
 export function resolvePiProvider(input: PiProviderResolutionInput): PiProviderResolution {
   const { agent, env } = input;
   const model = input.model ?? agent.settings.defaultModel;
-  const provider =
-    input.provider ?? agent.settings.defaultProvider ?? providerFromModel(model);
+  const provider = input.provider;
   if (provider === undefined || provider.length === 0) {
     throw new Error(
-      "no pi provider selected; pass --provider (or set defaultProvider in pi's settings.json)",
+      "no pi provider selected; pass --provider <id> naming a provider declared in pi's models.json",
     );
   }
   const entry = agent.providers[provider];
-  const builtin = PI_BUILTIN_PROVIDERS[provider];
+  if (entry === undefined) {
+    throw new Error(
+      `pi provider "${provider}" is not declared in pi's models.json; declare it with baseUrl, api and apiKey`,
+    );
+  }
   /** Every environment name the credential resolution actually read. */
   const envNames = new Set<string>();
 
-  const baseUrl = input.upstreamOverride ?? entry?.baseUrl ?? builtin?.baseUrl;
+  const baseUrl = input.upstreamOverride ?? entry.baseUrl;
   if (baseUrl === undefined) {
     throw new Error(`pi provider "${provider}" has no known upstream; pass --upstream <url> and --api <api>`);
   }
-  const api = input.apiOverride ?? entry?.api ?? builtin?.api;
+  const api = input.apiOverride ?? entry.api;
   if (api === undefined) {
     throw new Error(`pi provider "${provider}" declares no api; pass --api (openai-completions, openai-responses, anthropic-messages)`);
   }
@@ -241,18 +207,10 @@ export function resolvePiProvider(input: PiProviderResolutionInput): PiProviderR
     );
   }
 
-  let apiKey = resolveApiKeySpec(entry?.apiKey, env, envNames);
-  for (const name of builtin?.env ?? []) {
-    envNames.add(name);
-    if (apiKey !== undefined) continue;
-    const value = env[name];
-    if (value !== undefined && value.length > 0) {
-      apiKey = value;
-    }
-  }
+  const apiKey = resolveApiKeySpec(entry.apiKey, env, envNames);
 
   const headers: Record<string, string> = {};
-  for (const [name, spec] of Object.entries(entry?.headers ?? {})) {
+  for (const [name, spec] of Object.entries(entry.headers ?? {})) {
     const value = resolveApiKeySpec(spec, env, envNames);
     if (value !== undefined) headers[name] = value;
   }

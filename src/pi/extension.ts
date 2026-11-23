@@ -1,8 +1,8 @@
 /**
  * pi extension surface for LeakShield.
  *
- * Loaded by pi (`pi: { extensions: [...] }` in this package, or an explicit
- * `-e` path). It never masks provider traffic itself: the managed launcher
+ * Loaded by pi from an explicit extension path (`--pi-install` registers it in
+ * pi's settings). It never masks provider traffic itself: the managed launcher
  * points pi at the loopback provider boundary, which owns masking and the
  * session mapping. The extension supplies the pi session identity, restores
  * placeholders at the local tool boundary, and restores display text.

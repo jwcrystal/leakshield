@@ -63,7 +63,6 @@ function harness(files: Record<string, string>, overrides: Partial<PiLauncherDep
     },
     resolvePi: () => "/usr/local/bin/pi",
     piVersion: () => "1.6.0",
-    piAuthKey: () => null,
     runChild: async (_bin, args, env) => {
       recorded.childArgs = [...args];
       recorded.childEnv = { ...env };
@@ -84,9 +83,21 @@ function harness(files: Record<string, string>, overrides: Partial<PiLauncherDep
 }
 
 const ANTHROPIC_SETTINGS = JSON.stringify({
-  defaultProvider: "anthropic",
   defaultModel: "claude-test",
 });
+
+const ANTHROPIC_FILES = {
+  "/home/test/.pi/agent/settings.json": ANTHROPIC_SETTINGS,
+  "/home/test/.pi/agent/models.json": JSON.stringify({
+    providers: {
+      anthropic: {
+        baseUrl: "https://api.anthropic.com",
+        api: "anthropic-messages",
+        apiKey: "$ANTHROPIC_API_KEY",
+      },
+    },
+  }),
+};
 
 describe("pi launcher argument parsing", () => {
   it("owns its flags and forwards everything else to pi", () => {
@@ -96,30 +107,41 @@ describe("pi launcher argument parsing", () => {
       "anthropic",
       "--model",
       "anthropic/claude-test",
-      "--persist",
-      "--persist-ttl-days",
-      "30",
       "-p",
       "review this diff",
     ]);
     expect(error).toBeUndefined();
     expect(launcher.provider).toBe("anthropic");
     expect(launcher.model).toBe("anthropic/claude-test");
-    expect(launcher.persist).toBe(true);
-    expect(launcher.persistTtlDays).toBe(30);
     expect(launcher.piArgs).toEqual(["--continue", "-p", "review this diff"]);
   });
 
   it("rejects invalid numeric options", () => {
     expect(parseLauncherArgs(["--control-port", "70000"]).error).toContain("--control-port");
-    expect(parseLauncherArgs(["--persist-ttl-days", "-1"]).error).toContain("--persist-ttl-days");
   });
 
   it("stops owning flags at the pi `--` separator", () => {
     const parsed = parseLauncherArgs(["--continue", "--", "--persist", "hello"]);
     expect(parsed.error).toBeUndefined();
-    expect(parsed.launcher.persist).toBe(false);
     expect(parsed.launcher.piArgs).toEqual(["--continue", "--", "--persist", "hello"]);
+  });
+
+  it("refuses the removed --persist flags before the separator only", () => {
+    for (const flag of ["--persist", "--persist-keyfile", "--persist-path", "--persist-ttl-days"]) {
+      const parsed = parseLauncherArgs([flag, "value"]);
+      expect(parsed.error).toContain(`${flag} is not supported by \`leakshield pi\` yet (see #105)`);
+      expect(parsed.launcher.piArgs).not.toContain(flag);
+    }
+    for (const [arg, flag] of [
+      ["--persist-path=/x", "--persist-path"],
+      ["--persist-ttl-days=30", "--persist-ttl-days"],
+    ] as const) {
+      const parsed = parseLauncherArgs([arg]);
+      expect(parsed.error).toContain(`${flag} is not supported by \`leakshield pi\` yet (see #105)`);
+    }
+    const after = parseLauncherArgs(["--provider", "anthropic", "--", "--persist", "--persist-ttl-days", "30"]);
+    expect(after.error).toBeUndefined();
+    expect(after.launcher.piArgs).toEqual(["--", "--persist", "--persist-ttl-days", "30"]);
   });
 
   it("refuses extra extensions before the separator only", () => {
@@ -218,8 +240,16 @@ describe("pi extension installation", () => {
 });
 
 describe("pi managed launch", () => {
+  it("refuses --persist before the separator without starting the boundary", async () => {
+    const { deps, recorded } = harness(ANTHROPIC_FILES);
+    expect(await runPiLauncher(["--provider", "anthropic", "--persist"], deps)).toBe(2);
+    expect(recorded.logs.join("\n")).toContain("--persist is not supported by `leakshield pi` yet (see #105)");
+    expect(recorded.proxyOptions).toBeNull();
+    expect(recorded.childArgs).toBeNull();
+  });
+
   it("writes a generated agent directory and starts pi behind the boundary", async () => {
-    const { deps, recorded } = harness({ "/home/test/.pi/agent/settings.json": ANTHROPIC_SETTINGS });
+    const { deps, recorded } = harness(ANTHROPIC_FILES);
     const code = await runPiLauncher(["--continue", "--provider", "anthropic"], deps);
     expect(code).toBe(0);
 
@@ -264,12 +294,11 @@ describe("pi managed launch", () => {
     expect(recorded.removed).toEqual([`${DATA}/pi/run-fixed-id`]);
   });
 
-  it("selects the generated default provider when no model is configured", async () => {
+  it("writes the selected provider as the generated default and omits --model when none is configured", async () => {
     const { deps, recorded } = harness({
-      "/home/test/.pi/agent/settings.json": JSON.stringify({ defaultProvider: "anthropic" }),
+      "/home/test/.pi/agent/models.json": ANTHROPIC_FILES["/home/test/.pi/agent/models.json"],
     });
-    expect(await runPiLauncher([], deps)).toBe(0);
-    expect(recorded.childArgs).not.toContain("--provider");
+    expect(await runPiLauncher(["--provider", "anthropic"], deps)).toBe(0);
     expect(recorded.childArgs).not.toContain("--model");
     const settings = JSON.parse(recorded.written[`${DATA}/pi/run-fixed-id/agent/settings.json`]?.content ?? "{}") as {
       defaultProvider?: string;
@@ -280,7 +309,6 @@ describe("pi managed launch", () => {
   it("scrubs every environment name the credential resolution read", async () => {
     const { deps, recorded } = harness(
       {
-        "/home/test/.pi/agent/settings.json": JSON.stringify({ defaultProvider: "local" }),
         "/home/test/.pi/agent/models.json": JSON.stringify({
           providers: {
             local: {
@@ -295,15 +323,15 @@ describe("pi managed launch", () => {
       },
       { env: { HOME, LOCAL_KEY: "sk-local", LOCAL_ORG: "org-1", PATH: "/usr/bin" } },
     );
-    expect(await runPiLauncher([], deps)).toBe(0);
+    expect(await runPiLauncher(["--provider", "local"], deps)).toBe(0);
     expect(recorded.proxyOptions?.upstream.apiKey).toBe("sk-local");
     expect(recorded.childEnv).not.toHaveProperty("LOCAL_KEY");
     expect(recorded.childEnv).not.toHaveProperty("LOCAL_ORG");
   });
 
   it("keeps mandatory flags before the pi message separator", async () => {
-    const { deps, recorded } = harness({ "/home/test/.pi/agent/settings.json": ANTHROPIC_SETTINGS });
-    expect(await runPiLauncher(["--", "--persist", "message"], deps)).toBe(0);
+    const { deps, recorded } = harness(ANTHROPIC_FILES);
+    expect(await runPiLauncher(["--provider", "anthropic", "--", "--persist", "message"], deps)).toBe(0);
     expect(recorded.childArgs).toEqual([
       "--provider",
       "anthropic",
@@ -319,59 +347,40 @@ describe("pi managed launch", () => {
     ]);
   });
 
-  it("falls back to pi's own credential resolution", async () => {
+  it("refuses a provider with no models.json apiKey", async () => {
     const { deps, recorded } = harness(
-      { "/home/test/.pi/agent/settings.json": ANTHROPIC_SETTINGS },
-      { env: { HOME, PATH: "/usr/bin" }, piAuthKey: () => "sk-from-auth-file" },
+      {
+        "/home/test/.pi/agent/models.json": JSON.stringify({
+          providers: { local: { baseUrl: "https://local.test/v1", api: "openai-completions" } },
+        }),
+      },
+      { env: { HOME, PATH: "/usr/bin" } },
     );
-    expect(await runPiLauncher([], deps)).toBe(0);
-    expect(recorded.proxyOptions?.upstream.apiKey).toBe("sk-from-auth-file");
+    expect(await runPiLauncher(["--provider", "local"], deps)).toBe(1);
+    expect(recorded.logs.join("\n")).toContain(`set "apiKey" for it in pi's models.json`);
   });
 
   it("refuses to launch without a credential, a supported pi, or a provider", async () => {
-    const noCredential = harness(
-      { "/home/test/.pi/agent/settings.json": ANTHROPIC_SETTINGS },
-      { env: { HOME, PATH: "/usr/bin" } },
-    );
-    expect(await runPiLauncher([], noCredential.deps)).toBe(1);
+    const noCredential = harness(ANTHROPIC_FILES, { env: { HOME, PATH: "/usr/bin" } });
+    expect(await runPiLauncher(["--provider", "anthropic"], noCredential.deps)).toBe(1);
+    expect(noCredential.recorded.logs.join("\n")).toContain("no credential for pi provider");
 
-    const noPi = harness(
-      { "/home/test/.pi/agent/settings.json": ANTHROPIC_SETTINGS },
-      { resolvePi: () => null },
-    );
-    expect(await runPiLauncher([], noPi.deps)).toBe(1);
+    const noPi = harness(ANTHROPIC_FILES, { resolvePi: () => null });
+    expect(await runPiLauncher(["--provider", "anthropic"], noPi.deps)).toBe(1);
     expect(noPi.recorded.logs.join("\n")).toContain("not found on PATH");
 
-    const oldPi = harness(
-      { "/home/test/.pi/agent/settings.json": ANTHROPIC_SETTINGS },
-      { piVersion: () => "1.5.0" },
-    );
-    expect(await runPiLauncher([], oldPi.deps)).toBe(1);
+    const oldPi = harness(ANTHROPIC_FILES, { piVersion: () => "1.5.0" });
+    expect(await runPiLauncher(["--provider", "anthropic"], oldPi.deps)).toBe(1);
     expect(oldPi.recorded.logs.join("\n")).toContain("unsupported pi version");
 
-    const noProvider = harness({});
+    const noProvider = harness(ANTHROPIC_FILES);
     expect(await runPiLauncher([], noProvider.deps)).toBe(1);
-  });
-
-  it("passes persistence options only when asked", async () => {
-    const { deps, recorded } = harness({ "/home/test/.pi/agent/settings.json": ANTHROPIC_SETTINGS });
-    await runPiLauncher([], deps);
-    expect(recorded.proxyOptions?.persistence).toBeUndefined();
-    const persisted = harness({ "/home/test/.pi/agent/settings.json": ANTHROPIC_SETTINGS });
-    await runPiLauncher(["--persist", "--persist-ttl-days", "14", "--persist-path", "/store.db"], persisted.deps);
-    expect(persisted.recorded.proxyOptions?.persistence).toEqual({
-      ttlDays: 14,
-      path: "/store.db",
-      keyFile: false,
-    });
+    expect(noProvider.recorded.logs.join("\n")).toContain("no pi provider selected; pass --provider <id>");
   });
 
   it("closes the proxy and removes the generated directory even when pi fails", async () => {
-    const { deps, recorded } = harness(
-      { "/home/test/.pi/agent/settings.json": ANTHROPIC_SETTINGS },
-      { runChild: async () => 7 },
-    );
-    expect(await runPiLauncher([], deps)).toBe(7);
+    const { deps, recorded } = harness(ANTHROPIC_FILES, { runChild: async () => 7 });
+    expect(await runPiLauncher(["--provider", "anthropic"], deps)).toBe(7);
     expect(recorded.closed).toBe(true);
     expect(recorded.removed).toHaveLength(1);
   });

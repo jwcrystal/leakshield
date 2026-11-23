@@ -1,5 +1,7 @@
 # Actual pi routing and compaction verification
 
+> The fixture scripts were removed from the tree after the gate closed. To reproduce, restore them from commit `ae33512`: `git checkout ae33512 -- 'docs/evidence/pi-lab/*.mjs' docs/evidence/pi-provider-boundary.mjs`.
+
 This report records the proof-only proxy experiment. The subsequent [Core-owned wire experiment](wire-verification.md) resolves its tested manual compaction failure. Direct-provider configuration remains outside the proxy.
 
 PR #100 remains Draft. Testing the actual pi 1.6.0 process confirmed that proxy failures do not automatically fall back to a direct endpoint in the tested configuration. It also found a functional gap in manual compaction. With the proxy selected, compaction is refused. With a direct endpoint selected, compaction transmits original synthetic private values while the extension is enabled.

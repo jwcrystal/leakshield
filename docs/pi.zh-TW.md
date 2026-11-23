@@ -37,30 +37,27 @@ leakshield --pi-install   # 選用：把 extension 註冊到 ~/.pi/agent/setting
 ```bash
 npm ci
 npm run build
-node dist/cli.js pi --provider anthropic --continue
+node dist/cli.js pi --provider commandcode --continue
 ```
 
 ## 透過邊界啟動 pi
 
 ```bash
-leakshield pi --continue
-leakshield pi --provider anthropic --model anthropic/claude-sonnet
-leakshield pi --provider openai --model openai/gpt-6 -p "review this diff"
-leakshield --pi --provider openai   # 等價寫法
+leakshield pi --provider commandcode --continue
+leakshield pi --provider commandcode -p "review this diff"
+leakshield --pi --provider commandcode   # 等價寫法
 ```
 
 啟動器選項（其餘參數原樣傳給 pi）：
 
 | 選項 | 說明 |
 |---|---|
-| `--provider <id>` | 要保護的 pi provider；預設讀 pi `settings.json` 的 `defaultProvider`，再退回 `--model` 的 provider 部分 |
+| `--provider <id>` | **必填。** 要保護的 pi provider；必須宣告在 pi `models.json`，且設定 `apiKey` |
 | `--model <pattern>` | 傳給 pi，支援 `provider/id` 與 `:thinking` |
 | `--upstream <url>` | 覆寫 provider API base（https，或 loopback http） |
 | `--api <api>` | `openai-completions`、`openai-responses`、`anthropic-messages` |
 | `--config <path>` | 指定 `guard.config.yaml` |
 | `--control-port <port>` | 邊界埠號，預設隨機 loopback 埠 |
-| `--persist` | 跨重啟保存加密 mapping（見 [持久化](plugin/persistence.zh-TW.md)） |
-| `--persist-ttl-days <n>`／`--persist-path <path>`／`--persist-keyfile` | 持久化細部設定 |
 
 啟動器輸出不包含任何憑證。
 
@@ -72,13 +69,9 @@ leakshield --pi --provider openai   # 等價寫法
 | `anthropic-messages` | `POST …/messages` | 單元測試 + 真實 pi 行程（stub） |
 | `openai-responses` | `POST …/responses` | 單元測試 + 真實 pi 行程（stub） |
 
-可直接用 id 指定已知內建 provider：
+pi `models.json` 中宣告的 provider 會照其 base URL、API 與模型清單使用。provider 必須在那裡宣告並設定 `apiKey`；`--upstream` 與 `--api` 只覆寫它的 base URL 與 API。內建 provider 選擇（pi 目錄中繼資料與環境變數憑證）已從 adapter 移除，追蹤於 #106。
 
-`anthropic`、`openai`、`openrouter`、`groq`、`deepseek`、`together`、`cerebras`、`baseten`、`nvidia`、`xai`、`moonshotai`、`moonshotai-cn`、`minimax`、`minimax-cn`、`fireworks`、`zai`。
-
-pi `models.json` 中宣告的 provider 會照其 base URL、API 與模型清單使用。其他 provider 需同時給 `--upstream` 與 `--api`。
-
-範例：Command Code 不在 pi 目錄裡，因此用自訂 provider 宣告（已用 `deepseek/deepseek-v4.1-flash` 驗證）：
+範例：Command Code 以自訂 provider 宣告（已用 `deepseek/deepseek-v4.1-flash` 驗證）：
 
 ```json
 {
@@ -97,13 +90,9 @@ pi `models.json` 中宣告的 provider 會照其 base URL、API 與模型清單�
 
 ### 憑證
 
-上游憑證解析順序：
+上游憑證只來自所選 provider 在 pi `models.json` 的 `apiKey`：literal，或 `$ENV_NAME` 指向的環境變數。`!command` 一律拒絕、不會執行。不會隱性讀取環境變數，也不會採用 `pi auth login` 存下的 API key；`apiKey` 缺少或其 `$ENV` 未設定時，啟動器直接拒絕啟動。
 
-1. pi `models.json` provider 的 `apiKey`（literal 或 `$ENV`；`!command` 會拒絕）
-2. provider 慣用的環境變數（`ANTHROPIC_API_KEY`、`OPENAI_API_KEY` 等）
-3. `pi auth print-api-key --provider <id>`（`pi auth login` 存下的 API key）
-
-受管路徑不支援只有 OAuth 的帳號。已用 CommandCode 的 `deepseek/deepseek-v4.1-flash`（自訂 `models.json` entry）完成一次真實 provider 請求；Anthropic、OpenAI、OpenRouter 屬於 pi 自己的 provider 整合，adapter 以三種 wire format 的單元測試覆蓋，不逐家跑真實服務。憑證值不會傳給 pi 子行程，子行程的 provider API key 只是短期的 loopback token。
+受管路徑不支援只有 OAuth 的帳號。已用 CommandCode 的 `deepseek/deepseek-v4.1-flash`（自訂 `models.json` entry）完成一次真實 provider 請求；Anthropic、OpenAI、OpenRouter 也要像其他 provider 一樣宣告在 `models.json` 才能用；adapter 以三種 wire format 的單元測試覆蓋，不逐家跑真實服務。憑證值不會傳給 pi 子行程，子行程的 provider API key 只是短期的 loopback token。
 
 ## 保護範圍
 
@@ -121,8 +110,7 @@ pi `models.json` 中宣告的 provider 會照其 base URL、API 與模型清單�
 
 Session 檔留在使用者原本的目錄，`--continue`、`--resume`、`--session` 與 `/tree` 行為不變。邊界依 extension 提供的 pi session id 區分 mapping。
 
-- 不加 `--persist`：mapping 只在行程內。續用舊 session 時舊 placeholder 保持字面；需要它的工具呼叫會被拒絕（唯讀工具退化為 match 不到）。
-- 加 `--persist`：mapping 加密保存，重啟後依 session id 載回，續用 session 可還原重啟前的值。
+mapping 只在行程內。續用舊 session 時舊 placeholder 保持字面；需要它的 `write`、`edit` 與 shell（`bash`、`powershell`）呼叫會被拒絕，唯讀工具退化為 match 不到。跨重啟的持久化追蹤於 #105。
 
 ## 未受管的 pi 會 fail-closed
 
@@ -135,7 +123,7 @@ Session 檔留在使用者原本的目錄，`--continue`、`--resume`、`--sessi
 - pi 執行檔與版本是否支援
 - extension 檔案是否存在
 - pi `settings.json`／`models.json` 是否可讀
-- provider 是否可解析、是否有可用憑證（不讀值）
+- 透過 `PI_PROVIDER` 選定的 provider（未設定時跳過），以及其 `models.json` `apiKey` 是否存在（不讀值）
 - 直接跑 `pi` 會連到真實 provider 端點時的警告
 - 目前 shell 是否在受管啟動中，並探測邊界健康狀態
 

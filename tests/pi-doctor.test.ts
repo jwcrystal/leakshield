@@ -24,7 +24,12 @@ function stateOf(checks: Awaited<ReturnType<typeof runPiDoctor>>, id: string): s
   return checks.find((check) => check.id === id)?.state;
 }
 
-const SETTINGS = JSON.stringify({ defaultProvider: "anthropic", defaultModel: "claude-test" });
+const SETTINGS = JSON.stringify({ defaultModel: "claude-test" });
+const MODELS = JSON.stringify({
+  providers: {
+    anthropic: { baseUrl: "https://api.anthropic.com", api: "anthropic-messages", apiKey: "$ANTHROPIC_API_KEY" },
+  },
+});
 
 describe("pi doctor", () => {
   it("skips when pi is not installed", async () => {
@@ -41,8 +46,11 @@ describe("pi doctor", () => {
   it("reports the extension, provider and credential without reading the secret", async () => {
     const checks = await runPiDoctor(
       deps(
-        { [`${AGENT}/settings.json`]: SETTINGS },
-        { env: { HOME: "/home/test", ANTHROPIC_API_KEY: "sk-ant-secret-value" }, fileExists: () => false },
+        { [`${AGENT}/settings.json`]: SETTINGS, [`${AGENT}/models.json`]: MODELS },
+        {
+          env: { HOME: "/home/test", PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-ant-secret-value" },
+          fileExists: () => false,
+        },
       ),
     );
     expect(stateOf(checks, "pi-extension")).toBe("fail");
@@ -51,9 +59,73 @@ describe("pi doctor", () => {
     expect(JSON.stringify(checks)).not.toContain("sk-ant-secret-value");
   });
 
+  it("skips the provider check when no provider is selected", async () => {
+    const checks = await runPiDoctor(
+      deps({ [`${AGENT}/settings.json`]: SETTINGS, [`${AGENT}/models.json`]: MODELS }),
+    );
+    expect(stateOf(checks, "pi-provider")).toBe("skip");
+    expect(checks.find((check) => check.id === "pi-provider")?.detail).toContain("`leakshield pi` requires --provider");
+    expect(stateOf(checks, "pi-credential")).toBeUndefined();
+  });
+
+  it("warns when PI_PROVIDER names a provider outside models.json", async () => {
+    const checks = await runPiDoctor(
+      deps(
+        { [`${AGENT}/settings.json`]: SETTINGS, [`${AGENT}/models.json`]: MODELS },
+        { env: { HOME: "/home/test", PI_PROVIDER: "missing" } },
+      ),
+    );
+    expect(stateOf(checks, "pi-provider")).toBe("warn");
+    expect(checks.find((check) => check.id === "pi-provider")?.detail).toContain('"missing" is not declared');
+    expect(stateOf(checks, "pi-credential")).toBeUndefined();
+  });
+
+  it("resolves the provider from generated settings only inside a managed launch", async () => {
+    const generated = "/tmp/leakshield-pi/run-1/agent";
+    const files = {
+      [`${generated}/settings.json`]: JSON.stringify({ defaultProvider: "anthropic" }),
+      [`${generated}/models.json`]: JSON.stringify({
+        providers: {
+          anthropic: {
+            baseUrl: "http://127.0.0.1:4321",
+            api: "anthropic-messages",
+            apiKey: "$LEAKSHIELD_PI_TOKEN",
+          },
+        },
+      }),
+    };
+    const checks = await runPiDoctor(
+      deps(files, {
+        env: {
+          HOME: "/home/test",
+          PI_CODING_AGENT_DIR: generated,
+          LEAKSHIELD_PI_URL: "http://127.0.0.1:4321",
+          LEAKSHIELD_PI_TOKEN: "t".repeat(48),
+        },
+      }),
+    );
+    expect(stateOf(checks, "pi-provider")).toBe("ok");
+    expect(checks.find((check) => check.id === "pi-provider")?.detail).toContain("anthropic");
+    expect(stateOf(checks, "pi-credential")).toBe("ok");
+    expect(stateOf(checks, "pi-launcher")).toBe("ok");
+
+    const outside = await runPiDoctor(
+      deps(files, { env: { HOME: "/home/test", PI_CODING_AGENT_DIR: generated } }),
+    );
+    expect(stateOf(outside, "pi-provider")).toBe("skip");
+  });
+
   it("warns when no credential is available and when this is not a managed launch", async () => {
-    const checks = await runPiDoctor(deps({ [`${AGENT}/settings.json`]: SETTINGS }));
+    const checks = await runPiDoctor(
+      deps({
+        [`${AGENT}/settings.json`]: SETTINGS,
+        [`${AGENT}/models.json`]: JSON.stringify({
+          providers: { anthropic: { baseUrl: "https://api.anthropic.com", api: "anthropic-messages" } },
+        }),
+      }, { env: { HOME: "/home/test", PI_PROVIDER: "anthropic" } }),
+    );
     expect(stateOf(checks, "pi-credential")).toBe("warn");
+    expect(checks.find((check) => check.id === "pi-credential")?.fix).toContain("in pi's models.json");
     expect(stateOf(checks, "pi-launcher")).toBe("warn");
   });
 

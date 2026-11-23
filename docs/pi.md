@@ -37,30 +37,27 @@ From a checkout:
 ```bash
 npm ci
 npm run build
-node dist/cli.js pi --provider anthropic --continue
+node dist/cli.js pi --provider commandcode --continue
 ```
 
 ## Start pi through the boundary
 
 ```bash
-leakshield pi --continue
-leakshield pi --provider anthropic --model anthropic/claude-sonnet
-leakshield pi --provider openai --model openai/gpt-6 -p "review this diff"
-leakshield --pi --provider openai   # same launcher
+leakshield pi --provider commandcode --continue
+leakshield pi --provider commandcode -p "review this diff"
+leakshield --pi --provider commandcode   # same launcher
 ```
 
 Launcher options (everything else is passed to pi):
 
 | Option | Meaning |
 |---|---|
-| `--provider <id>` | pi provider to protect. Defaults to `defaultProvider` in pi's `settings.json`, then the provider part of `--model` |
+| `--provider <id>` | **Required.** pi provider to protect; must be declared in pi's `models.json` with an `apiKey` |
 | `--model <pattern>` | Forwarded to pi; accepts `provider/id` and `:thinking` |
 | `--upstream <url>` | Override the provider API base (https, or loopback http) |
 | `--api <api>` | `openai-completions`, `openai-responses` or `anthropic-messages` |
 | `--config <path>` | `guard.config.yaml` instead of discovery |
 | `--control-port <port>` | Boundary port; defaults to an ephemeral loopback port |
-| `--persist` | Keep encrypted mappings across restarts (see [Persistence](plugin/persistence.md)) |
-| `--persist-ttl-days <n>` / `--persist-path <path>` / `--persist-keyfile` | Persistence controls |
 
 The launcher prints nothing that contains a credential.
 
@@ -74,13 +71,9 @@ The boundary speaks the three pi wire protocols it has shared Core support for:
 | `anthropic-messages` | `POST …/messages` | unit + real pi process (stub) |
 | `openai-responses` | `POST …/responses` | unit + real pi process (stub) |
 
-Built-in providers with known metadata can be selected by id:
+A provider declared in pi's `models.json` is used as-is (base URL and API), including its declared model list. The provider must be declared there with an `apiKey`; `--upstream` and `--api` only override its base URL and API. Built-in provider selection (pi's catalog metadata and env-var credentials) was removed from the adapter and is tracked in #106.
 
-`anthropic`, `openai`, `openrouter`, `groq`, `deepseek`, `together`, `cerebras`, `baseten`, `nvidia`, `xai`, `moonshotai`, `moonshotai-cn`, `minimax`, `minimax-cn`, `fireworks`, `zai`.
-
-A provider declared in pi's `models.json` is used as-is (base URL and API), including its declared model list. Anything else needs `--upstream` and `--api`.
-
-Example: Command Code is not in pi's catalog, so it is declared as a custom provider (verified with `deepseek/deepseek-v4.1-flash`):
+Example: Command Code is declared as a custom provider (verified with `deepseek/deepseek-v4.1-flash`):
 
 ```json
 {
@@ -99,13 +92,9 @@ The launcher copies only safe model metadata into the generated config; `baseUrl
 
 ### Credentials
 
-Resolution order for the upstream credential:
+The upstream credential comes only from the selected provider's `apiKey` in pi's `models.json`: a literal, or `$ENV_NAME` naming an environment variable. A `!command` value is refused and never executed. Environment variables are not read implicitly, and API keys saved by `pi auth login` are not consulted; if `apiKey` is absent or its `$ENV` variable is unset, the launcher refuses to start.
 
-1. `apiKey` of the provider entry in pi's `models.json` (literal or `$ENV`; `!command` is refused)
-2. The provider's usual environment variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …)
-3. `pi auth print-api-key --provider <id>` (API keys saved by `pi auth login`)
-
-OAuth-only accounts are not supported by the managed route. One real CommandCode request was verified (`deepseek/deepseek-v4.1-flash` through a custom `models.json` entry). Anthropic, OpenAI and OpenRouter are pi's own provider integrations; the adapter verifies their three wire formats by unit test rather than by live per-provider runs. The credential value is never passed to the pi child: its provider API key is the short-lived loopback token.
+OAuth-only accounts are not supported by the managed route. One real CommandCode request was verified (`deepseek/deepseek-v4.1-flash` through a custom `models.json` entry). Anthropic, OpenAI and OpenRouter work only once declared in `models.json` like any other provider; the adapter verifies their three wire formats by unit test rather than by live per-provider runs. The credential value is never passed to the pi child: its provider API key is the short-lived loopback token.
 
 ## What is protected
 
@@ -123,8 +112,7 @@ OAuth-only accounts are not supported by the managed route. One real CommandCode
 
 Session files stay in the user's normal session directory, so `--continue`, `--resume`, `--session` and `/tree` keep working. The boundary scopes mappings by the pi session id that the extension supplies.
 
-- Without `--persist`, mappings are process-lifetime. A resumed session's old placeholders stay literal; a tool call that needs one is refused (read-only tools degrade to a no-match).
-- With `--persist`, mappings are encrypted at rest and reloaded by session id, so a resumed session can restore values issued before the restart.
+Mappings are process-lifetime. A resumed session's old placeholders stay literal; `write`, `edit` and shell (`bash`, `powershell`) calls that need one are refused, and read-only tools degrade to a no-match. Persistent mappings are tracked in #105.
 
 ## Unmanaged pi fails closed
 
@@ -137,7 +125,7 @@ If the LeakShield extension is installed in pi's settings but pi is started with
 - pi binary and supported version
 - extension file present
 - pi `settings.json` / `models.json` readable
-- provider resolvable, and whether a credential is available (never its value)
+- provider selected through `PI_PROVIDER` (skipped when unset), and whether its `models.json` `apiKey` is available (never its value)
 - warning when plain `pi` would go straight to a real provider endpoint
 - whether this shell is inside a managed launch, with a health probe of the boundary
 

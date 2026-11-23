@@ -103,7 +103,7 @@ pi `models.json` 中宣告的 provider 會照其 base URL、API 與模型清單�
 2. provider 慣用的環境變數（`ANTHROPIC_API_KEY`、`OPENAI_API_KEY` 等）
 3. `pi auth print-api-key --provider <id>`（`pi auth login` 存下的 API key）
 
-受管路徑不支援只有 OAuth 的帳號。已用 CommandCode 的 `deepseek/deepseek-v4.1-flash`（自訂 `models.json` entry）完成一次真實 provider 請求；Anthropic、OpenAI、OpenRouter 因沒有可用憑證仍未實測。憑證值不會傳給 pi 子行程，子行程的 provider API key 只是短期的 loopback token。
+受管路徑不支援只有 OAuth 的帳號。已用 CommandCode 的 `deepseek/deepseek-v4.1-flash`（自訂 `models.json` entry）完成一次真實 provider 請求；Anthropic、OpenAI、OpenRouter 屬於 pi 自己的 provider 整合，adapter 以三種 wire format 的單元測試覆蓋，不逐家跑真實服務。憑證值不會傳給 pi 子行程，子行程的 provider API key 只是短期的 loopback token。
 
 ## 保護範圍
 

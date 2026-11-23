@@ -105,7 +105,7 @@ Resolution order for the upstream credential:
 2. The provider's usual environment variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …)
 3. `pi auth print-api-key --provider <id>` (API keys saved by `pi auth login`)
 
-OAuth-only accounts are not supported by the managed route. One real CommandCode request was verified (`deepseek/deepseek-v4.1-flash` through a custom `models.json` entry); Anthropic, OpenAI and OpenRouter real-service runs remain untested because no credentials for them were available. The credential value is never passed to the pi child: its provider API key is the short-lived loopback token.
+OAuth-only accounts are not supported by the managed route. One real CommandCode request was verified (`deepseek/deepseek-v4.1-flash` through a custom `models.json` entry). Anthropic, OpenAI and OpenRouter are pi's own provider integrations; the adapter verifies their three wire formats by unit test rather than by live per-provider runs. The credential value is never passed to the pi child: its provider API key is the short-lived loopback token.
 
 ## What is protected
 

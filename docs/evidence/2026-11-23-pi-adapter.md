@@ -116,8 +116,14 @@ Interpretation:
 - The key existed only in the one-off command's environment. It was not written
   to `auth.json`, `models.json`, the session, or the mapping store.
 
-Not covered by this run: Anthropic/OpenAI/OpenRouter, OAuth-only accounts,
-long conversations, automatic compaction, and interactive TUI rendering.
+Not covered by this run, and not required for the adapter's gate: Anthropic,
+OpenAI and OpenRouter real-service runs. The adapter does not implement provider
+clients; pi owns those integrations, and the three wire formats are covered by
+unit tests. The one live header path not exercised is Anthropic's `x-api-key`
+injection (versus Bearer), also covered by unit tests.
+
+Still a plugin-level limitation: OAuth-only accounts, long conversations,
+automatic compaction, and interactive TUI rendering.
 
 ## Test coverage added
 
@@ -149,16 +155,18 @@ Protected and exercised:
 - `--continue` session reuse; encrypted mapping reload with `--persist`
 - unknown routes/models, missing auth/session, failed masking, redirects
 
-Not exercised or not supported:
+Not exercised, or outside the adapter's scope:
 
-- Anthropic, OpenAI and OpenRouter real-service runs
+- Anthropic, OpenAI and OpenRouter real-service runs: pi owns provider clients; the adapter verifies the three wire formats by unit test and one live smoke. Anthropic's `x-api-key` header path is unit-tested only.
 - real manual compaction / branch summarization in a pi process with the production launcher (research PR #100 verified the same Core path with the prototype proxy; this pass covers the request shape by test only)
 - interactive TUI rendering (print mode was used)
-- OAuth-only accounts, Google/Bedrock/Vertex/Codex wire formats
+- OAuth-only accounts (a credential-acquisition feature, not a provider integration); Google/Bedrock/Vertex/Codex wire formats are not supported
 - direct-provider bypass by a user who runs plain `pi` without the launcher; the extension refuses input/tools, but this is a local guard, not an egress firewall
 - MCP, codemode and tool-search built-ins are disabled by the launcher
 
-The #98 release gate remains open for broader real-provider coverage and an
-enforced egress policy. This change closes the application-level gaps that
-blocked normal coding work: tool restoration, formal install/start entry points,
-user settings, session reuse and the provider/background request paths.
+The #98 release gate remains open for an enforced egress policy (and OAuth
+support if the adapter claims subscription accounts). Provider-by-provider live
+coverage is pi's integration surface, not this adapter's. This change closes the
+application-level gaps that blocked normal coding work: tool restoration, formal
+install/start entry points, user settings, session reuse and the
+provider/background request paths.

@@ -17,6 +17,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { PSEUDONYM_TOKEN_PREFIX_V2 } from "../../dist/decision/pseudonymization.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const piBinary = process.argv[2];
@@ -27,8 +28,7 @@ if (piBinary === undefined || !["openai-completions", "anthropic-messages", "ope
 }
 
 const CANARY = "PI_WIRE_CANARY";
-const PREFIX = ["[SG", "P2:"].join("");
-const TOKEN = new RegExp(`${PREFIX.replace(/[[\]]/g, "\\$&")}[^\\]]+\\]`, "g");
+const TOKEN = new RegExp(`${PSEUDONYM_TOKEN_PREFIX_V2.replace(/[[\]]/g, "\\$&")}[^\\]]+\\]`, "g");
 const failures = [];
 const pass = (label, condition, detail = "") => {
   if (condition) console.log(`ok   ${label}`);
@@ -154,7 +154,7 @@ try {
     });
   });
   pass(`${api}: exit 0`, code === 0, `exit ${code}`);
-  pass(`${api}: provider received a request`, requests.length > 0, `requests=${requests.length}`);
+  pass(`${api}: one request`, requests.length === 1, `requests=${requests.length}`);
   pass(
     `${api}: provider never received the canary`,
     requests.every((request) => !request.body.includes(CANARY)),

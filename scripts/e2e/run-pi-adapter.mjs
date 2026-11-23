@@ -16,6 +16,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { PSEUDONYM_TOKEN_PREFIX_V2 } from "../../dist/decision/pseudonymization.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const piBinary = process.argv[2];
@@ -27,8 +28,7 @@ const persist = process.argv.includes("--persist");
 
 const ALPHA = "PI98_ALPHA_VALUE";
 const BETA = "PI98_BETA_VALUE";
-const SGP2_PREFIX = ["[SG", "P2:"].join("");
-const TOKEN = new RegExp(`${SGP2_PREFIX.replace(/[[\]]/g, "\\$&")}[^\\]]+\\]`, "g");
+const TOKEN = new RegExp(`${PSEUDONYM_TOKEN_PREFIX_V2.replace(/[[\]]/g, "\\$&")}[^\\]]+\\]`, "g");
 const failures = [];
 const pass = (label, condition, detail = "") => {
   if (condition) {
@@ -205,7 +205,7 @@ try {
     .map((entry) => JSON.stringify(entry.message))
     .join("\n");
   pass("saved assistant entries contain no original value", !assistantText.includes(ALPHA) && !assistantText.includes(BETA));
-  pass("saved tool-call arguments contain placeholders", assistantText.includes(SGP2_PREFIX));
+  pass("saved tool-call arguments contain placeholders", assistantText.includes(PSEUDONYM_TOKEN_PREFIX_V2));
   if (persist) pass("encrypted mapping store was written", fs.existsSync(storePath));
 
   const before = requests.length;
@@ -217,7 +217,7 @@ try {
   pass("resumed run sent a new masked request", requests.length > before && !requests.at(-1).body.includes(ALPHA));
   const resumedBody = requests.at(-1)?.body ?? "";
   pass("resumed session history stays masked", !resumedBody.includes(ALPHA) && !resumedBody.includes(BETA));
-  pass("resumed session loaded prior history", resumedBody.includes(SGP2_PREFIX));
+  pass("resumed session loaded prior history", resumedBody.includes(PSEUDONYM_TOKEN_PREFIX_V2));
 
   if (persist) {
     const third = await runPi("Restore the earlier token and finish.", [

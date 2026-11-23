@@ -122,7 +122,11 @@ Launcher options:
   --persist-path <path>  mapping store path for --persist
   --persist-keyfile      allow the weaker keyfile fallback when no OS keychain
 
-Everything after the launcher options is passed to pi, for example:
+Everything after a -- is passed to pi unchanged; launcher options only apply
+before it. Extra -e/--extension flags are refused: they can open their own
+connection and bypass the boundary.
+
+Examples:
   leakshield pi --provider anthropic --continue
   leakshield pi --provider openai --model openai/gpt-6 -p "review this diff"
 

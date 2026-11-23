@@ -423,7 +423,7 @@ function buildProxy(options: PiProxyOptions): BuiltProxy {
 
   const proxy: PiProxy = {
     get url() {
-      const display = host.includes(":") ? `[${host}]` : host;
+      const display = host.startsWith("[") ? host : host.includes(":") ? `[${host}]` : host;
       return `http://${display}:${port}`;
     },
     get port() {

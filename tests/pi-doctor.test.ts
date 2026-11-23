@@ -117,7 +117,7 @@ describe("pi doctor", () => {
     ).toBe(1);
   });
 
-  it("does not fail a protected OpenCode run for an inactive broken pi setup", () => {
+  it("does not fail a protected OpenCode run for an inactive broken pi setup", async () => {
     const protectedRun: DoctorReport = {
       status: "PROTECTED",
       hostVersion: "2.2.5",
@@ -125,9 +125,14 @@ describe("pi doctor", () => {
       configPath: "/work/opencode.json",
       checks: [],
     };
-    expect(
-      doctorExitCode({ ...protectedRun, pi: [{ id: "pi-settings", state: "fail", detail: "bad json" }] }),
-    ).toBe(0);
+    // Real report shape: a broken agent directory still emits a `pi-launcher:
+    // warn` row because this is not a managed launch.
+    const checks = await runPiDoctor(
+      deps({ [`${AGENT}/settings.json`]: "{oops" }, { env: { HOME: "/home/test" } }),
+    );
+    expect(stateOf(checks, "pi-settings")).toBe("fail");
+    expect(stateOf(checks, "pi-launcher")).toBe("warn");
+    expect(doctorExitCode({ ...protectedRun, pi: checks })).toBe(0);
     expect(
       doctorExitCode({ ...protectedRun, pi: [{ id: "pi-launcher", state: "fail", detail: "dead boundary" }] }),
     ).toBe(1);

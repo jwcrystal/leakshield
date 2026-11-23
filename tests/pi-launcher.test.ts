@@ -128,6 +128,12 @@ describe("pi launcher argument parsing", () => {
     expect(parseLauncherArgs(["--", "-e", "message"]).error).toBeUndefined();
   });
 
+  it("does not swallow the separator as an option value", () => {
+    const parsed = parseLauncherArgs(["--provider", "--", "--continue"]);
+    expect(parsed.launcher.provider).toBeUndefined();
+    expect(parsed.launcher.piArgs).toEqual(["--", "--continue"]);
+  });
+
   it("accepts pi 1.6 and later within major 1 only", () => {
     expect(parsePiVersion("1.6.0")).toBe("1.6.0");
     expect(parsePiVersion("pi 1.9.3 (build)")).toBe("1.9.3");

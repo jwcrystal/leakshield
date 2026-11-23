@@ -99,7 +99,9 @@ export interface ParsedLauncherArgs {
 
 function valueOf(args: readonly string[], flag: string): string | undefined {
   const index = args.indexOf(flag);
-  return index !== -1 && index + 1 < args.length ? args[index + 1] : undefined;
+  if (index === -1 || index + 1 >= args.length) return undefined;
+  const value = args[index + 1] as string;
+  return value === "--" ? undefined : value;
 }
 
 /** Flags this launcher owns; everything else is forwarded to pi unchanged. */
@@ -138,7 +140,7 @@ export function parseLauncherArgs(args: readonly string[]): ParsedLauncherArgs {
     }
     if (ownedBoolean.has(arg)) continue;
     if (ownedWithValue.has(arg)) {
-      index += 1;
+      if (args[index + 1] !== "--") index += 1;
       continue;
     }
     launcher.piArgs.push(arg);

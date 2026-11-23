@@ -186,7 +186,7 @@ policy or terminal rendering.
 | `tests/pi-launcher.test.ts` | argument ownership, version gate, generated agent directory, credential scrubbing, session reuse, refused `--persist*` flags, cleanup on failure |
 | `tests/pi-doctor.test.ts` | version/extension/settings/provider/credential/launch/route checks and exit-code integration |
 
-Full suite after the trim: **68 files, all tests passed** (see the PR for the
+Full suite after the trim: **69 files, all tests passed** (see the PR for the
 current count). `tsc --noEmit`, `npm run build` and `npm pack --dry-run` pass;
 the tarball contains `dist/pi/*`. The package `pi` manifest was removed by the trim.
 
@@ -223,12 +223,12 @@ Protected and exercised:
 - managed launch, generated config, child credential scrubbing
 - provider request masking on all three wire formats: unit tests, real pi stub runs (`run-pi-wire.mjs`), and Chat Completions through a real CommandCode provider
 - one real CommandCode provider request with a length oracle: the model saw a 33-character placeholder, not the 14-character original
-- custom provider via `models.json` + `--upstream`/`--api` (CommandCode)
+- custom provider via `models.json` (CommandCode)
 - compaction/summarization-shaped requests on the same route (unit)
 - read/write/edit/bash/powershell restoration and refusals
 - streaming pass-through with placeholders preserved in model-facing history
 - assistant display restoration, including resumed sessions
-- `--continue` session reuse; encrypted mapping reload with `--persist`
+- `--continue` session reuse (encrypted mapping reload with `--persist` was verified before the trim; removed, #105)
 - unknown routes/models, missing auth/session, failed masking, redirects
 
 Not exercised, or outside the adapter's scope:

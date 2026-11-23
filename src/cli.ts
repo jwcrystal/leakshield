@@ -44,7 +44,7 @@ initWindowsEncoding();
 const args = process.argv;
 const isCliMode = args.includes("--cli");
 const isWebMode = args.includes("--web");
-const isDoctorMode = args.includes("--doctor");
+const isDoctorMode = args.some((arg) => arg === "--doctor" || arg.startsWith("--doctor="));
 const isForgetMode = args.includes("--forget");
 const piIndex = args.indexOf("--pi");
 const isPiSubcommand = piIndex === -1 && args[2] === "pi";
@@ -77,14 +77,8 @@ if (isHelpRequest(args) && !isPiMode) {
   const { runClaudeCodeProxy } = await import("./claude-code/cli.js");
   process.exitCode = await runClaudeCodeProxy(args);
 } else if (isDoctorMode) {
-  const { runDoctor, createDoctorDeps, formatDoctorReport, doctorExitCode } = await import("./doctor.js");
-  const { runClaudeCodeDoctor, createClaudeCodeDoctorDeps } = await import("./claude-code/doctor.js");
-  const { runPiDoctor, createPiDoctorDeps } = await import("./pi/doctor.js");
-  const report = await runDoctor(createDoctorDeps());
-  report.claudeCode = await runClaudeCodeDoctor(createClaudeCodeDoctorDeps());
-  report.pi = await runPiDoctor(createPiDoctorDeps());
-  console.log(formatDoctorReport(report));
-  process.exitCode = doctorExitCode(report);
+  const { runDoctorCommand } = await import("./doctor-hosts.js");
+  process.exitCode = await runDoctorCommand(args);
 } else if (isWebMode) {
   const portIdx = args.indexOf("--port");
   const port = portIdx !== -1 ? parseInt(args[portIdx + 1], 10) || 3000 : 3000;

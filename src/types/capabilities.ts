@@ -147,6 +147,13 @@ export function assertCapabilities(
     if (path.posix.normalize(evidencePath) !== evidencePath || evidencePath.endsWith("/")) {
       fail(`${row} evidence must be a normalized file path: ${evidencePath}`);
     }
+    if (evidencePath.split("/").includes("..")) {
+      fail(`${row} evidence must stay inside the repository: ${evidencePath}`);
+    }
+    const resolved = path.resolve(root, evidencePath);
+    if (!resolved.startsWith(root.endsWith(path.sep) ? root : `${root}${path.sep}`)) {
+      fail(`${row} evidence must stay inside the repository: ${evidencePath}`);
+    }
     if (!fileExists(evidencePath)) fail(`${row} evidence does not exist: ${evidencePath}`);
     if (!isFile(evidencePath)) fail(`${row} evidence is not a file: ${evidencePath}`);
     return evidencePath;

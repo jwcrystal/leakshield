@@ -112,6 +112,15 @@ describe("capability declaration", () => {
     expect(errorOf(capabilities)).toContain("normalized file path");
   });
 
+  it("rejects evidence that leads outside the repository", () => {
+    const capabilities = withRow("transports.http", {
+      state: "protected",
+      mechanism: "core.onHttpRequest",
+      evidence: "../leakshield/README.md",
+    });
+    expect(errorOf(capabilities)).toContain("must stay inside the repository");
+  });
+
   it("rejects an absolute evidence path", () => {
     const capabilities = withRow("transports.http", {
       state: "protected",

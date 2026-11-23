@@ -12,7 +12,7 @@
  * are refused by model/API check rather than guarded here.
  */
 import { classifyModelRoute } from "../core/wire.js";
-import { createGuardCore, type GuardCore } from "../core/session-guard.js";
+import { createGuardCore, type GuardCore, type GuardPersistenceOptions } from "../core/session-guard.js";
 import type { GuardConfig } from "../types.js";
 import { assertPiToolBoundary, piToolPolicy } from "./tool-policy.js";
 
@@ -51,6 +51,8 @@ export interface PiGuard {
 
 export interface PiGuardOptions {
   config: GuardConfig;
+  /** Encrypted mapping store; omitted means process-lifetime mappings. */
+  persistence?: GuardPersistenceOptions;
   fetchImpl?: typeof fetch;
   createCore?: typeof createGuardCore;
 }
@@ -95,7 +97,7 @@ export function createPiGuard(options: PiGuardOptions): PiGuard {
     options.config,
     "block",
     true,
-    undefined,
+    options.persistence,
     { anthropicThinking: "mask" },
     piToolPolicy,
   );

@@ -5,7 +5,9 @@
  * Registers the built extension in a temporary pi agent directory and runs the
  * real pi 1.6.0 CLI against a recording loopback provider. The provider plays a
  * scripted tool sequence (read, write, edit, bash) and asserts that no original
- * value reaches it, while the local tools receive the restored values.
+ * value reaches it, while the local tools receive the restored values. The
+ * encrypted mapping store is enabled, so the resumed run loads persisted
+ * mappings from a second process.
  *
  * Usage: node scripts/e2e/run-pi-extension.mjs <path-to-pi-binary>
  * Requires `npm run build` first (the script imports the built placeholder
@@ -48,6 +50,8 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-pi-e2e-"));
 const home = path.join(tmp, "home");
 const work = path.join(tmp, "work");
 const agentDir = path.join(home, ".pi", "agent");
+const storePath = path.join(tmp, "mappings.db");
+const keyfilePath = path.join(tmp, "mappings.key");
 fs.mkdirSync(agentDir, { recursive: true });
 fs.mkdirSync(work, { recursive: true });
 fs.writeFileSync(path.join(work, ALPHA), `${ALPHA} file content\n`);
@@ -160,6 +164,10 @@ function runPi(prompt, extra = []) {
           HOME: home,
           PI_CODING_AGENT_DIR: agentDir,
           LEAKSHIELD_CONFIG: path.join(tmp, "guard.config.yaml"),
+          LEAKSHIELD_PI_PERSIST: "1",
+          LEAKSHIELD_PI_PERSIST_PATH: storePath,
+          LEAKSHIELD_PI_PERSIST_KEYFILE: "1",
+          LEAKSHIELD_PI_PERSIST_KEYFILE_PATH: keyfilePath,
           PI_OFFLINE: "1",
           PI_SKIP_VERSION_CHECK: "1",
         },
@@ -209,6 +217,15 @@ try {
     ? fs.readdirSync(sessionDir, { recursive: true }).filter((name) => String(name).endsWith(".jsonl"))
     : [];
   pass("pi persisted a session in the user's session directory", sessionFiles.length > 0);
+  pass(
+    "the encrypted mapping store was written",
+    fs.existsSync(storePath) && fs.statSync(storePath).size > 0,
+    `store=${storePath}`,
+  );
+  pass(
+    "the mapping store holds no plaintext value",
+    !fs.readFileSync(storePath).includes(ALPHA) && !fs.readFileSync(storePath).includes(BETA),
+  );
   const sessionLines = sessionFiles.flatMap((name) =>
     fs
       .readFileSync(path.join(sessionDir, String(name)), "utf8")

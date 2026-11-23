@@ -23,7 +23,9 @@ credential and session directory.
   `/…/dist/pi/extension.js` first in `extensions`, with a stub provider in
   `models.json` (loopback, `openai-completions` unless stated).
 - `LEAKSHIELD_CONFIG` points at a guard config whose `nda_keywords` hold the
-  synthetic values.
+  synthetic values. Persistence is on with a temporary store
+  (`LEAKSHIELD_PI_PERSIST*`), so the resumed run is a second process that loads
+  the persisted mappings.
 - The stub records every request body and echoes the first placeholder it sees,
   so a restored reply proves the display path.
 - Scripts: `scripts/e2e/run-pi-wire.mjs` and
@@ -54,6 +56,8 @@ ok   every provider request carried placeholders
 ok   tool results were masked before the next request
 ok   write and edit used the restored values
 ok   pi persisted a session in the user's session directory
+ok   the encrypted mapping store was written
+ok   the mapping store holds no plaintext value
 ok   saved tool-call arguments contain placeholders
 ok   resumed run exits 0
 ok   resumed run sent a new masked request
@@ -70,7 +74,7 @@ triggered at runtime (`/tree` has no RPC command). See the gap audit.
 
 ### Build and tests
 
-- `npx vitest run`: 67 files, 1,816 tests pass.
+- `npx vitest run`: 67 files, 1,822 tests pass.
 - `npx tsc --noEmit`, `npm run build`, `npm pack --dry-run`.
 
 ## What this does not prove

@@ -95,9 +95,25 @@ pi keeps its own credential and configuration. The extension runs inside the pi 
   - Shell restoration follows the same literal-argument subset as the OpenCode plugin: a placeholder may be a complete unquoted or whole-word quoted argument, a `curl`/`http` embedded value, or sit before a single trailing `>`/`>>` with a static filename. Pipelines, command chaining, expansions, `<`/`2>` redirection and a tokenized redirect target refuse the call. Token-free commands are unchanged.
   - Unknown, MCP and custom tools: a placeholder refuses the call. Their arguments may be forwarded to a remote service outside this session's mapping.
 
-## Sessions
+## Sessions and persistence
 
-Session files stay where pi keeps them, so `--continue`, `--resume`, `--session` and `/tree` keep working. Mappings are process-lifetime: a resumed session's old placeholders stay literal, `write`/`edit`/shell calls that need one are refused, and read-only tools degrade to a no-match. Persistent mappings are tracked in #105.
+Session files stay where pi keeps them, so `--continue`, `--resume`, `--session` and `/tree` keep working.
+
+Mappings are process-lifetime by default: a resumed session's old placeholders stay literal, `write`/`edit`/shell calls that need one are refused, and read-only tools degrade to a no-match.
+
+The encrypted mapping store is opt-in, like the OpenCode plugin's, because pi has no plugin-options channel:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `LEAKSHIELD_PI_PERSIST` | off | `1`/`true`/`yes` enables the store |
+| `LEAKSHIELD_PI_PERSIST_TTL_DAYS` | `7` | session TTL in days; `0` never expires |
+| `LEAKSHIELD_PI_PERSIST_PATH` | `~/.local/share/leakshield/SGP.db` | store path |
+| `LEAKSHIELD_PI_PERSIST_KEYFILE` | off | allow the keyfile step when no OS keychain is available |
+| `LEAKSHIELD_PI_PERSIST_KEYFILE_PATH` | `~/.local/share/leakshield/sgp.key` | keyfile path |
+
+Key custody is the same ladder as the plugin: OS keychain, then the opt-in keyfile, then memory-only with a warning. `leakshield --forget --all` erases the store. An invalid value refuses to load the extension instead of running without the store you asked for.
+
+With the store enabled, a later process can restore placeholders from earlier sessions wherever the guard sees them: a new request that replays old history, and tool calls. A transcript rendered by a previous process is not re-rendered.
 
 ## Doctor
 

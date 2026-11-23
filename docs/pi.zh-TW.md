@@ -95,9 +95,25 @@ pi 保留自己的憑證與設定。extension 跑在 pi 行程內，所以不像
   - shell 還原範圍與 OpenCode plugin 相同：placeholder 可以是完整未加引號的參數、整詞加引號的參數、`curl`/`http` 內嵌的值，或單一結尾 `>`/`>>` 配固定檔名之前。管線、命令串接、展開、`<`/`2>` 重導向與被 token 化的重導向目標都會拒絕。沒有 placeholder 的命令不受影響。
   - 未知、MCP 與自訂工具：帶著 placeholder 就拒絕。它們的參數可能被轉送到這個 session mapping 之外的遠端服務。
 
-## Session
+## Session 與持久化
 
-session 檔留在 pi 原本的位置，`--continue`、`--resume`、`--session` 與 `/tree` 照常可用。mapping 只在行程存活期間有效：resume 後的舊 placeholder 維持字面，需要它的 `write`/`edit`/shell 呼叫會被拒絕，唯讀工具退化成比對不到。持久化 mapping 由 #105 追蹤。
+session 檔留在 pi 原本的位置，`--continue`、`--resume`、`--session` 與 `/tree` 照常可用。
+
+mapping 預設只在行程存活期間有效：resume 後的舊 placeholder 維持字面，需要它的 `write`/`edit`/shell 呼叫會被拒絕，唯讀工具退化成比對不到。
+
+加密 mapping store 和 OpenCode plugin 一樣是選用，因為 pi 沒有 plugin options 通道：
+
+| 變數 | 預設 | 意義 |
+|---|---|---|
+| `LEAKSHIELD_PI_PERSIST` | 關 | `1`/`true`/`yes` 啟用 store |
+| `LEAKSHIELD_PI_PERSIST_TTL_DAYS` | `7` | session 保留天數；`0` 不過期 |
+| `LEAKSHIELD_PI_PERSIST_PATH` | `~/.local/share/leakshield/SGP.db` | store 路徑 |
+| `LEAKSHIELD_PI_PERSIST_KEYFILE` | 關 | 沒有作業系統金鑰圈時允許退回金鑰檔 |
+| `LEAKSHIELD_PI_PERSIST_KEYFILE_PATH` | `~/.local/share/leakshield/sgp.key` | 金鑰檔路徑 |
+
+金鑰取得順序與 plugin 相同：作業系統金鑰圈、選用的金鑰檔、最後才退到只留記憶體並警告。`leakshield --forget --all` 會清除 store。設定值不合法時 extension 會拒絕載入，不會默默地在沒有 store 的情況下執行。
+
+啟用 store 後，後續行程能在 guard 看得到的地方還原舊 session 的 placeholder：重播舊歷史的新請求，以及工具呼叫。前一個行程已經渲染過的 transcript 不會重新渲染。
 
 ## Doctor
 

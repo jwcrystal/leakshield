@@ -14,6 +14,7 @@
 import { loadConfig } from "../config/loader.js";
 import type { GuardConfig } from "../types.js";
 import { createPiGuard, PROTECT_FAILED, type PiGuard, type PiGuardModel } from "./guard.js";
+import { piPersistenceOptions } from "./persistence.js";
 
 const GUARD_KEY = Symbol.for("leakshield.pi.guard");
 
@@ -79,7 +80,7 @@ function refusalText(error: unknown): string {
 function installGuard(): PiGuard {
   const existing = (globalThis as Record<symbol, unknown>)[GUARD_KEY] as PiGuard | undefined;
   if (existing !== undefined) return existing;
-  const guard = createPiGuard({ config: guardConfig() });
+  const guard = createPiGuard({ config: guardConfig(), persistence: piPersistenceOptions(process.env) });
   guard.install();
   Object.defineProperty(globalThis, GUARD_KEY, { value: guard, configurable: true });
   return guard;

@@ -373,7 +373,7 @@ The proxy masks every Anthropic Messages request Claude Code sends (and `count_t
 
 ```bash
 leakshield --pi-install                            # optional: register the extension in pi's settings
-leakshield pi --provider anthropic --continue      # run pi behind the loopback boundary
+leakshield pi --provider commandcode --continue    # run pi behind the loopback boundary
 leakshield --doctor                                # the "pi:" section checks the wiring
 ```
 

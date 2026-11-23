@@ -24,19 +24,6 @@ function whichPi(): string | null {
   return first?.trim() ?? null;
 }
 
-/** pi may print notices before the key; the key is the last non-empty line. */
-function readAuthKey(bin: string, provider: string): string | null {
-  const result = spawnSync(bin, ["auth", "print-api-key", "--provider", provider], {
-    encoding: "utf8",
-    timeout: 15000,
-  });
-  if (result.error || result.status !== 0) return null;
-  const lines = (result.stdout || "").split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
-  const key = lines.at(-1);
-  if (key === undefined || key.length < 8 || key.length > 8192 || /\s/.test(key)) return null;
-  return key;
-}
-
 function runChild(bin: string, args: readonly string[], env: Record<string, string>, cwd: string): Promise<number> {
   return new Promise((resolve) => {
     const child = spawn(bin, [...args], { cwd, env, stdio: "inherit" });
@@ -91,7 +78,6 @@ export function createPiLauncherDeps(): PiLauncherDeps {
       if (result.error || result.status !== 0) return null;
       return (result.stdout || "").trim() || null;
     },
-    piAuthKey: readAuthKey,
     runChild,
     startProxy: startPiProxy,
     loadGuardConfig(configPath, cwd) {
@@ -107,28 +93,25 @@ export function createPiLauncherDeps(): PiLauncherDeps {
 const PI_USAGE = `leakshield pi — run the pi coding agent behind the LeakShield boundary
 
 Usage:
-  leakshield pi [--provider <id>] [--model <provider/id>] [-- pi args...]
+  leakshield pi --provider <id> [--model <provider/id>] [-- pi args...]
 
 Launcher options:
-  --provider <id>        pi provider to protect (default: pi's defaultProvider)
+  --provider <id>        pi provider to protect (required; must be declared
+                         in pi's models.json)
   --model <pattern>      model passed to pi (supports provider/id and :thinking)
   --upstream <url>       override the provider API base (https, or loopback http)
   --api <api>            override the wire api: openai-completions,
                          openai-responses, or anthropic-messages
   --config <path>        guard.config.yaml to use instead of discovery
   --control-port <port>  loopback boundary port (default: an ephemeral port)
-  --persist              keep encrypted mappings across restarts
-  --persist-ttl-days <n> mapping TTL in days for --persist (default: 7)
-  --persist-path <path>  mapping store path for --persist
-  --persist-keyfile      allow the weaker keyfile fallback when no OS keychain
 
 Everything after a -- is passed to pi unchanged; launcher options only apply
 before it. Extra -e/--extension flags are refused: they can open their own
 connection and bypass the boundary.
 
 Examples:
-  leakshield pi --provider anthropic --continue
-  leakshield pi --provider openai --model openai/gpt-6 -p "review this diff"
+  leakshield pi --provider commandcode --continue
+  leakshield pi --provider commandcode -p "review this diff"
 
 Plain \`pi\` is not protected. If the LeakShield extension is installed in
 pi's settings, it refuses input until pi runs through this launcher.`;

@@ -1,5 +1,7 @@
 # Installation, session lifecycle and interactive display verification
 
+> The fixture scripts were removed from the tree after the gate closed. To reproduce, restore them from commit `ae33512`: `git checkout ae33512 -- 'docs/evidence/pi-lab/*.mjs' docs/evidence/pi-provider-boundary.mjs`.
+
 Actual pi 1.6.0 tests now cover local extension installation, saved sessions, pi and proxy restarts, session switching, manual compaction under session binding, and real interactive terminal rendering. The local prototype passes these tests. Formal npm pi integration and real authenticated provider verification remain incomplete.
 
 ## Reproduction

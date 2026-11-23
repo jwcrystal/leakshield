@@ -4,7 +4,7 @@
 Application layer for the scanner: configuration, rule engine, decision model, pseudonymization, OpenCode plugin hooks, and the CLI / Web transports.
 
 ## Design
-- Entrypoints: `index.ts` (OpenCode plugin, re-exports `opencode.ts`), `cli.ts` (CLI / Web / doctor / forget / `--claude-code-proxy` / `--pi`), and `pi/extension.ts` (pi extension, package `pi.extensions` + `leakshield/pi` export).
+- Entrypoints: `index.ts` (OpenCode plugin, re-exports `opencode.ts`), `cli.ts` (CLI / Web / doctor / forget / `--claude-code-proxy` / `--pi`), and `pi/extension.ts` (pi extension, registered by `leakshield --pi-install`).
 - Subdirectories:
   - `config/` — YAML config loading and validation.
   - `rules/` — built-in and dynamic rules, encoding-aware detection, unicode checks, exact `.env` values.

@@ -17,7 +17,6 @@ import { PI_HEALTH_PATH, PI_HEALTH_SERVICE } from "./proxy.js";
 import {
   defaultPiAgentDir,
   loadPiUserAgent,
-  providerFromModel,
   resolvePiProvider,
   type PiUserAgent,
 } from "./settings.js";
@@ -90,39 +89,54 @@ export async function runPiDoctor(deps: PiDoctorDeps): Promise<DoctorCheck[]> {
     });
   }
   if (agent !== null) {
-    let provider: string | undefined;
-    let model: string | undefined;
-    let credential: boolean | undefined;
-    try {
-      const resolution = resolvePiProvider({ agent, env: deps.env });
-      provider = resolution.provider;
-      model = resolution.model;
-      credential = resolution.upstream.apiKey !== undefined;
-    } catch (error) {
-      provider = deps.env.PI_PROVIDER ?? agent.settings.defaultProvider ?? providerFromModel(agent.settings.defaultModel);
+    const configured = deps.env.PI_PROVIDER;
+    const managed = deps.env.LEAKSHIELD_PI_URL !== undefined;
+    const selected =
+      configured !== undefined && configured.length > 0
+        ? configured
+        : managed
+          ? agent.settings.defaultProvider
+          : undefined;
+    if (selected === undefined || selected.length === 0) {
       checks.push({
         id: "pi-provider",
-        state: "warn",
-        detail: `pi provider could not be resolved without flags: ${error instanceof Error ? error.message : String(error)}`,
-        fix: "Pass --provider to `leakshield --pi`, or declare the provider in pi's models.json.",
+        state: "skip",
+        detail: "no provider selected; `leakshield pi` requires --provider",
       });
-    }
-    if (provider !== undefined && credential !== undefined) {
-      checks.push({
-        id: "pi-provider",
-        state: "ok",
-        detail: `${provider}${model !== undefined ? ` / ${model}` : ""}`,
-      });
-      checks.push(
-        credential
-          ? { id: "pi-credential", state: "ok", detail: `a credential is available for ${provider} (value not read).` }
-          : {
-              id: "pi-credential",
-              state: "warn",
-              detail: `no credential found in the environment or models.json for ${provider}.`,
-              fix: `Export its API key or run \`pi auth login ${provider}\` before \`leakshield --pi\`.`,
-            },
-      );
+    } else {
+      let provider: string | undefined;
+      let model: string | undefined;
+      let credential: boolean | undefined;
+      try {
+        const resolution = resolvePiProvider({ agent, env: deps.env, provider: selected });
+        provider = resolution.provider;
+        model = resolution.model;
+        credential = resolution.upstream.apiKey !== undefined;
+      } catch (error) {
+        checks.push({
+          id: "pi-provider",
+          state: "warn",
+          detail: `pi provider could not be resolved: ${error instanceof Error ? error.message : String(error)}`,
+          fix: "Declare the provider in pi's models.json with baseUrl, api and apiKey.",
+        });
+      }
+      if (provider !== undefined && credential !== undefined) {
+        checks.push({
+          id: "pi-provider",
+          state: "ok",
+          detail: `${provider}${model !== undefined ? ` / ${model}` : ""}`,
+        });
+        checks.push(
+          credential
+            ? { id: "pi-credential", state: "ok", detail: `a credential is available for ${provider} (value not read).` }
+            : {
+                id: "pi-credential",
+                state: "warn",
+                detail: `no apiKey in pi's models.json for ${provider}.`,
+                fix: `set "apiKey" for ${provider} in pi's models.json (a literal or "$ENV_NAME").`,
+              },
+        );
+      }
     }
     // An entry that names a real upstream is expected; it becomes a bypass only
     // when pi runs without the launcher.

@@ -2,7 +2,6 @@
 import { describe, expect, it } from "vitest";
 import {
   loadPiUserAgent,
-  providerFromModel,
   resolveApiKeySpec,
   resolvePiProvider,
   resolveSessionDir,
@@ -17,14 +16,14 @@ function agentWith(files: Record<string, string>) {
 describe("pi settings", () => {
   it("reads defaults, sessionDir and provider entries", () => {
     const agent = agentWith({
-      "settings.json": JSON.stringify({ defaultProvider: "anthropic", defaultModel: "claude-test", sessionDir: "sessions" }),
+      "settings.json": JSON.stringify({ defaultModel: "claude-test", sessionDir: "sessions" }),
       "models.json": JSON.stringify({
         providers: {
           local: { baseUrl: "https://local.test/v1", api: "openai-completions", apiKey: "$LOCAL_KEY", models: [{ id: "m1" }, { id: "m2" }] },
         },
       }),
     });
-    expect(agent.settings.defaultProvider).toBe("anthropic");
+    expect(agent.settings.defaultModel).toBe("claude-test");
     expect(agent.providers.local?.baseUrl).toBe("https://local.test/v1");
     expect(agent.providers.local?.models).toEqual([{ id: "m1" }, { id: "m2" }]);
   });
@@ -65,37 +64,64 @@ describe("pi settings", () => {
     expect(resolution.envNames.sort()).toEqual(["LOCAL_KEY", "LOCAL_ORG"]);
   });
 
-  it("resolves a built-in provider from its API key environment variable", () => {
-    const agent = agentWith({ "settings.json": JSON.stringify({ defaultProvider: "anthropic", defaultModel: "claude-test" }) });
-    const resolution = resolvePiProvider({ agent, env: { ANTHROPIC_API_KEY: "sk-ant-test" } });
-    expect(resolution.provider).toBe("anthropic");
-    expect(resolution.upstream.baseUrl).toBe("https://api.anthropic.com");
-    expect(resolution.upstream.api).toBe("anthropic-messages");
-    expect(resolution.upstream.apiKey).toBe("sk-ant-test");
-    expect(resolution.models).toEqual([]);
-  });
-
-  it("takes the provider from provider/model and lets --provider win", () => {
-    const agent = agentWith({});
-    expect(providerFromModel("openrouter/some/model:high")).toBe("openrouter");
-    expect(
-      resolvePiProvider({ agent, env: { OPENROUTER_API_KEY: "sk-or" }, model: "openrouter/some/model:high" }).provider,
-    ).toBe("openrouter");
-    expect(resolvePiProvider({ agent, env: { ANTHROPIC_API_KEY: "k" }, provider: "anthropic", model: "openai/x" }).provider).toBe(
-      "anthropic",
+  it("requires --provider and never infers it from settings or the model", () => {
+    const agent = agentWith({
+      "settings.json": JSON.stringify({ defaultModel: "anthropic/claude-test" }),
+      "models.json": JSON.stringify({
+        providers: { anthropic: { baseUrl: "https://api.anthropic.com", api: "anthropic-messages", apiKey: "sk-ant-test" } },
+      }),
+    });
+    expect(() => resolvePiProvider({ agent, env: { ANTHROPIC_API_KEY: "sk-ant-test" } })).toThrow(
+      "no pi provider selected; pass --provider <id>",
     );
+    expect(() => resolvePiProvider({ agent, env: {}, model: "anthropic/claude-test" })).toThrow("no pi provider selected");
+    expect(resolvePiProvider({ agent, env: {}, provider: "anthropic" }).upstream.apiKey).toBe("sk-ant-test");
   });
 
-  it("refuses unsupported APIs, unknown providers and unset $ENV credentials", () => {
+  it("refuses a provider outside models.json even with --upstream and --api", () => {
     const agent = agentWith({});
-    expect(() => resolvePiProvider({ agent, env: {}, provider: "google" })).toThrow("no known upstream");
+    expect(() => resolvePiProvider({ agent, env: {}, provider: "google" })).toThrow(
+      `pi provider "google" is not declared in pi's models.json`,
+    );
     expect(() =>
-      resolvePiProvider({ agent, env: {}, provider: "google", upstreamOverride: "https://generativelanguage.googleapis.com/v1beta", apiOverride: "google-generative-ai" }),
+      resolvePiProvider({
+        agent,
+        env: {},
+        provider: "google",
+        upstreamOverride: "https://x.test/v1",
+        apiOverride: "openai-completions",
+      }),
+    ).toThrow("declare it with baseUrl, api and apiKey");
+  });
+
+  it("lets --upstream and --api override a declared provider entry", () => {
+    const agent = agentWith({
+      "models.json": JSON.stringify({
+        providers: { local: { baseUrl: "https://local.test/v1", api: "openai-completions", apiKey: "sk-local" } },
+      }),
+    });
+    const resolution = resolvePiProvider({
+      agent,
+      env: {},
+      provider: "local",
+      upstreamOverride: "http://127.0.0.1:4321/v1",
+      apiOverride: "anthropic-messages",
+    });
+    expect(resolution.upstream.baseUrl).toBe("http://127.0.0.1:4321/v1");
+    expect(resolution.upstream.api).toBe("anthropic-messages");
+    expect(resolution.upstream.apiKey).toBe("sk-local");
+  });
+
+  it("refuses unsupported APIs and leaves a missing models.json apiKey undefined", () => {
+    const agent = agentWith({
+      "models.json": JSON.stringify({
+        providers: { overridden: { baseUrl: "https://local.test/v1", api: "openai-completions" } },
+      }),
+    });
+    expect(() =>
+      resolvePiProvider({ agent, env: {}, provider: "overridden", upstreamOverride: "https://generativelanguage.googleapis.com/v1beta", apiOverride: "google-generative-ai" }),
     ).toThrow("does not speak");
-    expect(resolvePiProvider({ agent, env: {}, provider: "google", upstreamOverride: "https://x.test/v1", apiOverride: "openai-completions" }).upstream.baseUrl).toBe(
-      "https://x.test/v1",
-    );
-    expect(resolvePiProvider({ agent, env: {}, provider: "anthropic" }).upstream.apiKey).toBeUndefined();
+    expect(resolvePiProvider({ agent, env: {}, provider: "overridden" }).upstream.apiKey).toBeUndefined();
   });
 
   it("refuses apiKey commands instead of executing them", () => {

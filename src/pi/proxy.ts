@@ -16,7 +16,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { createGuardCore, type GuardCore, type GuardPersistenceOptions } from "../core/session-guard.js";
+import { createGuardCore, type GuardCore } from "../core/session-guard.js";
 import type { GuardConfig } from "../types.js";
 import { assertPiToolBoundary, piToolPolicy } from "./tool-policy.js";
 
@@ -80,7 +80,6 @@ export interface PiProxyOptions {
   models?: readonly string[];
   host?: string;
   port?: number;
-  persistence?: GuardPersistenceOptions;
   fetch?: typeof fetch;
   log?: (line: string) => void;
 }
@@ -263,7 +262,7 @@ function buildProxy(options: PiProxyOptions): BuiltProxy {
   const fetchImpl = options.fetch ?? fetch;
   const log = options.log ?? ((line: string) => console.error(line));
   const token = randomBytes(32).toString("hex");
-  const core: GuardCore | null = createGuardCore(options.config, "block", true, options.persistence, {
+  const core: GuardCore | null = createGuardCore(options.config, "block", true, undefined, {
     anthropicThinking: "mask",
   }, piToolPolicy);
 

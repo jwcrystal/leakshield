@@ -7,7 +7,7 @@
  * edit, bash) and asserts that no original value reaches it, while the local
  * tools receive the restored values.
  *
- * Usage: node scripts/e2e/run-pi-adapter.mjs <path-to-pi-binary> [--persist]
+ * Usage: node scripts/e2e/run-pi-adapter.mjs <path-to-pi-binary>
  * Requires `npm run build` first (the script imports the built placeholder
  * prefix) and Node.js 24.
  */
@@ -22,10 +22,9 @@ import { PSEUDONYM_TOKEN_PREFIX_V2 } from "../../dist/decision/pseudonymization.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const piBinary = process.argv[2];
 if (piBinary === undefined) {
-  console.error("usage: node scripts/e2e/run-pi-adapter.mjs <pi-binary> [--persist]");
+  console.error("usage: node scripts/e2e/run-pi-adapter.mjs <pi-binary>");
   process.exit(2);
 }
-const persist = process.argv.includes("--persist");
 
 const ALPHA = "PI98_ALPHA_VALUE";
 const BETA = "PI98_BETA_VALUE";
@@ -44,7 +43,6 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-pi-e2e-"));
 const home = path.join(tmp, "home");
 const work = path.join(tmp, "work");
 const agentDir = path.join(home, ".pi", "agent");
-const storePath = path.join(tmp, "SGP.db");
 fs.mkdirSync(agentDir, { recursive: true });
 fs.mkdirSync(work, { recursive: true });
 fs.writeFileSync(path.join(work, ALPHA), `${ALPHA} file content\n`);
@@ -54,7 +52,7 @@ fs.writeFileSync(
 );
 fs.writeFileSync(
   path.join(agentDir, "settings.json"),
-  `${JSON.stringify({ defaultProvider: "stub", defaultModel: "stub-model" }, null, 2)}\n`,
+  `${JSON.stringify({ defaultModel: "stub-model" }, null, 2)}\n`,
 );
 
 const requests = [];
@@ -170,7 +168,6 @@ function expectFile(label, filePath, expected) {
 try {
   const first = await runPi(
     `Read ${ALPHA}, and note ${BETA}. Then write, edit and cat the value.`,
-    persist ? ["--persist", "--persist-keyfile", "--persist-path", storePath] : [],
   );
   pass("first run exits 0", first.code === 0, `exit ${first.code}\n${first.stderr.slice(-2000)}`);
   pass("scripted tool sequence ran", step >= 5, `steps=${step}`);
@@ -207,30 +204,14 @@ try {
     .join("\n");
   pass("saved assistant entries contain no original value", !assistantText.includes(ALPHA) && !assistantText.includes(BETA));
   pass("saved tool-call arguments contain placeholders", assistantText.includes(PSEUDONYM_TOKEN_PREFIX_V2));
-  if (persist) pass("encrypted mapping store was written", fs.existsSync(storePath));
 
   const before = requests.length;
-  const second = await runPi("Continue and finish.", [
-    "--continue",
-    ...(persist ? ["--persist", "--persist-keyfile", "--persist-path", storePath] : []),
-  ]);
+  const second = await runPi("Continue and finish.", ["--continue"]);
   pass("resumed run exits 0", second.code === 0, `exit ${second.code}\n${second.stderr.slice(-2000)}`);
   pass("resumed run sent a new masked request", requests.length > before && !requests.at(-1).body.includes(ALPHA));
   const resumedBody = requests.at(-1)?.body ?? "";
   pass("resumed session history stays masked", !resumedBody.includes(ALPHA) && !resumedBody.includes(BETA));
   pass("resumed session loaded prior history", resumedBody.includes(PSEUDONYM_TOKEN_PREFIX_V2));
-
-  if (persist) {
-    const third = await runPi("Restore the earlier token and finish.", [
-      "--continue",
-      "--persist",
-      "--persist-keyfile",
-      "--persist-path",
-      storePath,
-    ]);
-    pass("persisted mapping run exits 0", third.code === 0, `exit ${third.code}`);
-    pass("mapping store holds no original value", !fs.readFileSync(storePath).includes(ALPHA));
-  }
 } finally {
   await new Promise((resolve) => upstream.close(resolve));
   if (failures.length === 0) {

@@ -45,7 +45,7 @@ fs.mkdirSync(agentDir, { recursive: true });
 fs.mkdirSync(work, { recursive: true });
 fs.writeFileSync(
   path.join(agentDir, "settings.json"),
-  `${JSON.stringify({ defaultProvider: "stub", defaultModel: "stub-model" }, null, 2)}\n`,
+  `${JSON.stringify({ defaultModel: "stub-model" }, null, 2)}\n`,
 );
 fs.writeFileSync(
   path.join(tmp, "guard.config.yaml"),

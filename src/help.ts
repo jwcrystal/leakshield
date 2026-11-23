@@ -38,9 +38,9 @@ Claude Code proxy options (then set ANTHROPIC_BASE_URL=http://127.0.0.1:<port>):
   --attachments block|allow      Refuse (default) or pass images/documents through unscanned
 
 pi options (leakshield --pi --help lists them all):
-  --provider <id>                pi provider to protect
+  --provider <id>                pi provider to protect (required; must be a
+                                 provider declared in models.json)
   --model <provider/id>          Model passed to pi
-  --persist                      Keep encrypted mappings across restarts
 
 Forget options:
   --path <file>                  Mapping store location (default: ~/.local/share/leakshield/SGP.db)

@@ -1,5 +1,7 @@
 # Managed provider configuration, startup checks and proxy routing
 
+> The fixture scripts were removed from the tree after the gate closed. To reproduce, restore them from commit `ae33512`: `git checkout ae33512 -- 'docs/evidence/pi-lab/*.mjs' docs/evidence/pi-provider-boundary.mjs`.
+
 These integration checks run in the cloud with actual pi 1.6.0 and two independent authenticated loopback stubs. They cover provider selection, startup validation, proxy routing and credential separation without requiring real provider credentials.
 
 The managed research launcher generates one isolated pi configuration containing only the selected provider alias and a proxy URL. It checks the pinned CLI version and authenticated Core masking before starting the pi session. The proxy alone receives the selected upstream credential. The pi child receives a separate proxy credential and a restricted environment.

@@ -15,7 +15,6 @@
   "keywords": [
     "opencode",
     "opencode-plugin",
-    "pi-package",
     "secrets",
     "pii",
     "redaction",
@@ -31,16 +30,7 @@
     "./core": {
       "types": "./dist/core/index.d.ts",
       "default": "./dist/core/index.js"
-    },
-    "./pi": {
-      "types": "./dist/pi/extension.d.ts",
-      "default": "./dist/pi/extension.js"
     }
-  },
-  "pi": {
-    "extensions": [
-      "./dist/pi/extension.js"
-    ]
   },
   "files": [
     "dist",

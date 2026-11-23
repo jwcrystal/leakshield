@@ -2,16 +2,14 @@
  * `leakshield pi` — managed launch of the pi coding agent.
  *
  * The launcher is the enforceable part of the pi adapter. It reads the user's
- * pi settings and models, resolves one provider, starts the loopback provider
- * boundary, and writes a generated agent directory whose only provider is that
- * boundary. The child never receives the upstream credential.
+ * pi settings and models, resolves the requested provider, starts the loopback
+ * provider boundary, and writes a generated agent directory whose only provider
+ * is that boundary. The child never receives the upstream credential.
  *
  * Session storage stays with the user, so `--continue`, `--resume` and
- * `--session` behave as before. With `--persist`, the mapping store also
- * survives a restart and a resumed session can restore its placeholders.
+ * `--session` behave as before. Mappings last as long as the process.
  */
 import path from "node:path";
-import { defaultStorePath } from "../decision/mapping-key.js";
 import type { GuardConfig } from "../types.js";
 import { PI_LAUNCH_TOKEN_ENV, PI_LAUNCH_URL_ENV } from "./extension.js";
 import type { PiProxy, PiProxyOptions } from "./proxy.js";
@@ -85,10 +83,6 @@ export interface PiLauncherArgs {
   api?: string;
   configPath?: string;
   controlPort: number;
-  persist: boolean;
-  persistTtlDays: number;
-  persistPath?: string;
-  persistKeyfile: boolean;
   piArgs: string[];
 }
 
@@ -108,9 +102,6 @@ function valueOf(args: readonly string[], flag: string): string | undefined {
 export function parseLauncherArgs(args: readonly string[]): ParsedLauncherArgs {
   const launcher: PiLauncherArgs = {
     controlPort: 0,
-    persist: false,
-    persistTtlDays: 7,
-    persistKeyfile: false,
     piArgs: [],
   };
   const ownedWithValue = new Set([
@@ -120,10 +111,7 @@ export function parseLauncherArgs(args: readonly string[]): ParsedLauncherArgs {
     "--api",
     "--config",
     "--control-port",
-    "--persist-ttl-days",
-    "--persist-path",
   ]);
-  const ownedBoolean = new Set(["--persist", "--persist-keyfile"]);
   const separator = args.indexOf("--");
   const ownArgs = separator === -1 ? args : args.slice(0, separator);
   for (let index = 0; index < args.length; index++) {
@@ -138,7 +126,15 @@ export function parseLauncherArgs(args: readonly string[]): ParsedLauncherArgs {
         error: "the managed launch refuses additional extensions; they can open their own network connection and bypass the boundary",
       };
     }
-    if (ownedBoolean.has(arg)) continue;
+    const unsupported = ["--persist", "--persist-keyfile", "--persist-path", "--persist-ttl-days"].find(
+      (flag) => arg === flag || arg.startsWith(`${flag}=`),
+    );
+    if (unsupported !== undefined) {
+      return {
+        launcher,
+        error: `${unsupported} is not supported by \`leakshield pi\` yet (see #105)`,
+      };
+    }
     if (ownedWithValue.has(arg)) {
       if (args[index + 1] !== "--") index += 1;
       continue;
@@ -151,9 +147,6 @@ export function parseLauncherArgs(args: readonly string[]): ParsedLauncherArgs {
   launcher.upstream = valueOf(ownArgs, "--upstream");
   launcher.api = valueOf(ownArgs, "--api");
   launcher.configPath = valueOf(ownArgs, "--config");
-  launcher.persist = ownArgs.includes("--persist");
-  launcher.persistKeyfile = ownArgs.includes("--persist-keyfile");
-  launcher.persistPath = valueOf(ownArgs, "--persist-path");
 
   const rawPort = valueOf(ownArgs, "--control-port");
   if (rawPort !== undefined) {
@@ -162,14 +155,6 @@ export function parseLauncherArgs(args: readonly string[]): ParsedLauncherArgs {
       return { launcher, error: "--control-port must be an integer from 0 to 65535" };
     }
     launcher.controlPort = port;
-  }
-  const rawTtl = valueOf(ownArgs, "--persist-ttl-days");
-  if (rawTtl !== undefined) {
-    const ttl = Number(rawTtl);
-    if (!Number.isInteger(ttl) || ttl < 0 || ttl > 3650) {
-      return { launcher, error: "--persist-ttl-days must be an integer from 0 to 3650" };
-    }
-    launcher.persistTtlDays = ttl;
   }
   return { launcher };
 }
@@ -233,8 +218,6 @@ export interface PiLauncherDeps {
   rmrf(target: string): void;
   resolvePi(): string | null;
   piVersion(bin: string): string | null;
-  /** Falls back to pi's own credential resolution (`pi auth print-api-key`). */
-  piAuthKey(bin: string, provider: string): string | null;
   runChild(bin: string, args: readonly string[], env: Record<string, string>, cwd: string): Promise<number>;
   startProxy(options: PiProxyOptions): Promise<PiProxy>;
   loadGuardConfig(configPath: string | undefined, cwd: string): GuardConfig;
@@ -352,10 +335,10 @@ export async function runPiLauncher(args: readonly string[], deps: PiLauncherDep
     return 1;
   }
 
-  const apiKey = resolution.upstream.apiKey ?? deps.piAuthKey(bin, resolution.provider) ?? undefined;
+  const apiKey = resolution.upstream.apiKey;
   if (apiKey === undefined) {
     deps.log(
-      `leakshield: no credential for pi provider "${resolution.provider}"; export its API key or run \`pi auth login ${resolution.provider}\``,
+      `leakshield: no credential for pi provider "${resolution.provider}"; set "apiKey" for it in pi's models.json (a literal or "$ENV_NAME")`,
     );
     return 1;
   }
@@ -373,13 +356,6 @@ export async function runPiLauncher(args: readonly string[], deps: PiLauncherDep
       },
       models: resolution.models,
       port: launcher.controlPort,
-      persistence: launcher.persist
-        ? {
-            ttlDays: launcher.persistTtlDays,
-            path: launcher.persistPath ?? defaultStorePath(),
-            keyFile: launcher.persistKeyfile,
-          }
-        : undefined,
     });
   } catch (proxyError) {
     deps.log(

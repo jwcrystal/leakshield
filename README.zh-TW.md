@@ -369,7 +369,7 @@ Proxy 會遮罩 Claude Code 送出的每個 Anthropic Messages 請求（含 `cou
 
 ```bash
 leakshield --pi-install                            # 選用：把 extension 註冊到 pi 設定
-leakshield pi --provider anthropic --continue      # 讓 pi 走 loopback 邊界
+leakshield pi --provider commandcode --continue    # 讓 pi 走 loopback 邊界
 leakshield --doctor                                # "pi:" 區段會檢查設定
 ```
 

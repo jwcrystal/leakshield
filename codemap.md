@@ -5,7 +5,7 @@ Scans for secrets, PII, database credentials, internal domains, and NDA keywords
 
 ## Design
 - Single-package TypeScript application with three entrypoints:
-  - `src/index.ts` — OpenCode plugin entry (re-exports `src/adapters/opencode/opencode.ts`); importing it never starts a process.
+  - `src/index.ts` — OpenCode plugin entry (re-exports `src/adapters/opencode/plugin.ts`); importing it never starts a process.
   - `src/cli.ts` — CLI / Web UI / `--doctor` / `--forget` / `--claude-code-proxy` entry (the `leakshield` bin and release binaries).
   - `src/adapters/pi/extension.ts` — pi extension entry (registered in pi `settings.extensions` or loaded with `-e`).
 - `src/core/` is the host-independent wire and session layer, and `src/adapters/{opencode,claude-code,pi}/` hold every host-specific module, so whether a file touches a host is answered by its directory. `src/doctor-report.ts` is the report shape and rendering shared by the three doctors.

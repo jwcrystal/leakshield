@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createTransparentSessionGuard } from "../src/adapters/opencode/opencode-transparent.js";
+import { createTransparentSessionGuard } from "../src/adapters/opencode/transparent.js";
 import type { GuardConfig } from "../src/types.js";
 
 const EMAIL = "alice.canary@example-test.invalid";

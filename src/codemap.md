@@ -4,9 +4,9 @@
 Application layer for the scanner: configuration, rule engine, decision model, pseudonymization, OpenCode plugin hooks, and the CLI / Web transports.
 
 ## Design
-- Entrypoints: `index.ts` (OpenCode plugin, re-exports `adapters/opencode/opencode.ts`), `cli.ts` (CLI / Web / doctor / forget / `--claude-code-proxy`), and `adapters/pi/extension.ts` (pi extension, registered in pi `settings.extensions` or loaded with `-e`).
+- Entrypoints: `index.ts` (OpenCode plugin, re-exports `adapters/opencode/plugin.ts`), `cli.ts` (CLI / Web / doctor / forget / `--claude-code-proxy`), and `adapters/pi/extension.ts` (pi extension, registered in pi `settings.extensions` or loaded with `-e`).
 - `adapters/` — one directory per host. Host-specific modules live only here; anything in `core/`, `decision/`, `scanner/`, `rules/` or `config/` must not import from it (`tests/core-boundary.test.ts`).
-  - `adapters/opencode/` — `opencode.ts` (plugin entry; `server` is a fail-closed stub for unsupported v1 hosts), `opencode-v2.ts`, `opencode-transparent*.ts` (transparent pseudonymization over HTTP/SSE, WebSocket and the AI SDK), `opencode-hooks.ts`, `opencode-tool-policy.ts`, `opencode-env-tools.ts` / `env-queries.ts` (opt-in read-only env queries), `doctor.ts` (the `--doctor opencode` checks).
+  - `adapters/opencode/` — `plugin.ts` (plugin entry; `server` is a fail-closed stub for unsupported v1 hosts), `v2.ts`, `transparent*.ts` (transparent pseudonymization over HTTP/SSE, WebSocket and the AI SDK), `hooks.ts`, `tool-policy.ts`, `env-tools.ts` / `env-queries.ts` (opt-in read-only env queries), `doctor.ts` (the `--doctor opencode` checks).
   - `adapters/claude-code/` — proxy adapter: `proxy.ts` (Anthropic Messages masking and restoration), `cli.ts` (`--claude-code-proxy`), `doctor.ts`.
   - `adapters/pi/` — `guard.ts` (in-process fetch boundary: masking, reply restoration, route and API refusal, tool restoration), `extension.ts` (pi hook surface: session/model binding, input and tool refusal), `tool-policy.ts` (pi built-in classification and unknown-tool refusal), `persistence.ts`, `settings.ts` (pi `settings.json`/`models.json` reads and model selection), `doctor.ts`.
 - Other subdirectories:
@@ -18,7 +18,7 @@ Application layer for the scanner: configuration, rule engine, decision model, p
   - `i18n/` — `en` and `zh-TW` messages, selected by `LEAKSHIELD_LANG`.
   - `utils/` — file collection, path security, Windows console encoding.
 - `core/` — host-independent wire layer: `wire.ts` (Chat/Anthropic/Responses mask and restore), `sse-recovery.ts`, `ws.ts` (Responses WebSocket frames), `tool-restore-policy.ts` (per-field tool restore rules), `session-guard.ts` (`createGuardCore`: session mapping, request masking, reply and tool restoration, persistence).
-- Root modules: `plugin-options.ts` (the plugin option schema, shared by the OpenCode entry, the pi persistence parser and the doctors), `doctor-report.ts` (report shape, rendering and exit code shared by the three doctors), `doctor-hosts.ts` (per-host dispatch), `forget.ts`, `help.ts`, `types.ts`.
+- Root modules: `guard-options.ts` (the plugin option schema, shared by the OpenCode entry, the pi persistence parser and the doctors), `doctor-report.ts` (report shape, rendering and exit code shared by the three doctors), `doctor-hosts.ts` (per-host dispatch), `forget.ts`, `help.ts`, `types.ts`.
 - MCP server mode no longer exists.
 
 ## Flow

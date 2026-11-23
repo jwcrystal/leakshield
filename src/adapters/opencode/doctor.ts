@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 import { loadConfig } from "../../config/loader.js";
 import { defaultKeyfilePath, defaultStorePath } from "../../decision/mapping-key.js";
 import { InMemoryMappingKeyProvider, openMappingStore } from "../../decision/mapping-store.js";
-import { validatePluginOptions, type PluginOptions } from "../../plugin-options.js";
+import { validatePluginOptions, type PluginOptions } from "../../guard-options.js";
 import type { DoctorCheck, DoctorReport, DoctorStatus } from "../../doctor-report.js";
 import { BUILTIN_RULE_IDS } from "../../rules/builtin.js";
 import { skippedCustomRules, customRuleBoundaries } from "../../rules/dynamic.js";

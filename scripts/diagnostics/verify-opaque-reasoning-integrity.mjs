@@ -1,5 +1,5 @@
 /** Offline red-capable regression probe. No real ciphertext, model or tools. */
-import { createTransparentSessionGuard } from "../../dist/adapters/opencode/opencode-transparent.js";
+import { createTransparentSessionGuard } from "../../dist/adapters/opencode/transparent.js";
 
 const bytes = Buffer.alloc(89);
 bytes[0] = 0x80;

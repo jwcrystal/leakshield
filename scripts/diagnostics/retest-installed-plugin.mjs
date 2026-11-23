@@ -59,7 +59,7 @@ const result = {
   options,
   model,
   sourceSession,
-  compiledGuardSha256: hash(readFileSync(resolve(root, "dist/adapters/opencode/opencode-transparent.js"))),
+  compiledGuardSha256: hash(readFileSync(resolve(root, "dist/adapters/opencode/transparent.js"))),
   cases: [],
 };
 let server;
@@ -167,7 +167,7 @@ try {
   const appended = readFileSync(logFile).subarray(beforeLog).toString("utf8");
   result.newPreparationRefusals = appended.split("\n").filter((line) => line.includes(refusal)).length;
   result.wsDegradationObserved = serverText.includes("[leakshield] degraded:");
-  result.compiledGuardUnchanged = hash(readFileSync(resolve(root, "dist/adapters/opencode/opencode-transparent.js"))) ===
+  result.compiledGuardUnchanged = hash(readFileSync(resolve(root, "dist/adapters/opencode/transparent.js"))) ===
     result.compiledGuardSha256;
   result.passed = Boolean(result.passed && result.privateServerStopped && result.globalConfigUnchanged &&
     result.compiledGuardUnchanged && result.newPreparationRefusals === 0);

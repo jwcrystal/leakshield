@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validatePluginOptions } from "../src/plugin-options.js";
+import { validatePluginOptions } from "../src/guard-options.js";
 
 describe("transparent wire protection options", () => {
   it.each([undefined, true, false])("accepts wireProtection=%s without changing omission semantics", (wireProtection) => {
@@ -44,7 +44,7 @@ describe("default mode", () => {
   });
 
   it("rejects options parsed without a filled-in mode", async () => {
-    const { PluginOptionsSchema } = await import("../src/plugin-options.js");
+    const { PluginOptionsSchema } = await import("../src/guard-options.js");
     expect(PluginOptionsSchema.safeParse({}).success).toBe(false);
   });
 });

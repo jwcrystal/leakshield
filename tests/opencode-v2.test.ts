@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createSessionKey, placeholderFor } from "../src/decision/deidentify.js";
-import { createFailClosedV2Setup, createV2Setup } from "../src/adapters/opencode/opencode-v2.js";
+import { createFailClosedV2Setup, createV2Setup } from "../src/adapters/opencode/v2.js";
 import { EnvQueryService } from "../src/adapters/opencode/env-queries.js";
 import type { GuardConfig } from "../src/types.js";
 

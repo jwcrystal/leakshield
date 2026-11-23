@@ -14,7 +14,7 @@ import {
   openMappingStore,
 } from "../src/decision/mapping-store.js";
 import { persistenceCheck } from "../src/adapters/opencode/doctor.js";
-import { validatePluginOptions } from "../src/plugin-options.js";
+import { validatePluginOptions } from "../src/guard-options.js";
 import type { DoctorDeps } from "../src/adapters/opencode/doctor.js";
 
 const tempRoot = mkdtempSync(join(tmpdir(), "sgp-forget-"));

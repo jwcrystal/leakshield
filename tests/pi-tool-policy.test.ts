@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { createGuardCore, type GuardCore } from "../src/core/session-guard.js";
 import { PSEUDONYM_TOKEN_PREFIX_V2 } from "../src/decision/pseudonymization.js";
-import { assertPiToolBoundary, piToolPolicy } from "../src/pi/tool-policy.js";
+import { assertPiToolBoundary, piToolPolicy } from "../src/adapters/pi/tool-policy.js";
 import { loadConfig } from "../src/config/loader.js";
 
 const SESSION = "pi-session-1";

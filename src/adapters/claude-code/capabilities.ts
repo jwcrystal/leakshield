@@ -10,7 +10,7 @@
  * those rows stay `unknown` rather than claiming a coverage or an absence the
  * evidence does not carry.
  */
-import type { HostCapabilities } from "../types/capabilities.js";
+import type { HostCapabilities } from "../../types/capabilities.js";
 
 export const CLAUDE_CODE_CAPABILITIES: HostCapabilities = {
   host: "claude-code",

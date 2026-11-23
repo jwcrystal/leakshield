@@ -6,7 +6,7 @@
  * PARTIAL for install-level reasons instead. Non-fetch transports are not
  * audited yet, so the host is capped at PARTIAL until a probe closes that row.
  */
-import type { HostCapabilities } from "./types/capabilities.js";
+import type { HostCapabilities } from "../../types/capabilities.js";
 
 export const OPENCODE_CAPABILITIES: HostCapabilities = {
   host: "opencode",

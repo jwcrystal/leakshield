@@ -3,7 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { runDoctor, parseJsonc, formatDoctorReport, type DoctorDeps } from "../src/doctor.js";
+import { runDoctor, parseJsonc, type DoctorDeps } from "../src/adapters/opencode/doctor.js";
+import { formatDoctorReport } from "../src/doctor-report.js";
 import { buildDynamicRules } from "../src/rules/dynamic.js";
 import type { GuardConfig } from "../src/types.js";
 

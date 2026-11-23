@@ -10,4 +10,4 @@
  * The CLI/web entrypoint lives in `./cli.js` (published as the `leakshield`
  * bin) so importing this module never starts an interactive process.
  */
-export { default } from "./opencode.js";
+export { default } from "./adapters/opencode/plugin.js";

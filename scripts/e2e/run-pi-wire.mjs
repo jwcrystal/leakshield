@@ -26,7 +26,7 @@ if (piBinary === undefined || !["openai-completions", "anthropic-messages", "ope
   console.error("usage: node scripts/e2e/run-pi-wire.mjs <pi-binary> <openai-completions|anthropic-messages|openai-responses>");
   process.exit(2);
 }
-const extensionPath = path.join(root, "dist/pi/extension.js");
+const extensionPath = path.join(root, "dist/adapters/pi/extension.js");
 if (!fs.existsSync(extensionPath)) {
   console.error(`missing ${extensionPath}; run npm run build first`);
   process.exit(2);

@@ -22,7 +22,7 @@ if (piBinary === undefined) {
   console.error("usage: node scripts/e2e/run-pi-config-refusal.mjs <pi-binary>");
   process.exit(2);
 }
-const guard = join(root, "dist/pi/extension.js");
+const guard = join(root, "dist/adapters/pi/extension.js");
 const CANARY = "PI98_PRIVATE_VALUE";
 const failures = [];
 const pass = (label, condition, detail = "") => {

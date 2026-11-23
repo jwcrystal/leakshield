@@ -10,7 +10,7 @@ LeakShield intercepts model traffic at a different point in each host:
 
 Different mechanisms are not the problem. The problem is that each adapter described its own coverage in its own words, so reviews argued about whether a given egress was covered. This page declares, per host, which egress paths and surfaces are `protected`, `refused`, `not-present`, `outside`, or `unknown`, using one vocabulary. A new adapter fills in the same table instead of writing a new story.
 
-**Status (2026-11-23):** implemented. `src/types/capabilities.ts` holds the contract and the invariant checks; each adapter declares its rows next to its doctor code (`src/opencode-capabilities.ts`, `src/claude-code/capabilities.ts`, `src/pi/capabilities.ts`), and `leakshield --doctor` prints those rows from the same constant. `unknown` and `outside` rows keep the host at `PARTIAL` in the doctor's verdict. A row can no longer change in the code without changing in the doctor, and a test fails if the two disagree.
+**Status (2026-11-23):** implemented. `src/types/capabilities.ts` holds the contract and the invariant checks; each adapter declares its rows next to its doctor code (`src/adapters/opencode/capabilities.ts`, `src/adapters/claude-code/capabilities.ts`, `src/adapters/pi/capabilities.ts`), and `leakshield --doctor` prints those rows from the same constant. `unknown` and `outside` rows keep the host at `PARTIAL` in the doctor's verdict. A row can no longer change in the code without changing in the doctor, and a test fails if the two disagree.
 
 ## States
 

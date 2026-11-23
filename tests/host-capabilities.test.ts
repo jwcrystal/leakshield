@@ -1,12 +1,12 @@
 // Component under test: the three host declarations and the doctor output they
 // produce. The doctor must print exactly what the adapter declares.
 import { describe, expect, it } from "vitest";
-import { CLAUDE_CODE_CAPABILITIES } from "../src/claude-code/capabilities.js";
+import { CLAUDE_CODE_CAPABILITIES } from "../src/adapters/claude-code/capabilities.js";
 import { capabilitySection, capabilityLines } from "../src/doctor-capabilities.js";
 import { claudeCodeVerdict, piVerdict } from "../src/doctor-hosts.js";
-import { formatDoctorReport, type DoctorReport } from "../src/doctor.js";
-import { OPENCODE_CAPABILITIES } from "../src/opencode-capabilities.js";
-import { PI_CAPABILITIES } from "../src/pi/capabilities.js";
+import { formatDoctorReport, type DoctorReport } from "../src/doctor-report.js";
+import { OPENCODE_CAPABILITIES } from "../src/adapters/opencode/capabilities.js";
+import { PI_CAPABILITIES } from "../src/adapters/pi/capabilities.js";
 import {
   assertCapabilities,
   capabilityAt,

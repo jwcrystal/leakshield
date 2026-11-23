@@ -62,7 +62,7 @@ export function preflight(suites) {
   for (const suite of suites) {
     if (!knownSuites.includes(suite)) fail(`Unknown suite "${suite}". Known: ${knownSuites.join(", ")}.`);
   }
-  if (suites.some((suite) => suite.startsWith("sg-")) && !existsSync(path.join(SG_DIST, "opencode-transparent.js"))) {
+  if (suites.some((suite) => suite.startsWith("sg-")) && !existsSync(path.join(SG_DIST, "adapters/opencode/transparent.js"))) {
     fail(`SG build not found at ${SG_DIST}. Run npm run build (or set E2E_SG_DIST).`);
   }
   if (suites.includes("official") && !(OFFICIAL && existsSync(path.join(OFFICIAL, "package.json")))) {
@@ -121,7 +121,7 @@ export function pluginsFor(suite, { dir, guardConfig }) {
     mkdirSync(adapter);
     writeFileSync(path.join(adapter, "package.json"), JSON.stringify({ type: "module" }));
     writeFileSync(path.join(adapter, "index.js"), `
-      import { createTransparentSessionGuard } from ${JSON.stringify(path.join(SG_DIST, "opencode-transparent.js"))};
+      import { createTransparentSessionGuard } from ${JSON.stringify(path.join(SG_DIST, "adapters/opencode/transparent.js"))};
       import { loadConfig } from ${JSON.stringify(path.join(SG_DIST, "config/loader.js"))};
       import { InMemoryMappingKeyProvider } from ${JSON.stringify(path.join(SG_DIST, "decision/mapping-store.js"))};
       export default { id: 'sg-persistence-test', async setup(ctx) {

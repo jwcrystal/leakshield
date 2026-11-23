@@ -17,7 +17,7 @@ Defines operator-maintained scanner inputs that extend the built-in detection en
 4. The CLI re-reads the file on every run; the OpenCode plugin needs an OpenCode restart to pick up changes.
 
 ## Integration
-- Loaded by `src/config/loader.ts`; consumed by the CLI (`src/transports/cli.ts`), Web UI (`src/transports/web.ts`), `src/doctor.ts`, and the plugin (`src/opencode.ts`)
+- Loaded by `src/config/loader.ts`; consumed by the CLI (`src/transports/cli.ts`), Web UI (`src/transports/web.ts`), `src/adapters/opencode/doctor.ts`, and the plugin (`src/adapters/opencode/opencode.ts`)
 - Affects:
   - scan sensitivity
   - result severity composition

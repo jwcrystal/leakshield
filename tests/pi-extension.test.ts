@@ -1,4 +1,4 @@
-// Component under test: the pi extension surface (src/pi/extension.ts).
+// Component under test: the pi extension surface (src/adapters/pi/extension.ts).
 // The guard is mocked so the tests cover handler wiring and refusal flow.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,7 +11,7 @@ const state = vi.hoisted(() => ({
   toolError: null as Error | null,
 }));
 
-vi.mock("../src/pi/guard.js", () => ({
+vi.mock("../src/adapters/pi/guard.js", () => ({
   PROTECT_FAILED: "LeakShield could not protect this provider request. [protect]",
   MISSING_SESSION: "LeakShield refused a provider request before a session was active. [session]",
   createPiGuard: () => {
@@ -43,7 +43,7 @@ vi.mock("../src/pi/guard.js", () => ({
   },
 }));
 
-const { default: leakshieldPiExtension } = await import("../src/pi/extension.js");
+const { default: leakshieldPiExtension } = await import("../src/adapters/pi/extension.js");
 
 type Handler = (event: unknown, ctx: unknown) => unknown;
 

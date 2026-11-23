@@ -6,7 +6,7 @@
  * titles. Providers whose API does not use fetch are refused before the run;
  * Codex's WebSocket transport is one of them.
  */
-import type { HostCapabilities } from "../types/capabilities.js";
+import type { HostCapabilities } from "../../types/capabilities.js";
 
 export const PI_CAPABILITIES: HostCapabilities = {
   host: "pi",

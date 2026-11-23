@@ -8,16 +8,14 @@
  */
 import {
   createDoctorDeps,
-  doctorExitCode,
-  formatDoctorReport,
   runDoctor,
-  type DoctorCheck,
-} from "./doctor.js";
-import { createClaudeCodeDoctorDeps, runClaudeCodeDoctor } from "./claude-code/doctor.js";
-import { CLAUDE_CODE_CAPABILITIES } from "./claude-code/capabilities.js";
-import { createPiDoctorDeps, runPiDoctor } from "./pi/doctor.js";
-import { PI_CAPABILITIES } from "./pi/capabilities.js";
-import { OPENCODE_CAPABILITIES } from "./opencode-capabilities.js";
+} from "./adapters/opencode/doctor.js";
+import { doctorExitCode, formatDoctorReport, type DoctorCheck } from "./doctor-report.js";
+import { createClaudeCodeDoctorDeps, runClaudeCodeDoctor } from "./adapters/claude-code/doctor.js";
+import { createPiDoctorDeps, runPiDoctor } from "./adapters/pi/doctor.js";
+import { CLAUDE_CODE_CAPABILITIES } from "./adapters/claude-code/capabilities.js";
+import { PI_CAPABILITIES } from "./adapters/pi/capabilities.js";
+import { OPENCODE_CAPABILITIES } from "./adapters/opencode/capabilities.js";
 import { capabilityCapText, capabilitySection } from "./doctor-capabilities.js";
 import { capabilityVerdict, type HostCapabilities } from "./types/capabilities.js";
 

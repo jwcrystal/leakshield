@@ -50,8 +50,8 @@ import {
   type RecordLike,
 } from "../../core/session-guard.js";
 import type { GuardConfig } from "../../types.js";
-import { createAISDKTransportAdmission } from "./opencode-transparent-aisdk.js";
-import { opencodeToolPolicy } from "./opencode-tool-policy.js";
+import { createAISDKTransportAdmission } from "./transparent-aisdk.js";
+import { opencodeToolPolicy } from "./tool-policy.js";
 
 export type { GuardPersistenceOptions } from "../../core/session-guard.js";
 

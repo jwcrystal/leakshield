@@ -29,7 +29,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   createTransparentSessionGuard,
   type GuardPersistenceOptions,
-} from "../src/adapters/opencode/opencode-transparent.js";
+} from "../src/adapters/opencode/transparent.js";
 import { InMemoryMappingKeyProvider, openMappingStore } from "../src/decision/mapping-store.js";
 import type { GuardConfig } from "../src/types.js";
 

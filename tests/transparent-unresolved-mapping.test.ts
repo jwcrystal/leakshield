@@ -26,7 +26,7 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import { createTransparentSessionGuard } from "../src/adapters/opencode/opencode-transparent.js";
+import { createTransparentSessionGuard } from "../src/adapters/opencode/transparent.js";
 import { PSEUDONYM_TOKEN_PREFIX_V2 } from "../src/decision/pseudonymization.js";
 import type { GuardConfig } from "../src/types.js";
 

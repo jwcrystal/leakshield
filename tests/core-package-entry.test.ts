@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createGuardCore, type HostToolPolicy } from "../src/core/index.js";
-import { opencodeToolPolicy } from "../src/adapters/opencode/opencode-tool-policy.js";
+import { opencodeToolPolicy } from "../src/adapters/opencode/tool-policy.js";
 
 const ROOT = join(__dirname, "..");
 

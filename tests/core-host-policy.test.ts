@@ -3,7 +3,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { createGuardCore, type GuardCore, type HostToolPolicy } from "../src/core/session-guard.js";
-import { opencodeToolPolicy } from "../src/adapters/opencode/opencode-tool-policy.js";
+import { opencodeToolPolicy } from "../src/adapters/opencode/tool-policy.js";
 import { PSEUDONYM_TOKEN_PREFIX_V2 } from "../src/decision/pseudonymization.js";
 import type { GuardConfig } from "../src/types.js";
 

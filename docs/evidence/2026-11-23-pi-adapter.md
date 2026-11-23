@@ -19,7 +19,7 @@ This record covers the step from the verified research flows to a product adapte
 | pi | `@earendil-works/pi-coding-agent@1.6.0` from npm |
 | LeakShield | this branch, `npm ci && npm run build` |
 | Upstream in runtime test | recording loopback stub, synthetic values only |
-| Real provider credentials | none available |
+| Real provider run | CommandCode `deepseek/deepseek-v4.1-flash`, one request |
 
 Credential readiness recorded with pi's own check (no values read):
 
@@ -29,9 +29,9 @@ Credential readiness recorded with pi's own check (no values read):
 {"status":"not_ready","provider":"openrouter","reason":"credentials_not_configured"}
 ```
 
-A real-service run is therefore **not executed**. The managed route and the
-masking path are exercised against a recording stub; provider wire formats are
-covered by unit tests.
+Anthropic, OpenAI and OpenRouter were not run. One real CommandCode request
+was executed through a custom `models.json` provider; see
+[Real provider run](#real-provider-run-commandcode).
 
 ## Reproduce
 
@@ -76,6 +76,49 @@ Defect found by this run and fixed: the HTTP server treated Node's normal
 fetch after the body was read (HTTP 502). The server now aborts only on an early
 response close or request abort (`src/pi/proxy.ts`).
 
+## Real provider run (CommandCode)
+
+One real request was executed to close the gap the stub cannot close: a real
+upstream accepted the managed route and never saw the synthetic value.
+
+| Item | Value |
+|---|---|
+| Date | 2026-11-23 |
+| Provider | CommandCode, custom `models.json` entry |
+| API base | `https://api.commandcode.ai/provider/v1` |
+| API | `openai-completions` (`POST /chat/completions`) |
+| Model | `deepseek/deepseek-v4.1-flash` |
+| Auth | `COMMANDCODE_API_KEY` resolved by the launcher; child env scrubbed |
+| Guard config | temporary YAML with `nda_keywords: [PI_REAL_CANARY]` |
+| Prompt | “Reply with only its character count: `"PI_REAL_CANARY"`” |
+
+Observed:
+
+```text
+pi-real-check: starting
+33
+pi-real-check: exit=0
+
+[leakshield] refused tool bash: LeakShield blocked this tool call because the
+shell command's quoting is not supported.
+```
+
+Interpretation:
+
+- `PI_REAL_CANARY` is 14 characters. The model answered **33**, the length of
+  the placeholder token it received, so the provider did not receive the
+  original value.
+- The run exited 0, so provider authentication, the custom-provider path, the
+  managed launch and streaming all worked against a real service.
+- The model also attempted a `bash` call while working. The tool boundary
+  refused it because the placeholder sat in an unsupported shell quoting
+  position; the run still completed.
+- The key existed only in the one-off command's environment. It was not written
+  to `auth.json`, `models.json`, the session, or the mapping store.
+
+Not covered by this run: Anthropic/OpenAI/OpenRouter, OAuth-only accounts,
+long conversations, automatic compaction, and interactive TUI rendering.
+
 ## Test coverage added
 
 | File | Covers |
@@ -87,7 +130,7 @@ response close or request abort (`src/pi/proxy.ts`).
 | `tests/pi-launcher.test.ts` | argument ownership, version gate, generated agent directory, credential scrubbing, session reuse, persistence options, cleanup on failure |
 | `tests/pi-doctor.test.ts` | version/extension/settings/provider/credential/launch/route checks and exit-code integration |
 
-Full suite: **68 files, 1,829 tests passed**. `tsc --noEmit`, `npm run build`
+Full suite: **68 files, 1,830 tests passed**. `tsc --noEmit`, `npm run build`
 and `npm pack --dry-run` pass; the tarball contains `dist/pi/*` and the `pi`
 manifest.
 
@@ -97,6 +140,8 @@ Protected and exercised:
 
 - managed launch, generated config, child credential scrubbing
 - provider request masking on all three wire formats (unit) and Chat Completions through a real pi process
+- one real CommandCode provider request with a length oracle: the model saw a 33-character placeholder, not the 14-character original
+- custom provider via `models.json` + `--upstream`/`--api` (CommandCode)
 - compaction/summarization-shaped requests on the same route (unit)
 - read/write/edit/bash/powershell restoration and refusals
 - streaming pass-through with placeholders preserved in model-facing history
@@ -106,14 +151,14 @@ Protected and exercised:
 
 Not exercised or not supported:
 
-- a real authenticated provider service (no credentials in this environment)
+- Anthropic, OpenAI and OpenRouter real-service runs
 - real manual compaction / branch summarization in a pi process with the production launcher (research PR #100 verified the same Core path with the prototype proxy; this pass covers the request shape by test only)
 - interactive TUI rendering (print mode was used)
 - OAuth-only accounts, Google/Bedrock/Vertex/Codex wire formats
 - direct-provider bypass by a user who runs plain `pi` without the launcher; the extension refuses input/tools, but this is a local guard, not an egress firewall
 - MCP, codemode and tool-search built-ins are disabled by the launcher
 
-The #98 release gate remains open for a real provider run and an enforced egress
-policy. This change closes the application-level gaps that blocked normal coding
-work: tool restoration, formal install/start entry points, user settings,
-session reuse and the provider/background request paths.
+The #98 release gate remains open for broader real-provider coverage and an
+enforced egress policy. This change closes the application-level gaps that
+blocked normal coding work: tool restoration, formal install/start entry points,
+user settings, session reuse and the provider/background request paths.

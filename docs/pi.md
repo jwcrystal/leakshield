@@ -70,7 +70,7 @@ The boundary speaks the three pi wire protocols it has shared Core support for:
 
 | pi `api` | Endpoint | Verified |
 |---|---|---|
-| `openai-completions` | `POST …/chat/completions` | unit + real pi process |
+| `openai-completions` | `POST …/chat/completions` | unit + real pi process + real CommandCode provider |
 | `anthropic-messages` | `POST …/messages` | unit |
 | `openai-responses` | `POST …/responses` | unit |
 
@@ -80,6 +80,23 @@ Built-in providers with known metadata can be selected by id:
 
 A provider declared in pi's `models.json` is used as-is (base URL and API), including its declared model list. Anything else needs `--upstream` and `--api`.
 
+Example: Command Code is not in pi's catalog, so it is declared as a custom provider (verified with `deepseek/deepseek-v4.1-flash`):
+
+```json
+{
+  "providers": {
+    "commandcode": {
+      "baseUrl": "https://api.commandcode.ai/provider/v1",
+      "api": "openai-completions",
+      "apiKey": "$COMMANDCODE_API_KEY",
+      "models": [{ "id": "deepseek/deepseek-v4.1-flash", "contextWindow": 1000000, "maxTokens": 8192 }]
+    }
+  }
+}
+```
+
+The launcher copies only safe model metadata into the generated config; `baseUrl`, `apiKey` and `headers` from that entry stay out of the pi child.
+
 ### Credentials
 
 Resolution order for the upstream credential:
@@ -88,7 +105,7 @@ Resolution order for the upstream credential:
 2. The provider's usual environment variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …)
 3. `pi auth print-api-key --provider <id>` (API keys saved by `pi auth login`)
 
-OAuth-only accounts are not supported by the managed route. Real-service connectivity was not exercised in this repository's verification because no provider credentials were available in the test environment; the recording-stub runs and the unit tests are the recorded evidence. The credential value is never passed to the pi child: its provider API key is the short-lived loopback token.
+OAuth-only accounts are not supported by the managed route. One real CommandCode request was verified (`deepseek/deepseek-v4.1-flash` through a custom `models.json` entry); Anthropic, OpenAI and OpenRouter real-service runs remain untested because no credentials for them were available. The credential value is never passed to the pi child: its provider API key is the short-lived loopback token.
 
 ## What is protected
 

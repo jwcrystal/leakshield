@@ -68,7 +68,7 @@ leakshield --pi --provider openai   # 等價寫法
 
 | pi `api` | 端點 | 驗證 |
 |---|---|---|
-| `openai-completions` | `POST …/chat/completions` | 單元測試 + 真實 pi 行程 |
+| `openai-completions` | `POST …/chat/completions` | 單元測試 + 真實 pi 行程 + 真實 CommandCode provider |
 | `anthropic-messages` | `POST …/messages` | 單元測試 |
 | `openai-responses` | `POST …/responses` | 單元測試 |
 
@@ -78,6 +78,23 @@ leakshield --pi --provider openai   # 等價寫法
 
 pi `models.json` 中宣告的 provider 會照其 base URL、API 與模型清單使用。其他 provider 需同時給 `--upstream` 與 `--api`。
 
+範例：Command Code 不在 pi 目錄裡，因此用自訂 provider 宣告（已用 `deepseek/deepseek-v4.1-flash` 驗證）：
+
+```json
+{
+  "providers": {
+    "commandcode": {
+      "baseUrl": "https://api.commandcode.ai/provider/v1",
+      "api": "openai-completions",
+      "apiKey": "$COMMANDCODE_API_KEY",
+      "models": [{ "id": "deepseek/deepseek-v4.1-flash", "contextWindow": 1000000, "maxTokens": 8192 }]
+    }
+  }
+}
+```
+
+啟動器只會把安全的模型中繼資料複製到產生的設定；該 entry 的 `baseUrl`、`apiKey`、`headers` 不會進到 pi 子行程。
+
 ### 憑證
 
 上游憑證解析順序：
@@ -86,7 +103,7 @@ pi `models.json` 中宣告的 provider 會照其 base URL、API 與模型清單�
 2. provider 慣用的環境變數（`ANTHROPIC_API_KEY`、`OPENAI_API_KEY` 等）
 3. `pi auth print-api-key --provider <id>`（`pi auth login` 存下的 API key）
 
-受管路徑不支援只有 OAuth 的帳號。這次變更的驗證環境沒有真實 provider 憑證，因此真實服務連線未執行；紀錄以錄製 stub 的實機測試與單元測試為準。憑證值不會傳給 pi 子行程，子行程的 provider API key 只是短期的 loopback token。
+受管路徑不支援只有 OAuth 的帳號。已用 CommandCode 的 `deepseek/deepseek-v4.1-flash`（自訂 `models.json` entry）完成一次真實 provider 請求；Anthropic、OpenAI、OpenRouter 因沒有可用憑證仍未實測。憑證值不會傳給 pi 子行程，子行程的 provider API key 只是短期的 loopback token。
 
 ## 保護範圍
 

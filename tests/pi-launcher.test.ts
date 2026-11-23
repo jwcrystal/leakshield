@@ -48,7 +48,7 @@ function harness(files: Record<string, string>, overrides: Partial<PiLauncherDep
     },
   };
   const deps: PiLauncherDeps = {
-    env: { HOME, ANTHROPIC_API_KEY: "sk-ant-upstream", PATH: "/usr/bin" },
+    env: { HOME, ANTHROPIC_API_KEY: "sk-ant-upstream", COMMANDCODE_API_KEY: "user-test-key", PATH: "/usr/bin" },
     cwd: "/work",
     home: HOME,
     readFile: (filePath) => files[filePath] ?? null,
@@ -240,6 +240,7 @@ describe("pi managed launch", () => {
       PATH: "/usr/bin",
     });
     expect(recorded.childEnv).not.toHaveProperty("ANTHROPIC_API_KEY");
+    expect(recorded.childEnv).not.toHaveProperty("COMMANDCODE_API_KEY");
     expect(recorded.closed).toBe(true);
     expect(recorded.removed).toEqual([`${DATA}/pi/run-fixed-id`]);
   });

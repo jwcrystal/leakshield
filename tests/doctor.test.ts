@@ -101,6 +101,33 @@ describe("parseJsonc", () => {
 });
 
 describe("runDoctor", () => {
+  it.each([
+    [{ mode: "transparent" }, "enabled"],
+    [{ mode: "transparent", wireProtection: false }, "disabled"],
+    [{ mode: "block" }, "not-applicable"],
+  ])("reports the configured wire state for %j", async (options, wireProtection) => {
+    const { deps } = makeFixture({ config: () => ({ plugins: [{ package: "leakshield", options }] }) });
+    expect(await runDoctor(deps)).toMatchObject({ wireProtection });
+  });
+
+  it("keeps the weakest configured wire state across registrations", async () => {
+    const { deps } = makeFixture({ config: () => ({ plugins: [
+      { package: "leakshield", options: { mode: "transparent" } },
+      { package: "leakshield", options: { mode: "transparent", wireProtection: false } },
+    ] }) });
+    expect(await runDoctor(deps)).toMatchObject({ status: "PARTIAL", wireProtection: "disabled" });
+  });
+
+  it("reports known wire configuration even when the guard config is broken", async () => {
+    const { deps } = makeFixture({
+      config: () => ({ plugins: [{ package: "leakshield", options: { mode: "transparent" } }] }),
+      options: { loadGuardConfig: () => { throw new Error("synthetic invalid config"); } },
+    });
+    const report = await runDoctor(deps);
+    expect(report).toMatchObject({ status: "BROKEN", wireProtection: "enabled" });
+    expect(formatDoctorReport(report)).toContain("Configuration status: BROKEN");
+  });
+
   it("reports PROTECTED for a valid v2 local-dist registration", async () => {
     const { deps } = makeFixture({
       distFiles: true,

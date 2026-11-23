@@ -24,6 +24,8 @@ export interface DoctorReport {
   hostGeneration: "v1" | "v2" | null;
   configPath: string | null;
   checks: DoctorCheck[];
+  /** Weakest validated OpenCode configuration; absent when options are unknown. */
+  wireProtection?: "enabled" | "disabled" | "not-applicable";
   /** Copy-paste registration snippet for the OpenCode v2 config. */
   snippet?: string;
   /** Claude Code proxy checks; reported separately from the OpenCode status. */
@@ -51,10 +53,21 @@ export function formatDoctorReport(report: DoctorReport): string {
     lines.push("Registration snippet for your opencode.json:");
     lines.push(report.snippet);
   }
+  lines.push("");
+  lines.push(`Configuration status: ${report.status}`);
+  lines.push(`Wire protection: ${report.wireProtection ?? "unknown"} (configuration only; live-session interception is not verified).`);
   const capText = report.capabilities ? capabilityCapText(report.capabilities) : null;
   if (report.capabilities) {
     lines.push("");
     lines.push(...capabilitySection(report.capabilities));
+  }
+  if (report.status === "PROTECTED" || report.status === "PARTIAL") {
+    if (report.status === "PARTIAL") {
+      lines.push("Partial reason (configuration): wireProtection=false; final outbound HTTP bodies and WebSocket frames are not inspected.");
+    }
+    if (capText !== null) {
+      lines.push(`Partial reason (host coverage): ${capText}.`);
+    }
   }
   lines.push("");
   const verdict =

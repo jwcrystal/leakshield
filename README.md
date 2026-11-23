@@ -277,6 +277,8 @@ The default `mode` is **`transparent`** (see [Transparent mode](docs/plugin/tran
 | `PROTECTED` | `block` or `redact`, or transparent with `wireProtection` omitted or `true` (the v2 default), and every declared capability row covered | Install-level checks pass. In transparent mode, the final HTTP body or supported WS frame is validated too |
 | `PARTIAL` | Transparent with `wireProtection: false` ([hook-first example](config/opencode.hook-first.example.json)), or a host whose [declared capability rows](docs/host-capabilities.md) include `unknown` or `outside` | Final outbound HTTP bodies are not inspected, or a declared egress is not covered; the doctor names the row and the issue that closes it |
 
+Doctor prints `Configuration status` and `Wire protection` separately from host-wide `Coverage`. `Wire protection: enabled` describes the validated configuration, not proof of interception in a live session; block mode reports `not-applicable`, and an unknown configuration reports `unknown`. A `PARTIAL` verdict lists configuration and host-coverage reasons separately, including both when both apply. Host coverage is not filtered to your selected provider/model. Each host section also prints its declared credential handling, mapping-persistence policy and complete residual list; `opt-in` describes persistence support, not whether it is enabled in your install.
+
 With `PARTIAL`:
 
 - Later-added content or attachments may leave unmasked, even with `attachments: "block"`.

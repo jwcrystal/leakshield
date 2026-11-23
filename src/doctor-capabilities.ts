@@ -47,6 +47,9 @@ export function capabilityHeader(capabilities: HostCapabilities): string {
 export function capabilitySection(capabilities: HostCapabilities): string[] {
   const icon = { ok: "[OK]  ", warn: "[WARN]" } as const;
   const lines = [capabilityHeader(capabilities)];
+  lines.push("Coverage scope: host-wide declaration; not filtered to the selected provider/model.");
+  lines.push(`Credential handling (declared): ${capabilities.credentials}`);
+  lines.push(`Mapping persistence (declared): ${capabilities.persistence}`);
   for (const line of capabilityLines(capabilities)) {
     lines.push(`${icon[line.state]} ${line.id}: ${line.detail}`);
     if (line.note !== undefined) lines.push(`       note: ${line.note}`);
@@ -58,6 +61,9 @@ export function capabilitySection(capabilities: HostCapabilities): string[] {
       ? "Coverage: PROTECTED — every declared row is covered."
       : `Coverage: PARTIAL — ${reasons.join("; ")}.`,
   );
+  lines.push("Residuals (declared):");
+  if (capabilities.residuals.length === 0) lines.push("  - none declared");
+  for (const residual of capabilities.residuals) lines.push(`  - ${residual}`);
   return lines;
 }
 

@@ -273,6 +273,8 @@ LeakShield 只支援 OpenCode v2：v2 載入套件的 `id` + `setup(ctx)` 定義
 | `PROTECTED` | `block` 或 `redact`，或 transparent 且 `wireProtection` 省略或為 `true`（v2 預設），且每個已宣告的 capability 列都被覆蓋 | 安裝層檢查通過。transparent 模式下也會驗證最終的 HTTP body 或支援的 WS frame |
 | `PARTIAL` | Transparent 且 `wireProtection: false`（[hook-first 範本](config/opencode.hook-first.example.json)），或該 host 的[已宣告 capability 列](docs/host-capabilities.md)包含 `unknown` 或 `outside` | 不檢查最終出站 HTTP body，或某條已宣告的出口沒有覆蓋；doctor 會指名該列與關閉它的 issue |
 
+Doctor 會分開印出 `Configuration status`、`Wire protection` 與宿主整體的 `Coverage`。`Wire protection: enabled` 代表已驗證的設定，不是執行中 session 已成功攔截的證明；block 模式顯示 `not-applicable`，設定尚不明確時顯示 `unknown`。`PARTIAL` 會分別列出設定與宿主覆蓋的原因，兩者同時存在時都會印出。宿主覆蓋不依目前選擇的 provider／model 篩選。每個宿主區段也會印出宣告的憑證處理方式、映射持久化政策與完整 residuals；`opt-in` 表示支援選用持久化，不代表本次安裝已啟用。
+
 `PARTIAL` 時：
 
 - 後續新增內容／附件可能未遮罩，即使設定 `attachments: "block"`。

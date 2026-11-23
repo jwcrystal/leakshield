@@ -14,6 +14,8 @@ Different mechanisms are not the problem. The problem is that each adapter descr
 
 ## States
 
+Doctor separates OpenCode's `Configuration status` and configured `Wire protection` from the host-wide `Coverage` declaration. It lists configuration and host-coverage causes of `PARTIAL` separately. An enabled wire setting is not a live-session interception proof, and host coverage is not filtered to the selected provider/model. Each capability section prints the declared credential handling, mapping-persistence policy and every residual. These are declarations: `persistence: opt-in` does not establish that a running install has enabled persistence.
+
 | State | Meaning | Requirement |
 |---|---|---|
 | `protected` | Content on this path passes through LeakShield core masking and restoration | An existing evidence path (script or record); the doctor and the test point at the same declaration |

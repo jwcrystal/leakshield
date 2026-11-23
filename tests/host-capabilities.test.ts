@@ -59,6 +59,44 @@ describe("host declarations", () => {
 });
 
 describe("doctor capability output", () => {
+  it.each(HOSTS.map((capabilities) => [capabilities.host, capabilities] as const))(
+    "%s prints every residual and the declared credential and persistence policies",
+    (_host, capabilities) => {
+      const section = capabilitySection(capabilities).join("\n");
+      expect(section).toContain(`Credential handling (declared): ${capabilities.credentials}`);
+      expect(section).toContain(`Mapping persistence (declared): ${capabilities.persistence}`);
+      expect(section).toContain("Residuals (declared):");
+      for (const residual of capabilities.residuals) expect(section).toContain(`  - ${residual}`);
+      expect(section).toContain("Coverage scope: host-wide");
+    },
+  );
+
+  it("distinguishes enabled wire protection from partial host coverage", () => {
+    const report = { ...capabilityReport(OPENCODE_CAPABILITIES), wireProtection: "enabled" as const };
+    const text = formatDoctorReport(report);
+    expect(text).toContain("Wire protection: enabled");
+    expect(text).toContain("Configuration status: PROTECTED");
+    expect(text).toContain("Partial reason (host coverage):");
+    expect(text).not.toContain("Partial reason (configuration):");
+    expect(text).toContain("live-session interception is not verified");
+  });
+
+  it("prints both partial reasons when wire protection is disabled and coverage is unknown", () => {
+    const report: DoctorReport = { ...capabilityReport(OPENCODE_CAPABILITIES), status: "PARTIAL" };
+    const text = formatDoctorReport({ ...report, wireProtection: "disabled" });
+    expect(text).toContain("Wire protection: disabled");
+    expect(text).toContain("Configuration status: PARTIAL");
+    expect(text).toContain("Partial reason (configuration):");
+    expect(text).toContain("Partial reason (host coverage):");
+  });
+
+  it("does not infer enabled wire protection from an unknown or inapplicable configuration", () => {
+    const report = { ...capabilityReport(OPENCODE_CAPABILITIES), status: "HOST_MISSING" as const };
+    expect(formatDoctorReport(report)).toContain("Wire protection: unknown");
+    expect(formatDoctorReport({ ...report, wireProtection: "not-applicable" })).toContain("Wire protection: not-applicable");
+    expect(formatDoctorReport(report)).not.toContain("Partial reason (configuration):");
+  });
+
   it("prints one row per declaration, with the declared state", () => {
     for (const capabilities of HOSTS) {
       const rows = printCapabilityRows(formatDoctorReport(capabilityReport(capabilities)));

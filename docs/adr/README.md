@@ -11,7 +11,7 @@
 | 0006 | [pi 未知工具拒絕政策](0006-pi-unknown-tool-placeholder-refusal.md) | accepted；Code Mode 特例見下方 pi ADR |
 | 0007（跨宿主） | [體驗與隱私平衡](0007-experience-first-privacy-balance.md) | accepted |
 | 0007（pi） | [Code Mode 內層工具還原](0007-pi-codemode-restore-at-inner-calls.md) | accepted |
-| 0008 | [Transparent Protection & Native UX](0008-transparent-protection-and-native-ux.md) | proposed |
+| 0008 | [Transparent Protection & Native UX](0008-transparent-protection-and-native-ux.md) | accepted |
 
 0005 的 Claude Code 決策位於尚未合併的 [PR #101](https://github.com/jwcrystal/leakshield/pull/101)，不在此基底的 main。兩份既有 0007 都保留原檔名，避免破壞歷史連結；引用時請加上主題或完整檔名。
 

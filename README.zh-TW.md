@@ -9,6 +9,9 @@
 
 **在把程式碼、文件、資料丟給 AI 服務之前，先掃描敏感內容的守門員。**
 
+> **設計原則：** 預設無感、按需可觀測、在模型邊界：安全檢查失敗即阻斷。
+> 後續 adapter 工作依這三條開發與驗收（[ADR 0008](docs/adr/0008-transparent-protection-and-native-ux.md)）。這是 adapter 工作的契約，不代表所有宿主目前都已做到；各宿主現況見[宿主能力矩陣](docs/host-capabilities.md)。
+
 支援四種使用模式：
 - **OpenCode Plugin**：OpenCode 的強制入口檢查；OpenCode 要把內容送往模型時使用。
 - **pi adapter**：行程內的 pi extension，用共用 wire core 守住 agent 的 provider 請求。

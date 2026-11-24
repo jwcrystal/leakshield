@@ -18,13 +18,13 @@ pi 自己的 provider 流量不管 LeakShield 排在第幾個都會被守到：S
 
 ## 安裝
 
-LeakShield 同時是 pi 套件：manifest 指向編譯後的 extension，套件預設入口仍供 OpenCode plugin 使用。下一版發布後可執行：
+LeakShield 同時是 pi 套件：manifest 指向編譯後的 extension，套件預設入口仍供 OpenCode plugin 使用。已發布的套件可這樣安裝：
 
 ```bash
 pi install npm:leakshield
 ```
 
-目前 npm 0.3.1 尚未包含 pi 支援。新版發布前，先建置 checkout，再註冊整個套件目錄：
+pi 支援從 0.4.0 起。要改用本機建置，請先建置 checkout，再註冊整個套件目錄：
 
 ```bash
 npm ci

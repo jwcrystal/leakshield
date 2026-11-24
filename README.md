@@ -20,7 +20,7 @@ MCP server mode has been removed. It depended on the model voluntarily calling a
 | Mode | Start it with | Use it for |
 |------|---------------|------------|
 | OpenCode Plugin | Add the `leakshield` package or the `dist` directory to `opencode.json` (OpenCode v2) | Automatic, fail-closed protection for OpenCode model inputs and tool outputs |
-| pi adapter | `pi install /absolute/path/to/built/leakshield` (next npm release: `pi install npm:leakshield`; [setup](docs/pi.md)) | Masked pi provider requests and restored read/write/edit/bash arguments |
+| pi adapter | `pi install npm:leakshield` (0.4.0+, or `pi install /absolute/path/to/built/leakshield` for a local build; [setup](docs/pi.md)) | Masked pi provider requests and restored read/write/edit/bash arguments |
 | CLI | `npm run scan -- --file ./path` (or `leakshield --file ./path` after a global install / `npm link`) | Explicit local or CI scans; it never sends content to a model |
 | Web UI | `npm run web` | Manual browser scans at `http://localhost:3000` |
 
@@ -295,6 +295,7 @@ See [Wire protection](docs/plugin/wire-protection.md) for both levels.
 - [Capacity and lifecycle](docs/plugin/capacity.md): budgets, session limits, retention
 - [Readonly env queries](docs/plugin/env-queries.md): opt-in tools that answer configuration questions without returning values
 - [Host capability matrix](docs/host-capabilities.md): per-host declaration of which model egress and surfaces are protected, refused, absent, or outside interception, and the invariants a new adapter must satisfy
+- [Agent hook coverage](docs/hooks.md): how OpenCode, pi and Claude Code expose hooks, and which hook points can mask a request or restore a placeholder
 
 #### Persistence risk notes (read before enabling)
 

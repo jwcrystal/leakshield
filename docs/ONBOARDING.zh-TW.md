@@ -1,17 +1,19 @@
 # leakshield 新成員 3 分鐘 Onboarding
 
 > 目標：讓新成員在 3 分鐘內理解這個專案能做什麼、怎麼跑、何時用。
-> 專案目前是**實驗性、尚未正式發佈**（未上 npm），細節與限制以 [README.zh-TW.md](../README.zh-TW.md) 的「目前狀態」為準。
+> 專案目前是**實驗性的 `0.x` 版本**，已發佈到 npm（`leakshield`）。細節與限制以 [README.zh-TW.md](../README.zh-TW.md) 的「目前狀態」為準。
 
 ## 0) 你會得到什麼
 
 在內容送到 AI 模型之前，攔截或遮罩敏感資訊（API Key、Token、密碼、PII、DB 連線字串、`.env` 內的值等）。
 
-三種模式：
+五種入口，共用同一套掃描器：
 
-| 模式 | 用在哪 | 特性 |
+| 入口 | 用在哪 | 特性 |
 |------|--------|------|
-| **OpenCode Plugin**（主力） | 日常用 OpenCode 時 | 自動、fail-closed，在 prompt、歷史、工具輸出送出前處理 |
+| **OpenCode plugin** | 日常用 OpenCode v2 時 | 自動、fail-closed，在 prompt、歷史、工具輸出送出前處理；涵蓋最完整 |
+| **pi extension** | 日常用 pi 時 | 行程內包住 `fetch`，遮罩 provider 請求，並在本機還原 read/write/edit/bash 參數 |
+| **Claude Code proxy**（實驗性） | 日常用 Claude Code 時 | 本機 proxy，遮罩 Messages 請求並還原助理文字；工具參數尚未還原 |
 | **CLI** | 本機 / CI 明確掃描 | 不會把內容送給任何模型 |
 | **Web UI** | 手動貼文掃描 | 本機瀏覽器操作 |
 
@@ -41,7 +43,11 @@ npx tsc --noEmit               # 型別檢查
 
 ---
 
-## 2) 60 秒接上 OpenCode Plugin（主力）
+## 2) 60 秒接上你用的宿主
+
+選你日常用的那一個就好。以下用 repo 內的 build；用已發佈版本時，把 `npm run scan --` 換成全域安裝後的 `leakshield`。
+
+### OpenCode plugin
 
 1. 先 `npm run build`。
 2. 在 `opencode.json` 的 plugin 設定加入 build 後的 `dist` 目錄（僅支援 OpenCode v2）。建議的 hook-first 設定範本：[`config/opencode.hook-first.example.json`](../config/opencode.hook-first.example.json)。
@@ -55,7 +61,26 @@ npm run scan -- --doctor
 - `PARTIAL`：僅部分保護（hook-first 設定會顯示 `PARTIAL`）。
 - 其他狀態：會印出失敗的檢查項與修正方式。
 
-> `--doctor` 只檢查安裝，看不到執行中的 session。要確認真的有擋，請照 README 的 smoke test，用 `sk-` 加 20 個英數字的**合成 key** 測，不要用真實憑證。
+### pi extension
+
+```bash
+pi install "$PWD"              # 註冊本機 build；已發佈版本用 pi install npm:leakshield
+node dist/cli.js --doctor pi   # 套件安裝會顯示 PARTIAL（載入順序無法驗證）
+```
+
+需要 pi 1.6 與 Node.js 22.19 以上。細節見 [pi adapter](pi.zh-TW.md)。
+
+### Claude Code proxy（實驗性）
+
+```bash
+node dist/cli.js --claude-code-proxy             # 另開一個終端，保持執行
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8787  # 在啟動 Claude Code 的 shell
+node dist/cli.js --doctor claude-code
+```
+
+工具呼叫參數尚未還原，繞過 base URL 的流量也不在範圍內，見 [Claude Code](claude-code.zh-TW.md)。
+
+> `--doctor` 只檢查安裝，看不到執行中的 session。要確認真的有擋，請用 `sk-` 加 20 個英數字的**合成 key** 測（OpenCode 可照 [OpenCode plugin](opencode.zh-TW.md#隔離-smoke-testopencode-v2) 的 smoke test），不要用真實憑證。
 
 **它不保護什麼：** 它保護的是送往模型的對話內容，不是工具對外連線的防火牆；被允許的工具（`curl`、遠端 MCP）仍可能把原文傳出去。
 
@@ -134,11 +159,11 @@ npm run scan -- --file ../shared.env --allow-outside
 
 ### Q3. 公司內部詞彙沒被抓到？
 
-改 `config/guard.config.yaml` 的 `nda_keywords`、`private_domains`、`custom_rules`。CLI 下次執行自動讀新設定；OpenCode plugin 要重啟 OpenCode 才會套用。
+改 `config/guard.config.yaml` 的 `nda_keywords`、`private_domains`、`custom_rules`。CLI 下次執行自動讀新設定；OpenCode plugin 要重啟 OpenCode、pi extension 要重啟 pi、Claude Code proxy 要重啟 proxy 才會套用。
 
 ### Q4. 想讓 `.env` 裡的值完全不進模型？
 
-在 `config/guard.config.yaml` 設 `settings.env_files`，Guard 會偵測這些檔案中的值是否原樣出現在要送出的內容。改完要重啟 OpenCode。
+在 `config/guard.config.yaml` 設 `settings.env_files`，Guard 會偵測這些檔案中的值是否原樣出現在要送出的內容。改完要重啟對應的宿主（OpenCode、pi）或 Claude Code proxy。
 
 ---
 
@@ -157,12 +182,12 @@ npm run scan -- --dir . --ext .ts .js .env .json
 # 4) 有命中就先脫敏再分享
 npm run scan -- --redact --file .env --out .env.redacted
 
-# 5) 若要接 OpenCode：註冊 plugin 後檢查
-npm run scan -- --doctor
+# 5) 接上宿主後檢查（opencode / pi / claude-code）
+npm run scan -- --doctor opencode
 ```
 
 接著讀：[README.zh-TW.md](../README.zh-TW.md)（完整功能與限制）、[CONTRIBUTING.md](../CONTRIBUTING.md)（提交前必跑的檢查）、[docs/evidence](./evidence/README.md)（驗證紀錄）。
 
 如果你只記得一件事：
 
-> **Plugin 負責自動擋；手動貼內容給 AI 前，先跑一次 scan。**
+> **宿主整合（plugin／extension／proxy）負責自動擋；手動貼內容給 AI 前，先跑一次 scan。**

@@ -1,7 +1,7 @@
 # Repository Atlas: leakshield
 
 ## Responsibility
-Scans for secrets, PII, database credentials, internal domains, and NDA keywords before content reaches an AI model. It blocks or pseudonymizes content inside OpenCode, and also offers a CLI and a local Web UI for explicit scans.
+Scans for secrets, PII, database credentials, internal domains, and NDA keywords before content reaches an AI model. It blocks or pseudonymizes model requests through three host adapters (the OpenCode plugin, the pi extension and the Claude Code proxy), and also offers a CLI and a local Web UI for explicit scans.
 
 ## Design
 - Single-package TypeScript application with three entrypoints:

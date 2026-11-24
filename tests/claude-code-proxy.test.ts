@@ -65,6 +65,18 @@ function echoTokenStream(sent: Sent): Response {
   ]);
 }
 
+function toolReferenceTurn(reference: unknown, text = "hello") {
+  return {
+    model: "claude-test",
+    max_tokens: 64,
+    messages: [
+      { role: "user", content: [{ type: "text", text }] },
+      { role: "assistant", content: [{ type: "tool_use", id: "toolu_ts", name: "ToolSearch", input: { query: "select:WebFetch", max_results: 1 } }] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_ts", content: [reference] }] },
+    ],
+  };
+}
+
 describe("Claude Code proxy: masking", () => {
   it("masks a Messages request before forwarding it to the upstream", async () => {
     const { sent, fetchImpl } = fakeUpstream(echoTokenStream);
@@ -155,6 +167,21 @@ describe("Claude Code proxy: masking", () => {
     proxy.dispose();
   });
 
+  // Claude Code 2.1.330 loads deferred tools through ToolSearch, whose
+  // tool_result carries tool_reference parts. Refusing them made Claude Code
+  // turn tool search off for the rest of the session.
+  it("forwards a tool_reference result unchanged while masking the rest of the turn", async () => {
+    const { sent, fetchImpl } = fakeUpstream(echoTokenStream);
+    const proxy = createClaudeCodeProxy({ config, fetch: fetchImpl, log: quiet });
+    const response = await proxy.handle(messagesRequest(toolReferenceTurn({ type: "tool_reference", tool_name: "WebFetch" }, `key ${CANARY}`)));
+    expect(response.status).toBe(200);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].body).not.toContain(CANARY);
+    expect(sent[0].body).toMatch(TOKEN);
+    expect(JSON.parse(sent[0].body).messages[2].content[0].content).toEqual([{ type: "tool_reference", tool_name: "WebFetch" }]);
+    proxy.dispose();
+  });
+
   it("masks count_tokens and sends it to the count_tokens route", async () => {
     const { sent, fetchImpl } = fakeUpstream(() => new Response(JSON.stringify({ input_tokens: 5 }), {
       status: 200, headers: { "content-type": "application/json" },
@@ -199,6 +226,34 @@ describe("Claude Code proxy: fail closed", () => {
       messages: [{ role: "assistant", content: [{ type: "server_tool_use", id: "x", name: "web_search", input: { query: CANARY } }] }],
     }));
     expect(response.status).toBe(400);
+    expect(sent).toHaveLength(0);
+    proxy.dispose();
+  });
+
+  it("blocks a tool_reference whose tool name carries a finding", async () => {
+    const { sent, fetchImpl } = fakeUpstream(echoTokenStream);
+    const proxy = createClaudeCodeProxy({ config, fetch: fetchImpl, log: quiet });
+    const response = await proxy.handle(messagesRequest(toolReferenceTurn({ type: "tool_reference", tool_name: CANARY })));
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.message).toContain("[structural-identifier]");
+    expect(JSON.stringify(body)).not.toContain(CANARY);
+    expect(sent).toHaveLength(0);
+    proxy.dispose();
+  });
+
+  it("blocks a tool_reference with any field besides type and tool_name", async () => {
+    const { sent, fetchImpl } = fakeUpstream(echoTokenStream);
+    const proxy = createClaudeCodeProxy({ config, fetch: fetchImpl, log: quiet });
+    for (const reference of [
+      { type: "tool_reference", tool_name: "WebFetch", note: `key ${CANARY}` },
+      { type: "tool_reference", tool_name: 7 },
+      { type: "tool_reference" },
+    ]) {
+      const response = await proxy.handle(messagesRequest(toolReferenceTurn(reference)));
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.message).toContain("[anthropic-tool-result-part]");
+    }
     expect(sent).toHaveLength(0);
     proxy.dispose();
   });

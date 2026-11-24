@@ -43,6 +43,7 @@ Claude Code started by another app (the Claude desktop app, an Agent SDK host, o
 - `POST /v1/messages`: the whole body (system prompt, history, tool results, tool schemas, thinking text) is masked in one transaction. A value is replaced by the same placeholder for the whole Claude Code session (keyed by Claude Code's `x-claude-code-session-id` header), so history stays consistent across turns.
 - Replies, JSON or SSE: placeholders in assistant text are restored, including a placeholder split across stream events.
 - `POST /v1/messages/count_tokens`: masked the same way, because it carries the whole conversation.
+- Deferred tools: when Claude Code loads a tool through ToolSearch, the result is a `tool_reference` that names the tool and nothing else. It is forwarded unchanged; a tool name that holds a finding blocks the request.
 - Thinking history: Claude Code resends earlier `thinking` blocks. Their text is masked like other text; the `signature` and `redacted_thinking` data cross unchanged, because Anthropic verifies them.
 - Bodyless `GET`/`HEAD` (Claude Code sends `HEAD /api/hello`): forwarded when neither the URL nor the name or value of a non-credential header carries a finding.
 - Every route: a finding in the request path or query blocks the request. An upstream redirect is neither followed nor relayed: it is answered with a 400, so neither the proxy nor Claude Code resends the request to another host.
@@ -55,7 +56,7 @@ The proxy keeps mappings in memory only. After a restart, assistant text in Clau
 
 - **Tool execution.** There is no tool gate yet. Placeholders inside `tool_use` input are not restored, so if the model writes a placeholder into a Bash command or a file edit, the tool receives the placeholder, not the original. You see restored assistant text, not restored tool arguments. Restoration at tool execution through Claude Code hooks is a separate issue.
 - **Traffic that does not use the base URL.** WebFetch's domain safety check sends the hostname (without the path) straight to `api.anthropic.com`; set `skipWebFetchPreflight: true` in Claude Code settings to turn it off. Telemetry and error reporting, Bedrock/Vertex/Foundry providers, and Claude Code cloud sessions do not go through the proxy either.
-- **Server tools.** Claude Code's WebSearch puts `server_tool_use` and `web_search_tool_result` blocks into the history. The masker does not recognise them, so once a session has used WebSearch, its next requests are blocked. Other unrecognised block types (for example `tool_reference` from deferred tool loading) are blocked the same way.
+- **Server tools.** Claude Code's WebSearch puts `server_tool_use` and `web_search_tool_result` blocks into the history. The masker does not recognise them, so once a session has used WebSearch, its next requests are blocked. Other unrecognised block types are blocked the same way.
 - **Images and documents** are blocked unless the proxy runs with `--attachments allow`, which sends them unscanned.
 - **Large sessions.** A request body over 4 MiB is blocked.
 - **Long-running proxy.** One proxy process tracks at most 4096 Claude Code sessions and never releases them, because Claude Code sends no session-end signal. After that every new session is blocked until the proxy is restarted.

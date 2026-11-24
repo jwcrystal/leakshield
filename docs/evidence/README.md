@@ -42,6 +42,7 @@
 | 11-23 | [pi adapter：受管啟動版（已由 extension 取代）](2026-11-23-pi-adapter.md) | 已被取代 |
 | 11-23 | [pi 1.6.0 fetch 攔截缺口稽核](2026-11-23-pi-fetch-gap-audit.md) | 現行 |
 | 11-23 | [pi 1.6.0：extension 的行程內 fetch 攔截](2026-11-23-pi-in-process-fetch-interception.md) | 現行（缺口稽核的前置探測） |
+| 11-22 | [Claude Code 2.1.330：ToolSearch 的 `tool_reference` 經過 proxy（#102）](2026-11-22-claude-code-tool-reference.md) | 現行 |
 | 11-21 | [Claude Code 本機 proxy：Claude Code 2.1.321 實機驗證（#86）](2026-11-21-claude-code-proxy.md) | 現行 |
 | 11-06 | [0.3.0 工具還原：OpenCode v2.2.5 實機驗證](2026-11-06-opencode-2.2.5-tool-restoration.md) | 現行 |
 | 10-14 | [容量修正驗證](2026-10-14-transparent-capacity-verification.md) | 現行 |

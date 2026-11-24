@@ -12,7 +12,7 @@ pi 每次請求才建立 provider client，並在當下解析 `fetch`（`options
 |---|---|
 | `src/adapters/pi/guard.ts` | 包住 `globalThis.fetch`：遮罩 provider 請求、在回覆中還原助理文字、讓無關的 fetch 流量直接通過、拒絕未知路由與看不到的傳輸 |
 | `src/adapters/pi/extension.ts` | 綁定 pi session 與模型；模型無法保護時擋下輸入與工具；在 `tool_call` 還原工具參數 |
-| `src/adapters/pi/tool-policy.ts` | pi 的 `HostToolPolicy`：read/write/edit/bash/powershell 欄位；未知與 MCP 工具一律拒絕 |
+| `src/adapters/pi/tool-policy.ts` | pi 的 `HostToolPolicy`：read/write/edit/bash/powershell 欄位；未知與 MCP 工具一律拒絕；codemode 腳本在內層呼叫還原 |
 
 pi 自己的 provider 流量不管 LeakShield 排在第幾個都會被守到：SDK 是每次請求才解析 `fetch`。順序影響的是其他 extension：比它早載入、且握有原始 fetch（或用它建立的 client）的 extension，送出的請求不會被遮罩。因此排第一是建議，不是 pi 本身的前提；不是第一個時 doctor 會回報。
 
@@ -117,6 +117,7 @@ pi 保留自己的憑證與設定。extension 跑在 pi 行程內，所以不像
   - `bash` 與 `powershell`：只在原值對 shell 安全的完整參數詞中還原；命令位置、選項注入、引號與 shell 特殊字元都會拒絕。
   - shell 還原範圍與 OpenCode plugin 相同：placeholder 可以是完整未加引號的參數、整詞加引號的參數、`curl`/`http` 內嵌的值，或單一結尾 `>`/`>>` 配固定檔名之前。管線、命令串接、展開、`<`/`2>` 重導向與被 token 化的重導向目標都會拒絕。沒有 placeholder 的命令不受影響。
   - 未知、MCP 與自訂工具：帶著 placeholder 就拒絕。它們的參數可能被轉送到這個 session mapping 之外的遠端服務。
+  - `codemode`：腳本原始碼維持 placeholder 原樣。QuickJS 沙箱沒有網路、檔案系統與 timer，而 pi 對腳本發出的每個呼叫都會再觸發一次 `tool_call`，所以上面的規則在那一層套用；腳本呼叫未知工具時也在那裡被拒絕（ADR-0007）。腳本收到的是工具錯誤，會繼續執行。
 
 ## 與 OpenCode plugin 的一致性
 
@@ -189,6 +190,7 @@ mapping 預設只在行程存活期間有效：resume 後的舊 placeholder 維�
 - `node scripts/e2e/run-pi-wire.mjs <pi> openai-completions|anthropic-messages|openai-responses`：真實 pi + 錄製 stub，每種格式一個請求，stub 只看到 placeholder，顯示有還原。
 - `node scripts/e2e/run-pi-package.mjs <pi 絕對路徑>`：建置後將 npm 打包產物安裝到隔離目錄，用真實 pi 1.6.0 驗證套件安裝、入口發現、doctor 與移除，涵蓋三種 API。不發布套件、不用真實 provider 金鑰；依賴從 npm 安裝。見[套件安裝驗證](evidence/2026-11-24-pi-package-install.md)。
 - `node scripts/e2e/run-pi-extension.mjs <pi>`：真實 pi，腳本化 read → write → edit → bash → `--continue`，原值只到得了本機工具。
+- `node scripts/e2e/run-pi-codemode.mjs <pi>`：真實 pi 啟用 `codemode`，腳本帶著 placeholder：內層 `read` 拿到還原的路徑、內層自訂工具被拒絕且沒有執行，provider 收不到原值。
 - `node scripts/e2e/run-pi-compaction-refusal.mjs <pi>`：真實 pi，先在受保護模型上建立對話，再切到 `bedrock-converse-stream`；手動 compaction 會被取消，provider 收不到任何請求。
 - `node scripts/e2e/run-pi-config-refusal.mjs <pi>`：`LEAKSHIELD_PI_PERSIST` 設成不合法值時，pi 以 `Failed to load extension`、exit 1 結束，且沒有送出請求。
 - 紀錄與傳輸稽核：[2026-11-23-pi-extension.md](evidence/2026-11-23-pi-extension.md) 與 [2026-11-23-pi-fetch-gap-audit.md](evidence/2026-11-23-pi-fetch-gap-audit.md)。

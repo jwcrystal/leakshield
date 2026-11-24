@@ -12,7 +12,7 @@ pi builds its provider clients per request and resolves `fetch` at that point (`
 |---|---|
 | `src/adapters/pi/guard.ts` | Wraps `globalThis.fetch`: masks provider requests, restores assistant text in the reply, passes unrelated fetch traffic through, refuses unknown routes and transports it cannot see |
 | `src/adapters/pi/extension.ts` | Binds the pi session and model, blocks input and tools when the model cannot be protected, restores tool arguments at `tool_call` |
-| `src/adapters/pi/tool-policy.ts` | pi's `HostToolPolicy`: read/write/edit/bash/powershell fields, unknown and MCP tools refused |
+| `src/adapters/pi/tool-policy.ts` | pi's `HostToolPolicy`: read/write/edit/bash/powershell fields, unknown and MCP tools refused, codemode scripts restored at their inner calls |
 
 pi's own provider traffic is guarded wherever LeakShield sits in the load order: the SDKs resolve `fetch` per request. What position changes is other extensions: one loaded earlier that keeps the raw fetch (or a client built from it) reaches the provider unmasked. First position is therefore recommended, not required for pi itself, and the doctor reports when LeakShield is not first.
 
@@ -117,6 +117,7 @@ pi keeps its own credential and configuration. The extension runs inside the pi 
   - `bash` and `powershell`: restored only in complete argument words where the original is shell-safe; command position, option injection, quoting and metacharacters refuse the call.
   - Shell restoration follows the same literal-argument subset as the OpenCode plugin: a placeholder may be a complete unquoted or whole-word quoted argument, a `curl`/`http` embedded value, or sit before a single trailing `>`/`>>` with a static filename. Pipelines, command chaining, expansions, `<`/`2>` redirection and a tokenized redirect target refuse the call. Token-free commands are unchanged.
   - Unknown, MCP and custom tools: a placeholder refuses the call. Their arguments may be forwarded to a remote service outside this session's mapping.
+  - `codemode`: the script source keeps placeholders literal. The QuickJS sandbox has no network, file system or timers, and pi re-fires `tool_call` for every call the script makes, so the rules above apply at that inner call and an unknown tool called from a script is still refused there (ADR-0007). The script sees that refusal as a tool error and keeps running.
 
 ## Parity with the OpenCode plugin
 
@@ -189,6 +190,7 @@ The declared coverage, and the residuals that qualify it, are printed by `leaksh
 - `node scripts/e2e/run-pi-wire.mjs <pi> openai-completions|anthropic-messages|openai-responses` — real pi, recording stub, one request per format, placeholder at the stub, restored display.
 - `node scripts/e2e/run-pi-package.mjs <absolute-pi-path>` — after building, packs and installs the npm artifact into an isolated directory, then uses real pi 1.6.0 to install/discover/check/remove that local package on all three APIs. No publishing or live provider credentials; dependencies install from npm. See the [package-install evidence](evidence/2026-11-24-pi-package-install.md).
 - `node scripts/e2e/run-pi-extension.mjs <pi>` — real pi, scripted read → write → edit → bash → `--continue`, with the original values reaching only the local tools.
+- `node scripts/e2e/run-pi-codemode.mjs <pi>` — real pi with `codemode` enabled, a script carrying a placeholder: the inner `read` gets the restored path, an inner custom tool is refused and never runs, and the provider never sees the original value.
 - `node scripts/e2e/run-pi-compaction-refusal.mjs <pi>` — real pi, a conversation on a guarded model, then a switch to a `bedrock-converse-stream` model: manual compaction is cancelled and nothing reaches the provider.
 - `node scripts/e2e/run-pi-config-refusal.mjs <pi>` — an invalid `LEAKSHIELD_PI_PERSIST` value: pi exits 1 with `Failed to load extension` and no request.
 - Record and transport audit: [2026-11-23-pi-extension.md](evidence/2026-11-23-pi-extension.md) and [2026-11-23-pi-fetch-gap-audit.md](evidence/2026-11-23-pi-fetch-gap-audit.md).

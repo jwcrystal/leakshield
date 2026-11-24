@@ -13,7 +13,7 @@ import {
   type PiGuard,
   type PiGuardModel,
 } from "../src/adapters/pi/guard.js";
-import { PI_UNKNOWN_TOOL_ERROR } from "../src/adapters/pi/tool-policy.js";
+import { piUnknownToolError } from "../src/adapters/pi/tool-policy.js";
 
 const SECRET = ["PI", "GUARD", "SECRET"].join("_");
 const SESSION = "pi-guard-session";
@@ -190,7 +190,10 @@ describe("pi fetch guard", () => {
 
     expect(guard.restoreTool("read", { path: token })).toEqual({ path: SECRET });
     expect(guard.restoreTool("bash", { command: `echo ${token}` })).toEqual({ command: `echo ${SECRET}` });
-    expect(() => guard.restoreTool("mcp_remote", { query: token })).toThrow(PI_UNKNOWN_TOOL_ERROR);
+    expect(guard.restoreTool("codemode", { code: `return ${JSON.stringify(token)};` })).toEqual({
+      code: `return ${JSON.stringify(token)};`,
+    });
+    expect(() => guard.restoreTool("mcp_remote", { query: token })).toThrow(piUnknownToolError("mcp_remote"));
   });
 
   it("guards a model-shaped POST on an unexpected origin", async () => {

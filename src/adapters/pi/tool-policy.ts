@@ -8,8 +8,11 @@
  * `core/tool-restore-policy.ts` cover them.
  *
  * Unknown and MCP tools never restore and never degrade: a placeholder there
- * could reach a remote service, so the call is refused instead.
+ * could reach a remote service, so the call is refused instead. `codemode` is
+ * the exception: its script stays literal and the host re-fires this boundary
+ * for every call the sandbox makes, which is where restoration happens.
  */
+import { types } from "node:util";
 import type { HostToolPolicy, RecordLike } from "../../core/session-guard.js";
 import { containsTokenPrefix } from "../../decision/pseudonymization.js";
 import {
@@ -25,8 +28,26 @@ const PI_SHELL_TOOLS = new Set(["bash", "powershell"]);
 /** The built-ins whose input shapes this adapter understands. */
 const PI_KNOWN_TOOLS = new Set(["read", "write", "edit", "bash", "powershell", "grep", "find", "ls"]);
 
-export const PI_UNKNOWN_TOOL_ERROR =
-  "LeakShield blocked this tool call because the tool is not a known pi built-in and its arguments contain a placeholder. The tool did not run.";
+/** pi 1.6.0's built-in extension tool: raw JavaScript source in `{ code }`. */
+const CODE_MODE_TOOL = "codemode";
+
+export function piUnknownToolError(rawTool: string): string {
+  const name = rawTool.length > 0 ? `\`${rawTool}\`` : "this tool";
+  return `LeakShield blocked this tool call because ${name} is not a known pi built-in and its arguments contain a placeholder. The tool did not run.`;
+}
+
+/**
+ * A codemode script runs in a QuickJS sandbox with no network, file system or
+ * timers; its only way out is `tools.<name>()`, and pi re-fires `tool_call` for
+ * each of those with evaluated arguments. A placeholder in the source therefore
+ * stays literal, exactly like OpenCode's Code Mode (ADR-0003, ADR-0007).
+ */
+function isPiCodeModeCall(rawTool: string, input: unknown): boolean {
+  if (rawTool.toLowerCase() !== CODE_MODE_TOOL) return false;
+  if (input === null || typeof input !== "object" || types.isProxy(input)) return false;
+  const descriptor = Object.getOwnPropertyDescriptor(input, "code");
+  return descriptor !== undefined && "value" in descriptor && typeof descriptor.value === "string";
+}
 
 function carriesPlaceholder(value: unknown, depth: number): boolean {
   if (depth > 32) return true;
@@ -59,12 +80,14 @@ function carriesPlaceholder(value: unknown, depth: number): boolean {
 /**
  * Unknown and extension tools cannot be classified, so a placeholder must not
  * reach them: their arguments may be forwarded to a remote service that never
- * saw the pseudonymized session. Known pi built-ins go through the core.
- * This deliberately overrides ADR-0001 for the pi host; see ADR-0006.
+ * saw the pseudonymized session. Known pi built-ins go through the core, and
+ * `codemode` inherits the core's Code Mode handling.
+ * This deliberately overrides ADR-0001 for the pi host; see ADR-0006/ADR-0007.
  */
 export function assertPiToolBoundary(rawTool: string, input: unknown): void {
   if (PI_KNOWN_TOOLS.has(rawTool.toLowerCase())) return;
-  if (carriesPlaceholder(input, 0)) throw new Error(PI_UNKNOWN_TOOL_ERROR);
+  if (isPiCodeModeCall(rawTool, input)) return;
+  if (carriesPlaceholder(input, 0)) throw new Error(piUnknownToolError(rawTool));
 }
 
 /**
@@ -75,7 +98,9 @@ export function assertPiToolBoundary(rawTool: string, input: unknown): void {
 const PI_READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls"]);
 
 export const piToolPolicy: HostToolPolicy = {
-  isCodeModeCall: (_event: RecordLike): boolean => false,
+  isCodeModeCall(event: RecordLike): boolean {
+    return isPiCodeModeCall(typeof event.tool === "string" ? event.tool : "", event.input);
+  },
   isShellTool(rawTool: string): boolean {
     return PI_SHELL_TOOLS.has(rawTool.toLowerCase()) || isShellTool(rawTool);
   },

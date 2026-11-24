@@ -80,7 +80,7 @@ This is what `leakshield --doctor` prints, generated from the adapter constants 
 |---|---|---|---|---|---|---|---|---|
 | OpenCode | host hook | protected ¹ | protected ¹ ² | unknown (probe pending) | protected | protected | protected (payload hooks) | in-process |
 | Claude Code | proxy | protected (Anthropic) | unknown (no probe) | outside (Bedrock/Vertex bypass the proxy) | unknown (not restored yet) | protected | unknown ³ | separated ⁴ |
-| pi | fetch | protected | refused (Codex) | refused | protected | protected | protected (same fetch) | in-process |
+| pi | fetch | protected | refused (Codex) | refused | protected ⁵ | protected | protected (same fetch) | in-process |
 
 ¹ OpenCode's HTTP and WebSocket rows hold only in transparent mode with wire protection on (`wireProtection` omitted or `true`, the v2 default). The [hook-first configuration](plugin/wire-protection.md) sets `wireProtection: false`: LeakShield registers no outbound HTTP or WS send hooks, the doctor reports `PARTIAL`, and later-added content can leave unmasked. Transports are not uniform either: Commandcode's `/alpha/generate`, including its Go/403 fallback, is untouched with wire protection off and refused with it on.
 
@@ -89,6 +89,8 @@ This is what `leakshield --doctor` prints, generated from the adapter constants 
 ³ Claude Code compacts and summarizes on `/v1/messages`, the same route the proxy masks, so the masker sees those bodies. No separate background probe has been run ([#111](https://github.com/jwcrystal/leakshield/issues/111)), so the row stays `unknown` rather than claiming a coverage the evidence does not carry.
 
 ⁴ `separated` means the proxy holds no credential of its own: it forwards the host's headers, including the credential, unchanged and stores nothing. It does not mean LeakShield cannot see the credential, and the proxy runs as a separate process from the host.
+
+⁵ pi's tool gate covers the call itself and, since ADR-0007, the inner calls a `codemode` script makes. The script source keeps placeholders literal because the QuickJS sandbox has no egress of its own and pi re-fires `tool_call` for every call it makes; `direct` MCP, custom and extension tools are still refused.
 
 ### Unknown rows
 

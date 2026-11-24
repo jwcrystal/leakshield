@@ -78,7 +78,7 @@ This is what `leakshield --doctor` prints, generated from the adapter constants 
 
 | Host | Interception | HTTP | WebSocket | Non-fetch | Tool args | Reply | Background | Credentials |
 |---|---|---|---|---|---|---|---|---|
-| OpenCode | host hook | protected ¹ | protected ¹ ² | unknown (probe pending) | protected | protected | protected (payload hooks) | in-process |
+| OpenCode | host hook | protected ¹ | protected ¹ ² | unknown (probe pending) | protected ⁶ | protected | protected (payload hooks) | in-process |
 | Claude Code | proxy | protected (Anthropic) | unknown (no probe) | outside (Bedrock/Vertex bypass the proxy) | unknown (not restored yet) | protected | unknown ³ | separated ⁴ |
 | pi | fetch | protected | refused (Codex) | refused | protected ⁵ | protected | protected (same fetch) | in-process |
 
@@ -91,6 +91,8 @@ This is what `leakshield --doctor` prints, generated from the adapter constants 
 ⁴ `separated` means the proxy holds no credential of its own: it forwards the host's headers, including the credential, unchanged and stores nothing. It does not mean LeakShield cannot see the credential, and the proxy runs as a separate process from the host.
 
 ⁵ pi's tool gate covers the call itself and, since ADR-0007, the inner calls a `codemode` script makes. The script source keeps placeholders literal because the QuickJS sandbox has no egress of its own and pi re-fires `tool_call` for every call it makes; `direct` MCP, custom and extension tools are still refused.
+
+⁶ OpenCode restores an unknown or custom tool's arguments by field instead of refusing, because those tools run inside the host process and the core can classify the field. A tool that holds a placeholder can therefore send it, and `curl`/`http` values restore inside an argument by design (ADR-0001, ADR-0006).
 
 ### Unknown rows
 

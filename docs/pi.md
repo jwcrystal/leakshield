@@ -127,7 +127,6 @@ Shared contract:
 
 - model requests on the supported wire APIs are masked in-process before they are sent; a masking failure or an unknown request shape is refused, not forwarded;
 - assistant text in the reply is restored for display, and tool arguments are restored only at the local execution boundary;
-- a placeholder for an unknown, MCP or custom tool refuses the call;
 - transports the adapter cannot see are refused when the model is selected;
 - the credential stays in the host process; neither adapter isolates it from the host;
 - mapping persistence is opt-in, with the same encrypted store and key ladder.
@@ -138,6 +137,7 @@ Host-specific, and not a contract difference:
 - read-only `GET`/`HEAD` requests (model catalogs) pass in pi; OpenCode's hook does not receive them.
 - pi refuses the Codex WebSocket transport; OpenCode has a WebSocket frame adapter.
 - pi's load order matters for other extensions; OpenCode's host hook does not depend on plugin order.
+- an unknown, MCP or custom tool refuses a placeholder in pi and restores it by field in OpenCode, whose tools run inside the host process (ADR-0001, ADR-0006).
 
 ## Sessions and persistence
 

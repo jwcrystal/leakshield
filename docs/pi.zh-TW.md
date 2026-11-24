@@ -127,7 +127,6 @@ pi 保留自己的憑證與設定。extension 跑在 pi 行程內，所以不像
 
 - 三種支援的 wire API 上，模型請求在行程內先遮罩才送出；遮罩失敗或請求形狀無法辨識時拒絕，不轉送；
 - 回覆中的助理文字還原供顯示；工具參數只在實際執行邊界還原；
-- 未知、MCP、自訂工具的 placeholder 一律拒絕該次呼叫；
 - adapter 看不到的傳輸在選模型時就拒絕；
 - 憑證留在 host 行程；兩邊都沒有把它跟 host 隔離；
 - mapping 持久化是選用，使用同一個加密 store 與同一套金鑰取得順序。
@@ -138,6 +137,7 @@ pi 保留自己的憑證與設定。extension 跑在 pi 行程內，所以不像
 - 唯讀 `GET`/`HEAD`（模型目錄）在 pi 直接放行；OpenCode 的 hook 不會收到這種請求。
 - pi 拒絕 Codex 的 WebSocket 傳輸；OpenCode 有 WebSocket frame adapter。
 - pi 的載入順序會影響其他 extension；OpenCode 的 host hook 不依賴 plugin 順序。
+- 未知、MCP、自訂工具帶 placeholder 時，pi 拒絕該次呼叫，OpenCode 依欄位還原（它的工具在同一個 host process 內執行；ADR-0001、ADR-0006）。
 
 ## Session 與持久化
 

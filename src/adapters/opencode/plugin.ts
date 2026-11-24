@@ -1,14 +1,14 @@
 import type { Plugin as PluginNamespace } from "@opencode/plugin";
 import type { PluginModule } from "@opencode-ai/plugin";
-import { findConfigPath, loadConfigWithFingerprint, type LoadedGuardConfig } from "./config/loader.js";
-import { createSessionKey } from "./decision/deidentify.js";
-import { defaultStorePath } from "./decision/mapping-key.js";
+import { findConfigPath, loadConfigWithFingerprint, type LoadedGuardConfig } from "../../config/loader.js";
+import { createSessionKey } from "../../decision/deidentify.js";
+import { defaultStorePath } from "../../decision/mapping-key.js";
 import { EnvQueryService } from "./env-queries.js";
-import { createFailClosedHooks } from "./opencode-hooks.js";
-import { createFailClosedV2Setup, createV2Setup } from "./opencode-v2.js";
-import { createFailClosedTransparentGuard, createTransparentSessionGuard } from "./opencode-transparent.js";
-import { PluginOptionsSchema, withDefaultMode, type PluginOptions } from "./plugin-options.js";
-import type { GuardConfig } from "./types.js";
+import { createFailClosedHooks } from "./hooks.js";
+import { createFailClosedV2Setup, createV2Setup } from "./v2.js";
+import { createFailClosedTransparentGuard, createTransparentSessionGuard } from "./transparent.js";
+import { PluginOptionsSchema, withDefaultMode, type PluginOptions } from "../../guard-options.js";
+import type { GuardConfig } from "../../types.js";
 
 type V2Plugin = PluginNamespace.Plugin;
 type V2PluginContext = PluginNamespace.Context;

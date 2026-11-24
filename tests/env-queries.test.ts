@@ -9,7 +9,7 @@ import {
   classifyEnvValueShape,
   parseEnvFileContent,
   EnvQueryService,
-} from "../src/env-queries.js";
+} from "../src/adapters/opencode/env-queries.js";
 
 // The ESM namespace of node:fs cannot be spied on directly; a transparent
 // spread of the actual module keeps every other test in this file running

@@ -5,11 +5,11 @@ import {
   protectUnknownStrings,
   type IngressMode,
   type TextProtector,
-} from "./decision/ingress.js";
-import { deidentifyText } from "./decision/deidentify.js";
+} from "../../decision/ingress.js";
+import { deidentifyText } from "../../decision/deidentify.js";
 import type { EnvQueryService } from "./env-queries.js";
-import { registerV2EnvTools } from "./opencode-env-tools.js";
-import type { GuardConfig } from "./types.js";
+import { registerV2EnvTools } from "./env-tools.js";
+import type { GuardConfig } from "../../types.js";
 
 type V2Plugin = PluginNamespace.Plugin;
 type PluginContext = PluginNamespace.Context;

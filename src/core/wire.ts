@@ -685,7 +685,9 @@ function forwardSerialized(request: Request, raw: string, serialized: string): R
   if (serialized === raw && !raw.includes("\uFFFD")) return request;
   const headers = new Headers(request.headers);
   headers.delete("content-encoding");
-  headers.set("content-length", String(byteLength(serialized)));
+  // Let fetch frame the replacement body. An explicit length can also be
+  // rejected when Node's fetch uses a newer host-installed dispatcher.
+  headers.delete("content-length");
   return new Request(request, { body: serialized, headers });
 }
 
@@ -829,7 +831,7 @@ export async function remaskChatCompletionsRequest(
 /**
  * Validates an Anthropic Messages request body: top-level `system` (string or
  * text blocks), `messages` with content blocks (text | tool_use |
- * tool_result), flat `tools` ({name, description?, input_schema}). Images,
+ * tool_result, whose parts are text or a bare tool_reference), flat `tools` ({name, description?, input_schema}). Images,
  * documents, thinking blocks (unless the service sets anthropicThinking
  * "mask"), and any unknown block type refuse — never pass
  * tokenized or unscanned content through the wire boundary.
@@ -842,6 +844,16 @@ function validateAnthropicSystem(system: unknown): void {
       throw new Error(refusal("anthropic-system-block"));
     }
   }
+}
+
+/**
+ * A `tool_reference` part (Claude Code's ToolSearch result) names a tool and
+ * nothing else. Only that exact shape is accepted; its `tool_name` is a
+ * structural identifier, so a finding there refuses instead of being renamed.
+ */
+function isToolReferencePart(part: unknown): part is { type: "tool_reference"; tool_name: string } {
+  if (!isRecord(part) || part.type !== "tool_reference" || typeof part.tool_name !== "string") return false;
+  return Object.keys(part).every((key) => key === "type" || key === "tool_name");
 }
 
 function validateAnthropicContent(content: unknown, allowAttachments: boolean, allowThinking = false): void {
@@ -884,6 +896,7 @@ function validateAnthropicContent(content: unknown, allowAttachments: boolean, a
           if (allowAttachments && isAttachmentRecord(part)) {
             continue;
           }
+          if (isToolReferencePart(part)) continue;
           if (!isRecord(part) || part.type !== "text" || typeof part.text !== "string") {
             throw new Error(refusal("anthropic-tool-result-part"));
           }
@@ -978,7 +991,14 @@ function collectAnthropicStructuralStrings(body: Record<string, unknown>): strin
             pushString(out, block.id);
             pushString(out, block.name);
           }
-          if (block.type === "tool_result") pushString(out, block.tool_use_id);
+          if (block.type === "tool_result") {
+            pushString(out, block.tool_use_id);
+            if (Array.isArray(block.content)) {
+              for (const part of block.content) {
+                if (isToolReferencePart(part)) pushString(out, part.tool_name);
+              }
+            }
+          }
         }
       }
     }

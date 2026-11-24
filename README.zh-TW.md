@@ -9,8 +9,9 @@
 
 **在把程式碼、文件、資料丟給 AI 服務之前，先掃描敏感內容的守門員。**
 
-支援三種使用模式：
+支援四種使用模式：
 - **OpenCode Plugin**：OpenCode 的強制入口檢查；OpenCode 要把內容送往模型時使用。
+- **pi adapter**：行程內的 pi extension，用共用 wire core 守住 agent 的 provider 請求。
 - **CLI**：手動或 CI 掃描文字、檔案與目錄；支援脫敏。
 - **Web UI**：本機瀏覽器介面與 REST endpoint，供手動掃描。
 
@@ -19,6 +20,7 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 | 模式 | 啟動方式 | 適用情境 |
 |------|----------|----------|
 | OpenCode Plugin | 在 `opencode.json` 加入 `leakshield` 套件或 `dist` 目錄（OpenCode v2） | 自動且 fail-closed 地保護 OpenCode 模型輸入與工具輸出 |
+| pi adapter | `pi -e node_modules/leakshield/dist/adapters/pi/extension.js`（或放在 pi `settings.extensions` 第一項） | 遮罩 pi 的 provider 請求並還原 read/write/edit/bash 參數 |
 | CLI | `npm run scan -- --file ./path`（全域安裝或 `npm link` 後可用 `leakshield --file ./path`） | 明確的本機或 CI 掃描；不會把內容送到模型 |
 | Web UI | `npm run web` | 在 `http://localhost:3000` 手動以瀏覽器掃描 |
 
@@ -28,6 +30,7 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 
 - Transparent 模式已在 OpenCode v2.0.28 搭配本機替身 provider 驗證，並用真實 OpenAI 模型驗證過一次。0.3.0 的工具還原另在 OpenCode v2.2.5 用本機替身 provider、OpenChamber 的 render 工具與 `rtk` 重新驗證（[紀錄](docs/evidence/2026-11-06-opencode-2.2.5-tool-restoration.md)）。它**不保證**敏感內容絕不會送到模型：建議的 hook-first 設定在 `--doctor` 顯示為 `PARTIAL`，hook 之後才加入的內容，以及被允許的工具外送（curl、遠端 MCP），都不在保護範圍內。
 - Claude Code 透過本機 proxy 支援（`leakshield --claude-code-proxy`，再設定 `ANTHROPIC_BASE_URL`），已用 Claude Code 2.1.321 搭配本機替身上游驗證（[紀錄](docs/evidence/2026-11-21-claude-code-proxy.md)）。它會遮罩模型請求並還原助理文字，但還不會在工具執行時還原 placeholder，詳見 [Claude Code](docs/claude-code.zh-TW.md)。
+- pi 透過行程內 extension 支援：包住 agent 的 `fetch`，遮罩它支援的三種 wire API，並在本機還原 read/write/edit/bash 參數。已用 pi 1.6.0 搭配錄製替身上游驗證（[紀錄](docs/evidence/2026-11-23-pi-extension.md)）；不經 fetch 的 provider（Codex WebSocket、Bedrock）會被拒絕，只有 OAuth 的帳號不支援。詳見 [pi adapter](docs/pi.zh-TW.md)。
 - 尚未驗證：Windows 與 Linux 的 OS keychain 持久化（macOS 已於 2026-10-20 驗證）、真實 Anthropic provider、其他 provider 的長對話、長時間使用（[#26](https://github.com/jwcrystal/leakshield/issues/26)）。
 - `0.x` 期間預設值仍可能調整，變更見 [CHANGELOG](CHANGELOG.md)。
 - 驗證紀錄：[docs/evidence](docs/evidence/README.md)。漏洞請私下回報：[SECURITY.md](SECURITY.md)。授權：[Apache-2.0](LICENSE)。
@@ -263,12 +266,14 @@ LeakShield 只支援 OpenCode v2：v2 載入套件的 `id` + `setup(ctx)` 定義
 
 #### `PARTIAL` 的意思
 
-`leakshield --doctor` 在兩種狀態下 exit 0。它們是安裝層的結果，不保證敏感內容絕不會送到模型。
+`leakshield --doctor` 在兩種狀態下 exit 0。它們是安裝層的結果，不保證敏感內容絕不會送到模型。可用 `--doctor opencode`、`--doctor claude-code` 或 `--doctor pi`（也支援 `--doctor=<host>`）只檢查單一 host，exit code 只反映它。
 
 | 狀態 | 設定 | 意思 |
 |------|------|------|
-| `PROTECTED` | `block` 或 `redact`，或 transparent 且 `wireProtection` 省略或為 `true`（v2 預設） | 安裝層檢查通過。transparent 模式下也會驗證最終的 HTTP body 或支援的 WS frame |
-| `PARTIAL` | Transparent 且 `wireProtection: false`（[hook-first 範本](config/opencode.hook-first.example.json)） | 不檢查最終出站 HTTP body |
+| `PROTECTED` | `block` 或 `redact`，或 transparent 且 `wireProtection` 省略或為 `true`（v2 預設），且每個已宣告的 capability 列都被覆蓋 | 安裝層檢查通過。transparent 模式下也會驗證最終的 HTTP body 或支援的 WS frame |
+| `PARTIAL` | Transparent 且 `wireProtection: false`（[hook-first 範本](config/opencode.hook-first.example.json)），或該 host 的[已宣告 capability 列](docs/host-capabilities.md)包含 `unknown` 或 `outside` | 不檢查最終出站 HTTP body，或某條已宣告的出口沒有覆蓋；doctor 會指名該列與關閉它的 issue |
+
+Doctor 會分開印出 `Configuration status`、`Wire protection` 與宿主整體的 `Coverage`。`Wire protection: enabled` 代表已驗證的設定，不是執行中 session 已成功攔截的證明；block 模式顯示 `not-applicable`，設定尚不明確時顯示 `unknown`。`PARTIAL` 會分別列出設定與宿主覆蓋的原因，兩者同時存在時都會印出。宿主覆蓋不依目前選擇的 provider／model 篩選。每個宿主區段也會印出宣告的憑證處理方式、映射持久化政策與完整 residuals；`opt-in` 表示支援選用持久化，不代表本次安裝已啟用。
 
 `PARTIAL` 時：
 
@@ -336,7 +341,7 @@ rm -rf "$SMOKE_DIR"
 leakshield --doctor     # 全域安裝或 npm link 後；在 repo 內可用 npm run scan -- --doctor
 ```
 
-Doctor 不會把任何內容送出去。它會檢查 OpenCode host 版本、讀取 OpenCode 會套用的 `opencode.json` 或 `opencode.jsonc`（`.opencode/`、專案根目錄和一個全域目錄）、依 host 的方式合併其中的 `plugins` 陣列、確認 LeakShield 已用 plugin 本身接受的選項註冊、確認本機 `dist` 進入點真的存在（缺少時 OpenCode 會靜默記錄並跳過 plugin：session 看起來正常但沒有保護）、載入 guard 設定，並在本機跑合成 canary 的 smoke scan。Exit code 0 代表 `PROTECTED` 或 `PARTIAL`（`wireProtection: false`：不檢查最終出站 HTTP body）；v1 host 會回報 `BROKEN`，修正方式是升級到 OpenCode v2；其他狀態會印出失敗的檢查項與具體修正方式，plugin 未註冊時還會附上可直接複製的註冊片段。另有 `Claude Code:` 區段檢查 [Claude Code proxy](docs/claude-code.zh-TW.md) 的設定；即使沒有 OpenCode，只要 Claude Code 經過執行中的 LeakShield proxy，結束碼也是 0。
+Doctor 不會把任何內容送出去。它會檢查 OpenCode host 版本、讀取 OpenCode 會套用的 `opencode.json` 或 `opencode.jsonc`（`.opencode/`、專案根目錄和一個全域目錄）、依 host 的方式合併其中的 `plugins` 陣列、確認 LeakShield 已用 plugin 本身接受的選項註冊、確認本機 `dist` 進入點真的存在（缺少時 OpenCode 會靜默記錄並跳過 plugin：session 看起來正常但沒有保護）、載入 guard 設定，並在本機跑合成 canary 的 smoke scan。每個 host 區段後面會印出該 host 宣告的 capability 列（[總表](docs/host-capabilities.md)）；`unknown` 或 `outside` 會讓該 host 停在 `PARTIAL`，並指名關閉它的 issue。Exit code 0 代表 `PROTECTED` 或 `PARTIAL`（`wireProtection: false`：不檢查最終出站 HTTP body）；v1 host 會回報 `BROKEN`，修正方式是升級到 OpenCode v2；其他狀態會印出失敗的檢查項與具體修正方式，plugin 未註冊時還會附上可直接複製的註冊片段。另有 `Claude Code:` 區段檢查 [Claude Code proxy](docs/claude-code.zh-TW.md) 的設定；即使沒有 OpenCode，只要 Claude Code 經過執行中的 LeakShield proxy，結束碼也是 0。
 
 Doctor 是在 host 之外執行的安裝層檢查，看不到執行中的 session。執行期的證明來自上面的 smoke test 或 `scripts/e2e/run-boundary.mjs`。
 
@@ -359,6 +364,17 @@ leakshield --doctor                                # "Claude Code:" 區段會檢
 ```
 
 Proxy 會遮罩 Claude Code 送出的每個 Anthropic Messages 請求（含 `count_tokens`），還原助理 JSON 或串流文字中的 placeholder，無法遮罩的請求直接擋下，不會轉送。已用 API key 驗證；Claude Code 文件說 base URL 也適用於 claude.ai 登入，這裡尚未測試。它不會還原工具呼叫裡的 placeholder，也看不到繞過 base URL 的流量，例如 WebFetch 的網域檢查會把 hostname 送給 Anthropic。設定方式與完整的缺口清單見 [docs/claude-code.zh-TW.md](docs/claude-code.zh-TW.md)。
+
+---
+
+### pi（行程內 extension）
+
+```bash
+pi -e /path/to/node_modules/leakshield/dist/adapters/pi/extension.js   # 第一個載入
+leakshield --doctor pi                                        # 檢查註冊、順序與 wire API
+```
+
+pi 在建立 provider client 時才解析 `fetch`，compaction 與 branch summary 也一樣，所以包住 `globalThis.fetch` 的 extension 涵蓋的流量，與 OpenCode plugin 的 wire hook 相同。每個 provider 請求都在行程內遮罩；助理文字在回覆中還原，`read`、`write`、`edit`、`bash`、`powershell` 的參數在工具執行邊界還原。session 檔留在 pi 原本的位置，`--continue`、`--resume`、`--session` 照常運作。已用 pi 1.6.0 搭配錄製替身驗證；不經 fetch 的 provider（Codex WebSocket、Bedrock、Google auth）會被拒絕，不支援只有 OAuth 的帳號，而且 extension 必須先載入。詳見 [pi adapter](docs/pi.zh-TW.md)。
 
 ---
 

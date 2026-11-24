@@ -3,14 +3,14 @@
  * Restoration itself remains transactional and fail-closed in the core.
  */
 import { types } from "node:util";
-import type { HostToolPolicy, RecordLike } from "./core/session-guard.js";
+import type { HostToolPolicy, RecordLike } from "../../core/session-guard.js";
 import {
   isShellTool,
   isShellKey,
   isCodeKey,
   keyPolicy,
   READ_ONLY_TOOLS,
-} from "./core/tool-restore-policy.js";
+} from "../../core/tool-restore-policy.js";
 
 /** OpenCode v2.2.5 Code Mode tool, with input {code: string}. */
 const CODE_MODE_TOOL = "execute";

@@ -1,7 +1,7 @@
 {
   "name": "leakshield",
   "version": "0.3.1",
-  "description": "OpenCode plugin, CLI, and web scanner for sensitive content before sending it to AI",
+  "description": "OpenCode plugin, pi adapter, CLI, and web scanner for sensitive content before sending it to AI",
   "license": "Apache-2.0",
   "author": "Jared Wang",
   "repository": {

@@ -18,6 +18,8 @@
 | 各 transport 是否支援（Responses WS、AI SDK） | [Responses WS](2026-10-11-responses-ws-verification.md)、[AI SDK HTTP](2026-10-11-aisdk-http-verification.md) |
 | Claude Code 經本機 proxy 是否遮罩與還原 | [Claude Code 2.1.330 重測 2026-11-22](2026-11-22-claude-code-proxy-2.1.330.md)（方法與細節見 [2026-11-21](2026-11-21-claude-code-proxy.md)） |
 | Claude Code 工具的輸入格式、PreToolUse hook 實際行為 | [工具格式與 PreToolUse 2026-11-22](2026-11-22-claude-code-tool-shapes-pretooluse.md) |
+| pi 行程內 extension：遮罩、工具還原、session 續用 | [pi extension 驗證 2026-11-23](2026-11-23-pi-extension.md) |
+| pi hook-only 是否可行、例外與取消是否能阻擋 | [pi hook-only 雲端驗證 2026-11-23](2026-11-23-pi-hook-only-feasibility.md) |
 
 ## 比較
 
@@ -36,6 +38,12 @@
 
 | 日期 | 檔案 | 狀態 |
 |---|---|---|
+| 11-23 | [pi hook-only：內容 hooks、背景請求與明確取消（#118）](2026-11-23-pi-hook-only-feasibility.md) | 研究（37 情境、146 斷言；尚非正式模式） |
+| 11-23 | [pi extension：行程內遮罩、工具還原、session 續用（#98）](2026-11-23-pi-extension.md) | 現行 |
+| 11-23 | [pi adapter：受管啟動版（已由 extension 取代）](2026-11-23-pi-adapter.md) | 已被取代 |
+| 11-23 | [pi 1.6.0 fetch 攔截缺口稽核](2026-11-23-pi-fetch-gap-audit.md) | 現行 |
+| 11-23 | [pi 1.6.0：extension 的行程內 fetch 攔截](2026-11-23-pi-in-process-fetch-interception.md) | 現行（缺口稽核的前置探測） |
+| 11-22 | [Claude Code 2.1.330：ToolSearch 的 `tool_reference` 經過 proxy（#102）](2026-11-22-claude-code-tool-reference.md) | 現行 |
 | 11-22 | [Claude Code 2.1.330：工具輸入格式與 PreToolUse hook 行為（#91）](2026-11-22-claude-code-tool-shapes-pretooluse.md) | 現行 |
 | 11-22 | [Claude Code 本機 proxy：Claude Code 2.1.330 重測](2026-11-22-claude-code-proxy-2.1.330.md) | 現行 |
 | 11-21 | [Claude Code 本機 proxy：Claude Code 2.1.321 實機驗證（#86）](2026-11-21-claude-code-proxy.md) | 歷史（結論已由 11-22 重測確認；方法與 400 重試分析仍以此為準） |

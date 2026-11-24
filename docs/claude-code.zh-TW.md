@@ -32,7 +32,7 @@ LeakShield 透過本機 proxy 保護 Claude Code。Claude Code 把模型請求�
    leakshield --doctor
    ```
 
-   `Claude Code:` 區段會說明 `ANTHROPIC_BASE_URL` 來自哪裡（設定檔優先於 shell；專案 local 優先於專案，再優先於使用者，依 Claude Code 2.1.321 實測），以及該位址是否有 LeakShield proxy 回應。啟用 Bedrock、Vertex 或 Foundry，或設定了 `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST` 時會警告，因為這時 Claude Code 不會使用設定檔裡的 base URL。OpenCode 的各種結果維持原本的結束碼。沒有 OpenCode 的機器上，只有 Claude Code 指向執行中的 LeakShield proxy、且沒有 provider 或宿主設定繞過它時，結束碼才是 0；base URL 指向沒在執行的 proxy 時結束碼為 1。
+   `Claude Code:` 區段會說明 `ANTHROPIC_BASE_URL` 來自哪裡（設定檔優先於 shell；專案 local 優先於專案，再優先於使用者，依 Claude Code 2.1.321 實測），以及該位址是否有 LeakShield proxy 回應。啟用 Bedrock、Vertex 或 Foundry，或設定了 `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST` 時會警告，因為這時 Claude Code 不會使用設定檔裡的 base URL。OpenCode 的各種結果維持原本的結束碼。沒有 OpenCode 的機器上，只有 Claude Code 指向執行中的 LeakShield proxy、且沒有 provider 或宿主設定繞過它時，結束碼才是 0；base URL 指向沒在執行的 proxy 時結束碼為 1。`leakshield --doctor claude-code` 只跑這一段，且只有 proxy 健康時才 exit 0。
 
 `ANTHROPIC_BASE_URL` 指向 proxy 但 proxy 沒在執行時，Claude Code 的請求會失敗，不會改成直連 Anthropic，doctor 的結束碼為 1。
 
@@ -43,6 +43,7 @@ LeakShield 透過本機 proxy 保護 Claude Code。Claude Code 把模型請求�
 - `POST /v1/messages`：整個 body（system prompt、歷史、工具結果、工具 schema、thinking 文字）在同一個交易中遮罩。同一個值在整個 Claude Code session 中對應同一個 placeholder（以 Claude Code 的 `x-claude-code-session-id` header 區分 session），所以多輪歷史保持一致。
 - 回應（JSON 或 SSE）：還原助理文字中的 placeholder，跨串流事件切開的 placeholder 也會還原。
 - `POST /v1/messages/count_tokens`：同樣遮罩，因為它帶著整段對話。
+- 延遲載入的工具：Claude Code 透過 ToolSearch 載入工具時，結果是只寫著工具名稱的 `tool_reference`。proxy 原樣轉送；工具名稱含偵測到的值時，請求會被擋。
 - Thinking 歷史：Claude Code 會重送先前的 `thinking` block。文字照一般文字遮罩；`signature` 與 `redacted_thinking` 的資料原樣通過，因為 Anthropic 會驗證它們。
 - 沒有 body 的 `GET`／`HEAD`（Claude Code 會送 `HEAD /api/hello`）：URL 以及非憑證 header 的名稱與值都沒有命中時才轉送。
 - 所有路由：請求路徑或 query 有命中就擋下。上游的 redirect 既不跟隨也不轉交，直接回 400，proxy 和 Claude Code 都不會把請求重送到別的主機。
@@ -55,7 +56,7 @@ LeakShield 透過本機 proxy 保護 Claude Code。Claude Code 把模型請求�
 
 - **工具執行。** 目前沒有工具閘門。`tool_use` input 裡的 placeholder 不會還原，所以模型若把 placeholder 寫進 Bash 指令或檔案編輯，工具收到的是 placeholder 而不是原值。你看到的是還原後的助理文字，不是還原後的工具參數。透過 Claude Code hooks 在工具執行時還原是另一張 issue。
 - **不走 base URL 的流量。** WebFetch 的網域安全檢查會把 hostname（不含路徑）直接送到 `api.anthropic.com`；在 Claude Code 設定中設 `skipWebFetchPreflight: true` 可關閉。遙測與錯誤回報、Bedrock／Vertex／Foundry provider、Claude Code 雲端 session 也都不經過 proxy。
-- **Server tools。** Claude Code 的 WebSearch 會把 `server_tool_use` 與 `web_search_tool_result` block 放進歷史。遮罩器不認得這些 block，所以 session 用過 WebSearch 之後，接下來的請求都會被擋。其他不認得的 block 類型（例如延遲載入工具產生的 `tool_reference`）也一樣。
+- **Server tools。** Claude Code 的 WebSearch 會把 `server_tool_use` 與 `web_search_tool_result` block 放進歷史。遮罩器不認得這些 block，所以 session 用過 WebSearch 之後，接下來的請求都會被擋。其他不認得的 block 類型也一樣。
 - **圖片與文件**會被擋，除非 proxy 以 `--attachments allow` 啟動；這時它們會未經掃描送出。
 - **大型 session。** 超過 4 MiB 的請求 body 會被擋。
 - **長時間執行的 proxy。** 一個 proxy 程序最多追蹤 4096 個 Claude Code session，且不會釋放，因為 Claude Code 不會送出 session 結束的訊號。超過之後，新的 session 都會被擋，直到重啟 proxy。

@@ -193,5 +193,5 @@ mapping 預設只在行程存活期間有效：resume 後的舊 placeholder 維�
 - `node scripts/e2e/run-pi-codemode.mjs <pi>`：真實 pi 啟用 `codemode`，腳本帶著 placeholder：內層 `read` 拿到還原的路徑、內層自訂工具被拒絕且沒有執行，provider 收不到原值。
 - `node scripts/e2e/run-pi-compaction-refusal.mjs <pi>`：真實 pi，先在受保護模型上建立對話，再切到 `bedrock-converse-stream`；手動 compaction 會被取消，provider 收不到任何請求。
 - `node scripts/e2e/run-pi-config-refusal.mjs <pi>`：`LEAKSHIELD_PI_PERSIST` 設成不合法值時，pi 以 `Failed to load extension`、exit 1 結束，且沒有送出請求。
-- macOS 上的真實 provider：以 print mode 對 Command Code 的 `openai-completions` 端點送出合成 canary，模型只看得到 placeholder，回覆會被還原，帶著 placeholder 的 `bash` 呼叫會被拒絕。見[真實 provider 驗證](evidence/2026-11-24-pi-real-provider.md)。
+- macOS 上的真實 provider：以 print mode 對 Command Code 的 `openai-completions` 端點送出合成 canary。被問到識別字的長度與前四個字元時，模型回的是 placeholder 的；回覆會被還原，帶著 placeholder 的 `bash` 呼叫會被拒絕。這次沒有截錄請求 body，所以這是回覆面的遮蔽證據，不代表請求裡沒有其他副本。見[真實 provider 驗證](evidence/2026-11-24-pi-real-provider.md)。
 - 紀錄與傳輸稽核：[2026-11-23-pi-extension.md](evidence/2026-11-23-pi-extension.md) 與 [2026-11-23-pi-fetch-gap-audit.md](evidence/2026-11-23-pi-fetch-gap-audit.md)。

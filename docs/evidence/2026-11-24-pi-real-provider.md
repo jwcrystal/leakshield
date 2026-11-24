@@ -12,10 +12,14 @@ credential is the one the local CLI already stored.
 
 - Throwaway agent directory (`PI_CODING_AGENT_DIR`) whose `settings.json` lists
   `dist/adapters/pi/extension.js` in `extensions`, plus a `models.json` provider
-  entry for the endpoint. `HOME` points at the same temporary tree, so no user
-  session, setting or credential is read, and the run leaves no session behind.
+  entry for the endpoint. `HOME` points at the same temporary tree, so the run
+  reads none of the user's pi sessions or settings. The credential is the one
+  the local Command Code CLI already stored; it is handed to this isolated run
+  and never printed. pi still writes its own transcript under
+  `<agent>/sessions/`, so the transcript, original canary included, stays in
+  the temporary tree; the trees from this run were deleted afterwards.
 - `LEAKSHIELD_CONFIG` holds one `nda_keywords` entry, the synthetic canary
-  `PIREALCANARY9f3b` (17 characters). Mapping persistence is off.
+  `PIREALCANARY9f3b` (16 characters). Mapping persistence is off.
 - `pi --print --provider cc --model deepseek/deepseek-v4.1-flash`, pi 1.6.0 in
   print mode. Only the canary was sent; no user content was read or forwarded.
 
@@ -23,7 +27,7 @@ credential is the one the local CLI already stored.
 
 | Check | Result |
 |---|---|
-| The prompt asks for the identifier's length and its first four characters; the model answers `31\|SGP2` | PASS — the canary is 17 characters and starts `PIRE`, so the request carried a placeholder |
+| The prompt asks for the identifier's length and its first four characters; the model answers `31\|SGP2` | PASS — the canary is 16 characters and starts `PIRE`, so the request carried a placeholder |
 | A prompt asks the model to `read` a file holding the canary; the model's reasoning names `SGP2:NDA_KEYWORD-nhqo-ygjn-cxzq` | PASS — the tool result was masked before the request |
 | A prompt asks the model to repeat the identifier; stdout is the canary | PASS — the placeholder in the reply was restored for display |
 | The model then calls `bash` to count characters; the call does not run and the result reads `LeakShield blocked this tool call` | PASS — shell restoration refuses an argument that holds a placeholder |

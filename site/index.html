@@ -1,0 +1,904 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LeakShield — scan for secrets before you send</title>
+<meta name="description" content="LeakShield is a local gatekeeper that scans for API keys, tokens, private keys and PII before content reaches an AI model — and puts the values back on your machine.">
+<meta name="color-scheme" content="light dark">
+<meta property="og:type" content="website">
+<meta property="og:title" content="LeakShield — scan before you send">
+<meta property="og:description" content="A gatekeeper that scans for sensitive content before code, documents, or data reach an AI service.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/icon.svg">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
+<script>
+  (function () {
+    var stored = null;
+    try { stored = localStorage.getItem('leakshield-theme'); } catch (e) {}
+    var dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  })();
+</script>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-soft: #f8fafc;
+    --fg: #0f172a;
+    --fg-soft: #334155;
+    --muted: #64748b;
+    --border: #e2e8f0;
+    --border-strong: #cbd5e1;
+    --card: #ffffff;
+    --code-bg: #f8fafc;
+    --code-fg: #1e293b;
+    --accent: #6366f1;
+    --accent-2: #a855f7;
+    --accent-soft: rgba(99, 102, 241, .08);
+    --teal: #0d9488;
+    --danger: #dc2626;
+    --warn: #b45309;
+    --ok: #15803d;
+    --shadow: 0 1px 2px rgba(15, 23, 42, .05), 0 8px 24px -12px rgba(15, 23, 42, .18);
+    --radius: 14px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  }
+  html[data-theme="dark"] {
+    --bg: #0b1220;
+    --bg-soft: #0f172a;
+    --fg: #e2e8f0;
+    --fg-soft: #cbd5e1;
+    --muted: #94a3b8;
+    --border: #1e293b;
+    --border-strong: #334155;
+    --card: #101a2e;
+    --code-bg: #0d1526;
+    --code-fg: #dbe4f0;
+    --accent: #818cf8;
+    --accent-2: #c084fc;
+    --accent-soft: rgba(129, 140, 248, .12);
+    --teal: #2dd4bf;
+    --danger: #f87171;
+    --warn: #fbbf24;
+    --ok: #4ade80;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 32px -16px rgba(0, 0, 0, .7);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.65;
+    background: var(--bg);
+    color: var(--fg);
+    -webkit-font-smoothing: antialiased;
+  }
+  img { max-width: 100%; height: auto; }
+  a { color: inherit; }
+  .wrap { width: min(1120px, 100% - 2.5rem); margin-inline: auto; }
+  .skip {
+    position: absolute; left: -9999px; top: 0; z-index: 100;
+    background: var(--card); color: var(--fg); padding: .6rem 1rem; border-radius: 0 0 8px 0;
+  }
+  .skip:focus { left: 0; }
+
+  .site-header {
+    position: sticky; top: 0; z-index: 40;
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    backdrop-filter: saturate(1.6) blur(12px);
+    -webkit-backdrop-filter: saturate(1.6) blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .header-inner { display: flex; align-items: center; gap: 1.25rem; height: 62px; }
+  .brand { display: inline-flex; align-items: center; gap: .55rem; text-decoration: none; font-weight: 700; letter-spacing: -.01em; }
+  .brand img { width: 28px; height: 28px; }
+  .brand span { font-size: 1.02rem; }
+  .nav { display: flex; gap: 1.4rem; margin-left: auto; }
+  .nav a { font-size: .875rem; color: var(--muted); text-decoration: none; padding: .25rem 0; border-bottom: 1px solid transparent; }
+  .nav a:hover, .nav a:focus-visible { color: var(--fg); border-bottom-color: var(--border-strong); }
+  .header-tools { display: flex; align-items: center; gap: .45rem; margin-left: 1.4rem; }
+  .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 34px; min-width: 34px; padding: 0 .55rem;
+    border: 1px solid var(--border); border-radius: 9px;
+    background: var(--card); color: var(--fg-soft);
+    cursor: pointer; text-decoration: none; font: inherit; font-size: .78rem; font-weight: 600;
+    transition: border-color .15s, color .15s;
+  }
+  .icon-btn:hover { border-color: var(--border-strong); color: var(--fg); }
+  .icon-btn svg { width: 17px; height: 17px; }
+  html[data-theme="dark"] .icon-sun { display: none; }
+  html[data-theme="light"] .icon-moon { display: none; }
+  .lang-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; background: var(--card); }
+  .lang-switch button {
+    font: inherit; font-size: .78rem; line-height: 1;
+    padding: .5rem .6rem; border: 0; background: transparent; color: var(--muted); cursor: pointer;
+  }
+  .lang-switch button[aria-pressed="true"] { background: var(--accent-soft); color: var(--fg); font-weight: 600; }
+  @media (max-width: 900px) { .nav { display: none; } .header-tools { margin-left: auto; } }
+
+  section { scroll-margin-top: 78px; }
+  .eyebrow {
+    display: inline-block; margin: 0 0 .6rem;
+    font-size: .74rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--accent);
+  }
+  h2 { margin: 0 0 .6rem; font-size: clamp(1.5rem, 3.2vw, 2.05rem); line-height: 1.2; letter-spacing: -.025em; }
+  h3 { margin: 0 0 .35rem; font-size: 1.02rem; letter-spacing: -.01em; }
+  .lede { margin: 0; color: var(--muted); font-size: 1.03rem; max-width: 62ch; }
+  .block { padding: clamp(3rem, 6vw, 4.6rem) 0; }
+  .block + .block { border-top: 1px solid var(--border); }
+  .grad { background: linear-gradient(100deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  code {
+    font-family: var(--mono); font-size: .875em;
+    background: var(--accent-soft); color: var(--fg);
+    padding: .12em .38em; border-radius: 5px; overflow-wrap: anywhere;
+  }
+  .card {
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--card); box-shadow: var(--shadow);
+  }
+  /* Grid items default to min-width:auto, which lets a code block widen the
+     whole page on a phone. */
+  .hero-grid > *, .steps > *, .install-grid > *, .hosts > *, .limits > *,
+  .decisions > *, .strip-grid > *, .step-block > * { min-width: 0; }
+
+  .hero { position: relative; overflow: hidden; padding: clamp(3rem, 7vw, 5.5rem) 0 clamp(2.5rem, 5vw, 4rem); }
+  .hero::before {
+    content: ""; position: absolute; inset: -180px 0 auto 0; height: 620px; pointer-events: none;
+    background:
+      radial-gradient(52% 62% at 12% 8%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 68%),
+      radial-gradient(46% 56% at 88% 0%, color-mix(in srgb, var(--accent-2) 18%, transparent), transparent 70%);
+  }
+  .hero-grid { position: relative; display: grid; grid-template-columns: 1.08fr .92fr; gap: clamp(2rem, 5vw, 3.5rem); align-items: center; }
+  .badges { display: flex; flex-wrap: wrap; gap: .45rem; margin-bottom: 1.15rem; }
+  .pill {
+    display: inline-flex; align-items: center; gap: .4rem;
+    font-size: .74rem; font-weight: 600; letter-spacing: .01em;
+    padding: .28rem .6rem; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--card); color: var(--muted);
+  }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  h1 { margin: 0 0 1rem; font-size: clamp(2.1rem, 5vw, 3.35rem); line-height: 1.08; letter-spacing: -.035em; }
+  .hero p.sub { margin: 0 0 1.6rem; font-size: clamp(1rem, 1.6vw, 1.13rem); color: var(--muted); max-width: 46ch; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: .7rem; align-items: center; }
+  .btn {
+    display: inline-flex; align-items: center; gap: .5rem;
+    padding: .68rem 1.15rem; border-radius: 10px; font-size: .92rem; font-weight: 600;
+    text-decoration: none; border: 1px solid transparent; cursor: pointer;
+    transition: transform .12s, box-shadow .15s, border-color .15s;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-primary { background: linear-gradient(100deg, #6366f1, #a855f7); color: #fff; box-shadow: 0 8px 20px -10px rgba(99, 102, 241, .9); }
+  .btn-ghost { border-color: var(--border-strong); background: var(--card); color: var(--fg); }
+  .btn-ghost:hover { border-color: var(--accent); }
+  .hero-note { margin: 1.1rem 0 0; font-size: .8rem; color: var(--muted); }
+
+  .demo { padding: 1.1rem 1.15rem 1.2rem; }
+  .demo-title { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .8rem; }
+  .demo-title h2 { font-size: .8rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 700; margin: 0; }
+  .demo-lines { display: grid; gap: .55rem; }
+  .demo-line { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-soft); padding: .55rem .7rem; }
+  .demo-line .label { display: block; font-size: .68rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); margin-bottom: .3rem; }
+  .demo-line code { display: block; background: none; padding: 0; font-size: .78rem; color: var(--code-fg); line-height: 1.55; white-space: pre-wrap; word-break: break-all; }
+  .demo-line.safe { border-color: color-mix(in srgb, var(--teal) 40%, var(--border)); background: color-mix(in srgb, var(--teal) 6%, var(--bg-soft)); }
+  .demo-line.safe .label { color: var(--teal); }
+  .demo-line .masked { color: var(--accent); font-weight: 600; }
+  .demo-foot { margin: .7rem 0 0; font-size: .72rem; color: var(--muted); }
+
+  .strip { border-block: 1px solid var(--border); background: var(--bg-soft); }
+  .strip-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.6rem; padding: 1.7rem 0; }
+  .strip-item h3 { font-size: .88rem; margin-bottom: .2rem; }
+  .strip-item p { margin: 0; font-size: .82rem; color: var(--muted); line-height: 1.5; }
+  .strip-item .k { display: block; font-size: .68rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin-bottom: .3rem; }
+  @media (max-width: 780px) { .strip-grid { grid-template-columns: repeat(2, 1fr); gap: 1.2rem; } }
+
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin: 1.8rem 0 2rem; }
+  .step { padding: 1.15rem 1.2rem; position: relative; }
+  .step .n {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 8px; margin-bottom: .6rem;
+    font-size: .78rem; font-weight: 700; color: var(--accent);
+    background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  }
+  .step p { margin: 0; font-size: .87rem; color: var(--muted); }
+  .arch { padding: 1rem; display: grid; place-items: center; }
+  .arch img { width: 100%; max-width: 640px; border-radius: 10px; }
+  html[data-theme="dark"] .arch-light { display: none; }
+  html[data-theme="light"] .arch-dark { display: none; }
+  .caption { margin: .65rem 0 0; font-size: .78rem; color: var(--muted); text-align: center; }
+  @media (max-width: 780px) { .steps { grid-template-columns: 1fr; } }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); margin-top: 1.6rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .875rem; min-width: 560px; }
+  thead th {
+    text-align: left; font-size: .7rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted); font-weight: 700; padding: .7rem .95rem; border-bottom: 1px solid var(--border);
+    background: var(--bg-soft); white-space: nowrap;
+  }
+  tbody td { padding: .62rem .95rem; border-top: 1px solid var(--border); vertical-align: top; }
+  tbody tr:first-child td { border-top: 0; }
+  tbody td:first-child { font-weight: 600; color: var(--fg); white-space: nowrap; }
+  tbody td:last-child { white-space: nowrap; }
+  .sev { display: inline-flex; align-items: center; gap: .35rem; font-size: .74rem; font-weight: 700; letter-spacing: .03em; }
+  .sev i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .sev.high { color: var(--danger); } .sev.high i { background: var(--danger); }
+  .sev.med { color: var(--warn); } .sev.med i { background: var(--warn); }
+  .sev.low { color: var(--ok); } .sev.low i { background: var(--ok); }
+  .optin { display: inline-block; font-size: .64rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: .1rem .38rem; border-radius: 4px; border: 1px solid var(--border-strong); color: var(--muted); margin-left: .35rem; vertical-align: 1px; }
+  .note { margin: 1rem 0 0; font-size: .8rem; color: var(--muted); }
+  .decisions { display: grid; grid-template-columns: repeat(3, 1fr); gap: .8rem; margin-top: 1.5rem; }
+  .decision { padding: .85rem .95rem; border-radius: 10px; border: 1px solid var(--border); background: var(--bg-soft); }
+  .decision b { display: block; font-family: var(--mono); font-size: .82rem; letter-spacing: .02em; }
+  .decision span { font-size: .78rem; color: var(--muted); }
+  .decision.allow b { color: var(--ok); }
+  .decision.warn b { color: var(--warn); }
+  .decision.confirm b { color: var(--danger); }
+  @media (max-width: 700px) { .decisions { grid-template-columns: 1fr; } }
+
+  .install-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; }
+  .code-card { position: relative; border: 1px solid var(--border); border-radius: 11px; background: var(--code-bg); overflow: hidden; }
+  .code-card + .code-card { margin-top: .6rem; }
+  .code-card pre { margin: 0; padding: .85rem 3rem .85rem 1rem; overflow-x: auto; font-family: var(--mono); font-size: .8rem; line-height: 1.62; color: var(--code-fg); }
+  .code-card .copy {
+    position: absolute; top: .45rem; right: .45rem;
+    font: inherit; font-size: .68rem; font-weight: 600;
+    padding: .28rem .5rem; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--card); color: var(--muted);
+    opacity: 0; transition: opacity .15s, color .15s;
+  }
+  .code-card:hover .copy, .code-card .copy:focus-visible { opacity: 1; }
+  .code-card .copy:hover { color: var(--fg); }
+  .code-card .copy.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); opacity: 1; }
+  .step-block { display: grid; grid-template-columns: 26px 1fr; gap: .9rem; padding: 1.1rem 0; border-top: 1px solid var(--border); }
+  .step-block:first-of-type { border-top: 0; padding-top: .2rem; }
+  .step-block .n {
+    width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center;
+    font-size: .78rem; font-weight: 700; color: var(--accent);
+    background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  }
+  .step-block h3 { margin-bottom: .15rem; }
+  .step-block p { margin: 0 0 .6rem; font-size: .88rem; color: var(--muted); }
+  @media (max-width: 860px) { .install-grid { grid-template-columns: 1fr; } }
+  .callout {
+    display: flex; gap: .75rem; padding: .95rem 1rem; border-radius: 11px;
+    border: 1px solid color-mix(in srgb, var(--warn) 32%, var(--border));
+    background: color-mix(in srgb, var(--warn) 6%, var(--bg));
+    font-size: .85rem; color: var(--fg-soft);
+  }
+  .callout svg { flex: none; width: 18px; height: 18px; margin-top: .12rem; color: var(--warn); }
+  .callout p { margin: 0; }
+
+  .hosts { display: grid; grid-template-columns: repeat(2, 1fr); gap: .9rem; margin-top: 1.6rem; }
+  .host { padding: 1.1rem 1.15rem; }
+  .host-top { display: flex; align-items: center; justify-content: space-between; gap: .6rem; margin-bottom: .45rem; }
+  .host h3 { margin: 0; }
+  .status { font-size: .68rem; font-weight: 700; letter-spacing: .05em; padding: .16rem .48rem; border-radius: 999px; white-space: nowrap; }
+  .status.v { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); border: 1px solid color-mix(in srgb, var(--ok) 32%, transparent); }
+  .status.x { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 32%, transparent); }
+  .host p { margin: 0; font-size: .85rem; color: var(--muted); }
+  .host code { font-size: .76rem; }
+  @media (max-width: 700px) { .hosts { grid-template-columns: 1fr; } }
+
+  .limits { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1.5rem; }
+  .limit { padding: 1rem 1.1rem; border-radius: 11px; border: 1px solid var(--border); background: var(--bg-soft); }
+  .limit h3 { font-size: .9rem; margin-bottom: .2rem; }
+  .limit p { margin: 0; font-size: .84rem; color: var(--muted); }
+  @media (max-width: 780px) { .limits { grid-template-columns: 1fr; } }
+
+  .faq { margin-top: 1.4rem; border-top: 1px solid var(--border); }
+  details { border-bottom: 1px solid var(--border); }
+  summary {
+    list-style: none; cursor: pointer; padding: 1rem 0; font-weight: 600; font-size: .95rem;
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; font-size: 1.15rem; color: var(--muted); font-weight: 400; line-height: 1; }
+  details[open] summary::after { content: "–"; }
+  details p { margin: 0 0 1.05rem; font-size: .89rem; color: var(--muted); max-width: 78ch; }
+
+  footer { border-top: 1px solid var(--border); background: var(--bg-soft); padding: 2.2rem 0; }
+  .foot-inner { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 1.5rem; justify-content: space-between; font-size: .82rem; color: var(--muted); }
+  .foot-brand { display: inline-flex; align-items: center; gap: .5rem; font-weight: 600; color: var(--fg); }
+  .foot-brand img { width: 20px; height: 20px; }
+  .foot-links { display: flex; flex-wrap: wrap; gap: 1.15rem; }
+  .foot-links a { text-decoration: none; }
+  .foot-links a:hover { color: var(--fg); text-decoration: underline; }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { transition: none !important; }
+  }
+  @media (max-width: 900px) {
+    .hero-grid { grid-template-columns: 1fr; }
+    .hero p.sub { max-width: 60ch; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main" data-i18n="skip">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="#top">
+      <img src="assets/icon.svg" alt="" width="28" height="28">
+      <span>leakshield</span>
+    </a>
+    <nav class="nav" aria-label="Sections">
+      <a href="#how" data-i18n="nav.how">How it works</a>
+      <a href="#coverage" data-i18n="nav.coverage">Coverage</a>
+      <a href="#install" data-i18n="nav.install">Install</a>
+      <a href="#hosts" data-i18n="nav.hosts">Hosts</a>
+      <a href="#limits" data-i18n="nav.limits">Limits</a>
+      <a href="#faq" data-i18n="nav.faq">FAQ</a>
+    </nav>
+    <div class="header-tools">
+      <div class="lang-switch" role="group" aria-label="Language">
+        <button type="button" data-lang="en" aria-pressed="true">EN</button>
+        <button type="button" data-lang="zh" aria-pressed="false">繁中</button>
+      </div>
+      <button type="button" class="icon-btn" id="theme-toggle" aria-label="Toggle dark mode">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.4M12 19.6V22M2 12h2.4M19.6 12H22M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M19.1 4.9l-1.7 1.7M6.6 17.4l-1.7 1.7" stroke-linecap="round"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 14.5A8.2 8.2 0 0 1 9.5 4a8.2 8.2 0 1 0 10.5 10.5Z" stroke-linejoin="round"/></svg>
+      </button>
+      <a class="icon-btn" href="https://github.com/jwcrystal/leakshield" rel="noopener">GitHub&nbsp;↗</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero" id="top">
+    <div class="wrap hero-grid">
+      <div>
+        <div class="badges">
+          <span class="pill"><span class="dot"></span> 0.4.0 · <span data-i18n="hero.badge1">experimental</span></span>
+          <span class="pill">Apache-2.0</span>
+          <span class="pill" data-i18n="hero.badge2">local only</span>
+        </div>
+        <h1><span data-i18n="hero.title1">Your secrets should not be</span> <span class="grad" data-i18n="hero.title2">in the prompt.</span></h1>
+        <p class="sub" data-i18n="hero.sub">LeakShield sits between your editor and the model. It scans prompts, history and tool output for keys, tokens, private keys and PII — then restores the originals on your machine.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#install" data-i18n="hero.cta1">Quickstart</a>
+          <a class="btn btn-ghost" href="https://github.com/jwcrystal/leakshield#readme" rel="noopener" data-i18n="hero.cta2">Read the docs</a>
+        </div>
+        <p class="hero-note" data-i18n="hero.note">Node 20+ · OpenCode v2, pi and Claude Code · fail-closed by default</p>
+      </div>
+
+      <div class="card demo" aria-label="Example of masking and restoring">
+        <div class="demo-title">
+          <h2 data-i18n="demo.title">What the model sees</h2>
+          <span class="sev low"><i></i><span data-i18n="demo.tag">masked</span></span>
+        </div>
+        <div class="demo-lines">
+          <div class="demo-line">
+            <span class="label" data-i18n="demo.you">You write</span>
+            <code>psql postgres://app:<span class="val">s3cr3t-Pa55</span>@db.internal/prod</code>
+          </div>
+          <div class="demo-line">
+            <span class="label" data-i18n="demo.model">Sent to the model</span>
+            <code>psql postgres://app:<span class="masked">[&#83;GP2:SECRET-••••]</span>@db.internal/prod</code>
+          </div>
+          <div class="demo-line safe">
+            <span class="label" data-i18n="demo.tool">Restored locally, for tool calls</span>
+            <code>psql postgres://app:<span class="val">s3cr3t-Pa55</span>@db.internal/prod</code>
+          </div>
+        </div>
+        <p class="demo-foot" data-i18n="demo.note">Illustrative output with synthetic values. The reverse mapping never leaves the machine.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="strip">
+    <div class="wrap strip-grid">
+      <div class="strip-item">
+        <span class="k" data-i18n="strip.k1">Fail-closed</span>
+        <h3 data-i18n="strip.t1">Refuse, never forward</h3>
+        <p data-i18n="strip.d1">Anything the guard cannot mask safely stops the request instead of sending the original.</p>
+      </div>
+      <div class="strip-item">
+        <span class="k" data-i18n="strip.k2">Local</span>
+        <h3 data-i18n="strip.t2">Mapping stays home</h3>
+        <p data-i18n="strip.d2">Placeholders travel to the model; the mapping that turns them back stays here. Persistence is opt-in and encrypted.</p>
+      </div>
+      <div class="strip-item">
+        <span class="k" data-i18n="strip.k3">Honest</span>
+        <h3 data-i18n="strip.t3">Gaps are written down</h3>
+        <p data-i18n="strip.d3">Every known blind spot is documented and measured, not quietly ignored.</p>
+      </div>
+      <div class="strip-item">
+        <span class="k" data-i18n="strip.k4">Portable</span>
+        <h3 data-i18n="strip.t4">One core, four entry points</h3>
+        <p data-i18n="strip.d4">OpenCode plugin, pi extension, Claude Code proxy, CLI and web UI share the same scanner.</p>
+      </div>
+    </div>
+  </div>
+
+  <section class="block" id="how">
+    <div class="wrap">
+      <p class="eyebrow" data-i18n="how.eyebrow">How it works</p>
+      <h2 data-i18n="how.title">Scan, mask, restore — inside the loop</h2>
+      <p class="lede" data-i18n="how.sub">The guard hooks the request path of the host you already use. Sensitive spans are replaced with stable per-session placeholders before they leave the process, and turned back into the real values when a tool runs locally.</p>
+
+      <div class="steps">
+        <div class="card step">
+          <span class="n">1</span>
+          <h3 data-i18n="how.t1">Scan every boundary</h3>
+          <p data-i18n="how.d1">Prompts, replayed history, system prompts and tool results pass through the same rule set before a model can read them.</p>
+        </div>
+        <div class="card step">
+          <span class="n">2</span>
+          <h3 data-i18n="how.t2">Mask with pseudonyms</h3>
+          <p data-i18n="how.d2">Each finding becomes an SGP2 placeholder. The model reasons about a stable token without ever seeing the value.</p>
+        </div>
+        <div class="card step">
+          <span class="n">3</span>
+          <h3 data-i18n="how.t3">Restore on your side</h3>
+          <p data-i18n="how.d3">Tool arguments and assistant text are decoded locally, so your editor, shell and files still get the original.</p>
+        </div>
+      </div>
+
+      <div class="card arch">
+        <img class="arch-light" src="assets/leakshield-architecture.svg" width="640" height="608" loading="lazy" alt="Architecture: OpenCode, pi and Claude Code feed a shared core that masks requests before any provider, with detection rules and a documented not-covered band.">
+        <img class="arch-dark" src="assets/leakshield-architecture-dark.svg" width="640" height="608" loading="lazy" alt="Architecture: OpenCode, pi and Claude Code feed a shared core that masks requests before any provider, with detection rules and a documented not-covered band.">
+      </div>
+      <p class="caption" data-i18n="how.cap">The core is host-independent. Provider traffic is masked; telemetry, cloud sessions and on-disk transcripts are outside its boundary.</p>
+    </div>
+  </section>
+
+  <section class="block" id="coverage">
+    <div class="wrap">
+      <p class="eyebrow" data-i18n="cov.eyebrow">Detection coverage</p>
+      <h2 data-i18n="cov.title">What it catches</h2>
+      <p class="lede" data-i18n="cov.sub">Built-in rules run in every mode — block, redact and transparent — and are extended by <code>config/guard.config.yaml</code>.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th data-i18n="cov.th1">Type</th>
+              <th data-i18n="cov.th2">Detects</th>
+              <th data-i18n="cov.th3">Severity</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td data-i18n="cov.r1n">API keys</td><td data-i18n="cov.r1d">OpenAI, Anthropic, Google, AWS, Stripe live keys</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
+            <tr><td data-i18n="cov.r2n">Secrets &amp; passwords</td><td data-i18n="cov.r2d">Generic password assignments, AWS secret keys</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
+            <tr><td data-i18n="cov.r3n">Tokens</td><td data-i18n="cov.r3d">GitHub, Slack, Hugging Face, JWT, Bearer tokens</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
+            <tr><td data-i18n="cov.r4n">Private keys</td><td data-i18n="cov.r4d">PEM private key blocks</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
+            <tr><td data-i18n="cov.r5n">DB connection strings</td><td data-i18n="cov.r5d">MongoDB, PostgreSQL, MySQL, Redis, ADO</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
+            <tr><td data-i18n="cov.r6n">URL credentials</td><td data-i18n="cov.r6d">Only the userinfo span of a URL is masked</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
+            <tr><td data-i18n="cov.r7n">Taiwan national ID</td><td data-i18n="cov.r7d">Format validation</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
+            <tr><td data-i18n="cov.r8n">Credit cards</td><td data-i18n="cov.r8d">13–19 digits, Luhn checksum required</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
+            <tr><td data-i18n="cov.r9n">IBAN</td><td data-i18n="cov.r9d">Compact or 4-char groups, mod-97 checksum</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
+            <tr><td data-i18n="cov.r10n">NDA keywords</td><td data-i18n="cov.r10d">Your own list from the config file</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
+            <tr><td data-i18n="cov.r11n">Public IPv4</td><td data-i18n="cov.r11d">Private, loopback, CGNAT and reserved ranges excluded</td><td><span class="sev med"><i></i>MEDIUM</span></td></tr>
+            <tr><td data-i18n="cov.r12n">Email addresses</td><td data-i18n="cov.r12d">All email formats</td><td><span class="sev med"><i></i>MEDIUM</span></td></tr>
+            <tr><td data-i18n="cov.r13n">Private domains</td><td data-i18n="cov.r13d">Your own domain list from the config file</td><td><span class="sev med"><i></i>MEDIUM</span></td></tr>
+            <tr><td data-i18n="cov.r14n">Private IPv4 / VPN</td><td data-i18n="cov.r14d">RFC 1918, CGNAT and link-local, narrowed by <code>private_cidrs</code><span class="optin" data-i18n="cov.optin">opt-in</span></td><td><span class="sev med"><i></i>MEDIUM</span></td></tr>
+            <tr><td data-i18n="cov.r15n">Taiwan mobile numbers</td><td data-i18n="cov.r15d">Digit runs are a measured false-positive source<span class="optin" data-i18n="cov.optin">opt-in</span></td><td><span class="sev med"><i></i>MEDIUM</span></td></tr>
+            <tr><td data-i18n="cov.r16n">International phones</td><td data-i18n="cov.r16d">Same trade-off as Taiwan numbers<span class="optin" data-i18n="cov.optin">opt-in</span></td><td><span class="sev low"><i></i>LOW</span></td></tr>
+            <tr><td data-i18n="cov.r17n">HTTP(S) URLs</td><td data-i18n="cov.r17d">Off by default: always-on masking would flag provider endpoints<span class="optin" data-i18n="cov.optin">opt-in</span></td><td><span class="sev low"><i></i>LOW</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note" data-i18n="cov.note">Every rule has a stable id and can be toggled in <code>settings.rule_overrides</code>. Not covered: street addresses, dates, IPv6, and generic assignments outside the keyword list or under 8 characters.</p>
+
+      <div class="decisions">
+        <div class="decision allow"><b>ALLOW</b><span data-i18n="dec.a">No findings. Safe to send.</span></div>
+        <div class="decision warn"><b>WARN</b><span data-i18n="dec.w">Low-severity findings. A reminder is shown; sending is allowed.</span></div>
+        <div class="decision confirm"><b>CONFIRM</b><span data-i18n="dec.c">Medium or high findings. Explicit confirmation, or the request is blocked.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="install">
+    <div class="wrap">
+      <p class="eyebrow" data-i18n="ins.eyebrow">Quickstart</p>
+      <h2 data-i18n="ins.title">Protect a project in three steps</h2>
+      <p class="lede" data-i18n="ins.sub">Needs Node.js 20 or later and OpenCode v2. Mapping persistence needs Node 22.13+.</p>
+
+      <div class="install-grid" style="margin-top:1.8rem">
+        <div>
+          <div class="step-block">
+            <span class="n">1</span>
+            <div>
+              <h3 data-i18n="ins.t1">Install the package</h3>
+              <p data-i18n="ins.d1">The CLI and the plugin ship in one npm package.</p>
+              <div class="code-card">
+                <pre><code>npm install -g leakshield</code></pre>
+                <button class="copy" type="button" data-i18n="ins.copy">Copy</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="step-block">
+            <span class="n">2</span>
+            <div>
+              <h3 data-i18n="ins.t2">Register the plugin</h3>
+              <p data-i18n="ins.d2">Add it to your project's <code>opencode.json</code>. With no options, <code>mode</code> defaults to <code>transparent</code>.</p>
+              <div class="code-card">
+                <pre><code>{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [{ "package": "leakshield" }]
+}</code></pre>
+                <button class="copy" type="button" data-i18n="ins.copy">Copy</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="step-block">
+            <span class="n">3</span>
+            <div>
+              <h3 data-i18n="ins.t3">Check the install</h3>
+              <p data-i18n="ins.d3">Exit code 0 means <code>PROTECTED</code> or <code>PARTIAL</code>. Then run the synthetic-token smoke test from the README to prove the live path.</p>
+              <div class="code-card">
+                <pre><code>leakshield --doctor</code></pre>
+                <button class="copy" type="button" data-i18n="ins.copy">Copy</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h3 style="margin-bottom:.5rem" data-i18n="ins.cliT">Or scan from the terminal</h3>
+          <div class="code-card">
+            <pre><code># a file, a tree, or stdin
+leakshield --file ./src/config.ts
+leakshield --dir ./src --format json
+cat .env | leakshield --format json
+
+# write a redacted copy
+leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
+            <button class="copy" type="button" data-i18n="ins.copy">Copy</button>
+          </div>
+          <p class="note" data-i18n="ins.cliN">The CLI never sends content to a model. Exit code 1 means findings blocked the scan, which suits CI.</p>
+
+          <div class="callout" style="margin-top:1.1rem">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3.5 21 19H3l9-15.5Z" stroke-linejoin="round"/><path d="M12 9.5v4.2" stroke-linecap="round"/><circle cx="12" cy="16.6" r=".9" fill="currentColor" stroke="none"/></svg>
+            <div>
+              <p data-i18n="ins.warn">A missing <code>dist</code> entry point makes OpenCode log-and-skip the plugin — sessions look normal but are unprotected. <code>--doctor</code> catches that.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="hosts">
+    <div class="wrap">
+      <p class="eyebrow" data-i18n="hosts.eyebrow">Hosts</p>
+      <h2 data-i18n="hosts.title">Works where you already work</h2>
+      <p class="lede" data-i18n="hosts.sub">The same scanner and decision model sit behind each host. Verification is recorded per host, with the exact versions and stubs used.</p>
+
+      <div class="hosts">
+        <div class="card host">
+          <div class="host-top"><h3>OpenCode v2</h3><span class="status v" data-i18n="hosts.primary">primary</span></div>
+          <p data-i18n="hosts.d1">Enforced ingress gate. Scans prompts, history, tool output and tool definitions; transparent mode also inspects the final provider body. Verified on v2.0.28 and v2.2.5.</p>
+        </div>
+        <div class="card host">
+          <div class="host-top"><h3>pi</h3><span class="status v" data-i18n="hosts.verified">verified</span></div>
+          <p data-i18n="hosts.d2">In-process extension that wraps <code>fetch</code>, masks the three wire APIs it supports, and restores <code>read</code>/<code>write</code>/<code>edit</code>/<code>bash</code> arguments. Verified on pi 1.6.0.</p>
+        </div>
+        <div class="card host">
+          <div class="host-top"><h3>Claude Code</h3><span class="status x" data-i18n="hosts.experimental">experimental</span></div>
+          <p data-i18n="hosts.d3">Point <code>ANTHROPIC_BASE_URL</code> at the local proxy. Masks Messages requests and restores assistant text; tool calls are not restored yet.</p>
+        </div>
+        <div class="card host">
+          <div class="host-top"><h3>CLI &amp; Web UI</h3><span class="status v" data-i18n="hosts.manual">manual</span></div>
+          <p data-i18n="hosts.d4">Explicit scans of text, files, directories and CI pipelines, plus a local browser UI and REST endpoint. Not a model boundary.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="limits">
+    <div class="wrap">
+      <p class="eyebrow" data-i18n="lim.eyebrow">Limits</p>
+      <h2 data-i18n="lim.title">What it does not do</h2>
+      <p class="lede" data-i18n="lim.sub">LeakShield protects the model boundary, not your machine. Read this before relying on it.</p>
+
+      <div class="limits">
+        <div class="limit">
+          <h3 data-i18n="lim.t1">Not an egress firewall</h3>
+          <p data-i18n="lim.d1">A permitted tool can still send originals through <code>curl</code>, a remote MCP server or any other channel. Destination control belongs to a separate permission layer.</p>
+        </div>
+        <div class="limit">
+          <h3 data-i18n="lim.t2">Local copies remain</h3>
+          <p data-i18n="lim.d2">History, logs, backups and generated files keep whatever you wrote. <code>forget</code> cannot recall copies a backup already took.</p>
+        </div>
+        <div class="limit">
+          <h3 data-i18n="lim.t3">Detection has gaps</h3>
+          <p data-i18n="lim.d3">Addresses, dates, IPv6 and short generic assignments pass through. Checksum rules only fire on valid checksums; IP detection covers public IPv4.</p>
+        </div>
+        <div class="limit">
+          <h3 data-i18n="lim.t4">Coverage is versioned</h3>
+          <p data-i18n="lim.d4">Each host reports <code>PROTECTED</code>, <code>PARTIAL</code> or <code>BROKEN</code>. A plugin registered but not loaded looks normal — run <code>--doctor</code> and the smoke test.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="faq">
+    <div class="wrap">
+      <p class="eyebrow" data-i18n="faq.eyebrow">FAQ</p>
+      <h2 data-i18n="faq.title">Questions people ask first</h2>
+
+      <div class="faq">
+        <details>
+          <summary data-i18n="faq.q1">Does it send my data anywhere?</summary>
+          <p data-i18n="faq.a1">LeakShield itself sends nothing. Scanning, masking and restoring happen on your machine, and only the masked request your host already makes reaches the provider. Host telemetry, traffic that bypasses the interception point (Claude Code's WebFetch hostname check, for one), and tools you allow to run are outside that boundary.</p>
+        </details>
+        <details>
+          <summary data-i18n="faq.q2">What happens when masking is impossible?</summary>
+          <p data-i18n="faq.a2">The request is refused. LeakShield is fail-closed: an unrecognised shape, an invalid config or a missing mapping stops the call instead of forwarding the original.</p>
+        </details>
+        <details>
+          <summary data-i18n="faq.q3">Where do the placeholders and keys live?</summary>
+          <p data-i18n="faq.a3">Placeholders are per-session pseudonyms. Their reverse mapping stays on your machine: in memory by default, or in an opt-in encrypted database (SGP.db) whose key the OS keychain holds, with a keyfile fallback for headless machines.</p>
+        </details>
+        <details>
+          <summary data-i18n="faq.q4">How do I add my own keywords and domains?</summary>
+          <p data-i18n="faq.a4">Edit <code>config/guard.config.yaml</code> — NDA keywords, private domains, allowlists and <code>settings.rule_overrides</code>. An unknown rule id fails the config load rather than being ignored.</p>
+        </details>
+        <details>
+          <summary data-i18n="faq.q5">Is it production ready?</summary>
+          <p data-i18n="faq.a5">It is a 0.x release and defaults can still change. Verified hosts and versions are listed above and in the repository; treat unverified combinations as unproven.</p>
+        </details>
+        <details>
+          <summary data-i18n="faq.q6">How do I report a vulnerability?</summary>
+          <p data-i18n="faq.a6">Privately, through the security policy in the repository. Please do not open a public issue for a bypass.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot-inner">
+    <span class="foot-brand"><img src="assets/icon.svg" alt="" width="20" height="20"> leakshield</span>
+    <span data-i18n="foot.tag">Apache-2.0 · built by Jared Wang</span>
+    <nav class="foot-links" aria-label="Project links">
+      <a href="https://github.com/jwcrystal/leakshield" rel="noopener" data-i18n="foot.repo">Repository</a>
+      <a href="https://github.com/jwcrystal/leakshield/blob/main/README.md" rel="noopener" data-i18n="foot.docs">Documentation</a>
+      <a href="https://github.com/jwcrystal/leakshield/blob/main/CHANGELOG.md" rel="noopener" data-i18n="foot.chg">Changelog</a>
+      <a href="https://github.com/jwcrystal/leakshield/blob/main/SECURITY.md" rel="noopener" data-i18n="foot.sec">Security</a>
+      <a href="https://www.npmjs.com/package/leakshield" rel="noopener">npm</a>
+    </nav>
+  </div>
+</footer>
+<script>
+(function () {
+  var ZH = {
+    "skip": "跳至內容",
+    "nav.how": "運作方式",
+    "nav.coverage": "偵測範圍",
+    "nav.install": "安裝",
+    "nav.hosts": "支援宿主",
+    "nav.limits": "限制",
+    "nav.faq": "常見問題",
+
+    "hero.badge1": "實驗性",
+    "hero.badge2": "全程本機",
+    "hero.title1": "你的密鑰，不該留在",
+    "hero.title2": "prompt 裡。",
+    "hero.sub": "LeakShield 站在你的編輯器與模型之間：在送出前掃描 prompt、歷史訊息與工具輸出裡的密鑰、權杖、私鑰與個資，再於你的機器上把原值還原。",
+    "hero.cta1": "快速開始",
+    "hero.cta2": "閱讀文件",
+    "hero.note": "Node 20+ · OpenCode v2、pi、Claude Code · 預設 fail-closed",
+
+    "demo.title": "模型實際看到的內容",
+    "demo.tag": "已遮罩",
+    "demo.you": "你輸入的內容",
+    "demo.model": "送往模型",
+    "demo.tool": "工具執行前在本機還原",
+    "demo.note": "示意輸出，數值皆為合成範例。反向對照表不會離開這台機器。",
+
+    "strip.k1": "Fail-closed",
+    "strip.t1": "擋下，絕不轉送",
+    "strip.d1": "無法安全遮罩的內容會直接中止請求，不會把原文送出去。",
+    "strip.k2": "本機",
+    "strip.t2": "對照表留在本機",
+    "strip.d2": "佔位符會送到模型，能換回原值的對照表留在本機。對照表預設只在記憶體，要持久化需自行開啟加密儲存。",
+    "strip.k3": "誠實",
+    "strip.t3": "缺口寫得清楚",
+    "strip.d3": "每個已知盲點都有紀錄與量測，不會默默略過。",
+    "strip.k4": "通用",
+    "strip.t4": "一套核心，四個入口",
+    "strip.d4": "OpenCode plugin、pi extension、Claude Code proxy、CLI 與 Web UI 共用同一個掃描器。",
+
+    "how.eyebrow": "運作方式",
+    "how.title": "掃描、遮罩、還原，都在流程裡",
+    "how.sub": "守門員掛在你原本就在用的宿主請求路徑上。敏感片段在離開行程前換成每個 session 固定的佔位符，工具在本機執行時再換回真值。",
+    "how.t1": "掃描每一道邊界",
+    "how.d1": "prompt、重播的歷史、system prompt 與工具結果，在模型讀到之前都經過同一組規則。",
+    "how.t2": "以偽名遮罩",
+    "how.d2": "每個命中都換成 SGP2 佔位符。模型只看到穩定的代號，看不到真值。",
+    "how.t3": "在你這一側還原",
+    "how.d3": "工具參數與助理文字在本機解碼，編輯器、shell 與檔案拿到的仍是原始值。",
+
+    "how.cap": "核心與宿主無關。provider 流量會被遮罩；遙測、雲端 session 與磁碟上的逐字稿不在守備範圍。",
+
+    "cov.eyebrow": "偵測範圍",
+    "cov.title": "會抓到什麼",
+    "cov.sub": "內建規則在三種模式（block、redact、transparent）都會執行，並可由 <code>config/guard.config.yaml</code> 擴充。",
+    "cov.th1": "類型",
+    "cov.th2": "偵測內容",
+    "cov.th3": "嚴重度",
+    "cov.r1n": "API 金鑰",
+    "cov.r1d": "OpenAI、Anthropic、Google、AWS、Stripe 的有效金鑰",
+    "cov.r2n": "Secret 與密碼",
+    "cov.r2d": "通用密碼賦值、AWS secret key",
+    "cov.r3n": "權杖",
+    "cov.r3d": "GitHub、Slack、Hugging Face、JWT、Bearer token",
+    "cov.r4n": "私鑰",
+    "cov.r4d": "PEM 私鑰區塊",
+    "cov.r5n": "資料庫連線字串",
+    "cov.r5d": "MongoDB、PostgreSQL、MySQL、Redis、ADO",
+    "cov.r6n": "URL 內嵌憑證",
+    "cov.r6d": "只遮罩 URL 的 userinfo 這一段",
+    "cov.r7n": "台灣身分證號",
+    "cov.r7d": "格式驗證",
+    "cov.r8n": "信用卡號",
+    "cov.r8d": "13–19 碼，須通過 Luhn 檢查碼",
+    "cov.r9n": "IBAN",
+    "cov.r9d": "緊密或每 4 字元分組，須通過 mod-97",
+    "cov.r10n": "NDA 關鍵字",
+    "cov.r10d": "來自設定檔的自訂清單",
+    "cov.r11n": "公開 IPv4",
+    "cov.r11d": "排除私有、loopback、CGNAT 與保留網段",
+    "cov.r12n": "電子郵件",
+    "cov.r12d": "各種 email 格式",
+    "cov.r13n": "私有網域",
+    "cov.r13d": "來自設定檔的自訂網域清單",
+    "cov.r14n": "私有 IPv4／VPN",
+    "cov.r14d": "RFC 1918、CGNAT 與 link-local，可用 <code>private_cidrs</code> 縮小範圍",
+    "cov.r15n": "台灣手機號碼",
+    "cov.r15d": "數字串是實測的誤判來源",
+    "cov.r16n": "國際電話",
+    "cov.r16d": "與台灣手機號碼相同的取捨",
+    "cov.r17n": "HTTP(S) URL",
+    "cov.r17d": "預設關閉：全面遮罩會連 provider endpoint 一起標記",
+    "cov.optin": "需開啟",
+    "cov.note": "每條規則都有固定 id，可在 <code>settings.rule_overrides</code> 開關。不涵蓋：街道地址、日期、IPv6，以及關鍵字清單之外或短於 8 字元的通用賦值。",
+
+    "dec.a": "沒有命中，可安全送出。",
+    "dec.w": "只有低嚴重度命中。顯示提醒，仍可送出。",
+    "dec.c": "中或高嚴重度命中。需要明確確認，否則請求會被擋下。",
+
+    "ins.eyebrow": "快速開始",
+    "ins.title": "三個步驟保護一個專案",
+    "ins.sub": "需要 Node.js 20 以上與 OpenCode v2。對照表持久化需要 Node 22.13+。",
+    "ins.t1": "安裝套件",
+    "ins.d1": "CLI 與 plugin 在同一個 npm 套件裡。",
+    "ins.t2": "註冊 plugin",
+    "ins.d2": "加進專案的 <code>opencode.json</code>。不給選項時，<code>mode</code> 預設為 <code>transparent</code>。",
+    "ins.t3": "檢查安裝",
+    "ins.d3": "Exit code 0 代表 <code>PROTECTED</code> 或 <code>PARTIAL</code>。再跑 README 的合成權杖 smoke test，確認實際路徑。",
+    "ins.cliT": "或直接在終端掃描",
+    "ins.cliN": "CLI 不會把內容送到模型。Exit code 1 代表有命中而被攔下，適合放進 CI。",
+    "ins.warn": "<code>dist</code> 入口不存在時，OpenCode 只會記一筆 log 就跳過 plugin —— session 看起來正常，實際上毫無保護。<code>--doctor</code> 會抓到這件事。",
+    "ins.copy": "複製",
+
+    "hosts.eyebrow": "支援宿主",
+    "hosts.title": "你原本的工作環境就能用",
+    "hosts.sub": "每個宿主背後都是同一套掃描器與決策模型。驗證結果逐宿主記錄，寫明版本與替身。",
+    "hosts.primary": "主要",
+    "hosts.verified": "已驗證",
+    "hosts.experimental": "實驗性",
+    "hosts.manual": "手動",
+    "hosts.d1": "強制入口檢查。掃描 prompt、歷史、工具輸出與工具定義；transparent 模式另外檢查送往 provider 的最終 body。已在 v2.0.28 與 v2.2.5 驗證。",
+    "hosts.d2": "行程內 extension，包住 <code>fetch</code> 以遮罩它支援的三種 wire API，並還原 <code>read</code>／<code>write</code>／<code>edit</code>／<code>bash</code> 參數。已用 pi 1.6.0 驗證。",
+    "hosts.d3": "把 <code>ANTHROPIC_BASE_URL</code> 指向本機 proxy。遮罩 Messages 請求並還原助理文字；工具呼叫尚未還原。",
+    "hosts.d4": "手動掃描文字、檔案、目錄與 CI pipeline，另有本機瀏覽器介面與 REST endpoint。不是模型邊界。",
+
+    "lim.eyebrow": "限制",
+    "lim.title": "它做不到的事",
+    "lim.sub": "LeakShield 保護的是模型邊界，不是你的機器。依賴它之前請先讀完。",
+    "lim.t1": "不是對外防火牆",
+    "lim.d1": "被允許的工具仍可透過 <code>curl</code>、遠端 MCP server 或其他管道送出原文。目的地的管控屬於另一個權限層。",
+    "lim.t2": "本機副本仍在",
+    "lim.d2": "歷史、log、備份與產生的檔案都留著你寫過的內容。<code>forget</code> 無法回收備份已抄走的部分。",
+    "lim.t3": "偵測有缺口",
+    "lim.d3": "地址、日期、IPv6 與過短的通用賦值會直接通過。檢查碼規則只對有效號碼生效；IP 只涵蓋公開 IPv4。",
+    "lim.t4": "涵蓋範圍有版本",
+    "lim.d4": "每個宿主會回報 <code>PROTECTED</code>、<code>PARTIAL</code> 或 <code>BROKEN</code>。註冊了卻沒載入的 plugin 看起來一切正常 —— 請跑 <code>--doctor</code> 與 smoke test。",
+
+    "faq.eyebrow": "常見問題",
+    "faq.title": "大家最先問的問題",
+    "faq.q1": "它會把我的資料送到哪裡嗎？",
+    "faq.a1": "LeakShield 本身不會送出任何內容。掃描、遮罩與還原都在你的機器上完成，只有你的宿主原本就會發出的已遮罩請求會到達 provider。宿主的遙測、繞過攔截點的流量（例如 Claude Code 的 WebFetch 網域檢查），以及你允許執行的工具，都不在這個邊界內。",
+    "faq.q2": "無法遮罩時會怎樣？",
+    "faq.a2": "請求會被拒絕。LeakShield 是 fail-closed：無法辨識的格式、無效的設定或缺少對照，都會中止呼叫，而不是送出原文。",
+    "faq.q3": "佔位符與金鑰放在哪裡？",
+    "faq.a3": "佔位符是每個 session 的偽名，能換回原值的對照表留在你的機器上：預設只在記憶體；要持久化需自行開啟加密資料庫（SGP.db），金鑰由作業系統 keychain 保管，無 keychain 的環境可改用金鑰檔。",
+    "faq.q4": "怎麼加入自己的關鍵字與網域？",
+    "faq.a4": "編輯 <code>config/guard.config.yaml</code>：NDA 關鍵字、私有網域、allowlist 與 <code>settings.rule_overrides</code>。未知的規則 id 會讓設定載入失敗，不會被忽略。",
+    "faq.q5": "可以上生產環境了嗎？",
+    "faq.a5": "目前是 0.x，預設值仍可能調整。已驗證的宿主與版本列在上面與 repo 中；未驗證的組合請視為未證實。",
+    "faq.q6": "漏洞要怎麼回報？",
+    "faq.a6": "請依 repo 的 security policy 私下回報。發現繞過方式時，不要開公開 issue。",
+
+    "foot.tag": "Apache-2.0 · 作者 Jared Wang",
+    "foot.repo": "原始碼",
+    "foot.docs": "文件",
+    "foot.chg": "變更紀錄",
+    "foot.sec": "安全性"
+  };
+
+  var TITLE = {
+    en: "LeakShield — scan for secrets before you send",
+    zh: "LeakShield — 送出前先掃描敏感內容"
+  };
+
+  var original = new Map();
+  function remember() {
+    document.querySelectorAll('[data-i18n]').forEach(function (el) {
+      if (!original.has(el)) original.set(el, el.innerHTML);
+    });
+  }
+  function applyLang(lang) {
+    remember();
+    document.documentElement.lang = lang === 'zh' ? 'zh-Hant-TW' : 'en';
+    document.querySelectorAll('[data-i18n]').forEach(function (el) {
+      var key = el.getAttribute('data-i18n');
+      var text = lang === 'zh' ? ZH[key] : original.get(el);
+      if (text != null) el.innerHTML = text;
+    });
+    document.title = TITLE[lang] || TITLE.en;
+    document.querySelectorAll('.lang-switch button').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.lang === lang));
+    });
+    try { localStorage.setItem('leakshield-lang', lang); } catch (e) {}
+  }
+
+  var savedLang = null;
+  try { savedLang = localStorage.getItem('leakshield-lang'); } catch (e) {}
+  if (!savedLang) savedLang = /^zh/i.test(navigator.language || '') ? 'zh' : 'en';
+  applyLang(savedLang === 'zh' ? 'zh' : 'en');
+
+  document.querySelectorAll('.lang-switch button').forEach(function (b) {
+    b.addEventListener('click', function () { applyLang(b.dataset.lang); });
+  });
+
+  var toggle = document.getElementById('theme-toggle');
+  toggle.addEventListener('click', function () {
+    var next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem('leakshield-theme', next); } catch (e) {}
+  });
+
+  document.querySelectorAll('.code-card .copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var code = btn.parentElement.querySelector('code');
+      var text = code ? code.textContent : '';
+      var zh = document.documentElement.lang.indexOf('zh') === 0;
+      var done = function () {
+        btn.classList.add('ok');
+        btn.textContent = zh ? '已複製' : 'Copied';
+        setTimeout(function () {
+          btn.classList.remove('ok');
+          btn.textContent = zh ? '複製' : 'Copy';
+        }, 1600);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        var range = document.createRange();
+        range.selectNodeContents(code);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        try { document.execCommand('copy'); done(); } catch (e) {}
+        sel.removeAllRanges();
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>

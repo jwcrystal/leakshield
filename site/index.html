@@ -3,17 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LeakShield — scan for secrets before you send</title>
-<meta name="description" content="LeakShield is a local gatekeeper that scans for API keys, tokens, private keys and PII before content reaches an AI model — and puts the values back on your machine.">
+<title>LeakShield — Let AI read your code, not your secrets.</title>
+<meta name="description" content="LeakShield scans intercepted model requests and masks detected sensitive values before sending. Reverse mappings stay on your machine.">
 <meta name="color-scheme" content="light dark">
+<link rel="canonical" href="https://jwcrystal.github.io/leakshield/">
+<meta property="og:url" content="https://jwcrystal.github.io/leakshield/">
 <meta property="og:type" content="website">
-<meta property="og:title" content="LeakShield — scan before you send">
-<meta property="og:description" content="A gatekeeper that scans for sensitive content before code, documents, or data reach an AI service.">
+<meta property="og:title" content="LeakShield — Let AI read your code, not your secrets.">
+<meta property="og:description" content="LeakShield scans intercepted model requests and masks detected sensitive values before sending. Reverse mappings stay on your machine.">
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="assets/icon-small.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/icon.svg">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#fffdf9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141311" media="(prefers-color-scheme: dark)">
 <script>
   (function () {
     var stored = null;
@@ -24,47 +26,47 @@
 </script>
 <style>
   :root {
-    --bg: #ffffff;
-    --bg-soft: #f8fafc;
-    --fg: #0f172a;
-    --fg-soft: #334155;
-    --muted: #64748b;
-    --border: #e2e8f0;
-    --border-strong: #cbd5e1;
-    --card: #ffffff;
-    --code-bg: #f8fafc;
-    --code-fg: #1e293b;
-    --accent: #6366f1;
-    --accent-2: #a855f7;
-    --accent-soft: rgba(99, 102, 241, .08);
-    --teal: #0d9488;
+    --bg: #fffdf9;
+    --bg-soft: #f3efe9;
+    --fg: #1c1917;
+    --fg-soft: #44403c;
+    --muted: #57534e;
+    --border: #e7e0d7;
+    --border-strong: #a8a29e;
+    --card: #fffdf9;
+    --code-bg: #f5f0e9;
+    --code-fg: #292524;
+    --accent: #0f766e;
+    --accent-2: #115e59;
+    --accent-soft: #e6f2ed;
+    --teal: #0f766e;
     --danger: #dc2626;
     --warn: #b45309;
     --ok: #15803d;
-    --shadow: 0 1px 2px rgba(15, 23, 42, .05), 0 8px 24px -12px rgba(15, 23, 42, .18);
+    --shadow: 0 1px 2px rgba(28, 25, 23, .06);
     --radius: 14px;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
   }
   html[data-theme="dark"] {
-    --bg: #0b1220;
-    --bg-soft: #0f172a;
-    --fg: #e2e8f0;
-    --fg-soft: #cbd5e1;
-    --muted: #94a3b8;
-    --border: #1e293b;
-    --border-strong: #334155;
-    --card: #101a2e;
-    --code-bg: #0d1526;
-    --code-fg: #dbe4f0;
-    --accent: #818cf8;
-    --accent-2: #c084fc;
-    --accent-soft: rgba(129, 140, 248, .12);
+    --bg: #141311;
+    --bg-soft: #1b1916;
+    --fg: #ece9e2;
+    --fg-soft: #ded8d0;
+    --muted: #c8c2b9;
+    --border: #37312b;
+    --border-strong: #78716c;
+    --card: #23201c;
+    --code-bg: #1b1916;
+    --code-fg: #ece9e2;
+    --accent: #2dd4bf;
+    --accent-2: #5eead4;
+    --accent-soft: #20332e;
     --teal: #2dd4bf;
     --danger: #f87171;
     --warn: #fbbf24;
     --ok: #4ade80;
-    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 32px -16px rgba(0, 0, 0, .7);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .25);
   }
 
   *, *::before, *::after { box-sizing: border-box; }
@@ -133,7 +135,6 @@
   .lede { margin: 0; color: var(--muted); font-size: 1.03rem; max-width: 62ch; }
   .block { padding: clamp(3rem, 6vw, 4.6rem) 0; }
   .block + .block { border-top: 1px solid var(--border); }
-  .grad { background: linear-gradient(100deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
   code {
     font-family: var(--mono); font-size: .875em;
     background: var(--accent-soft); color: var(--fg);
@@ -149,12 +150,6 @@
   .decisions > *, .strip-grid > *, .step-block > * { min-width: 0; }
 
   .hero { position: relative; overflow: hidden; padding: clamp(3rem, 7vw, 5.5rem) 0 clamp(2.5rem, 5vw, 4rem); }
-  .hero::before {
-    content: ""; position: absolute; inset: -180px 0 auto 0; height: 620px; pointer-events: none;
-    background:
-      radial-gradient(52% 62% at 12% 8%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 68%),
-      radial-gradient(46% 56% at 88% 0%, color-mix(in srgb, var(--accent-2) 18%, transparent), transparent 70%);
-  }
   .hero-grid { position: relative; display: grid; grid-template-columns: 1.08fr .92fr; gap: clamp(2rem, 5vw, 3.5rem); align-items: center; }
   .badges { display: flex; flex-wrap: wrap; gap: .45rem; margin-bottom: 1.15rem; }
   .pill {
@@ -174,7 +169,7 @@
     transition: transform .12s, box-shadow .15s, border-color .15s;
   }
   .btn:hover { transform: translateY(-1px); }
-  .btn-primary { background: linear-gradient(100deg, #6366f1, #a855f7); color: #fff; box-shadow: 0 8px 20px -10px rgba(99, 102, 241, .9); }
+  .btn-primary { background: var(--fg); color: var(--bg); }
   .btn-ghost { border-color: var(--border-strong); background: var(--card); color: var(--fg); }
   .btn-ghost:hover { border-color: var(--accent); }
   .hero-note { margin: 1.1rem 0 0; font-size: .8rem; color: var(--muted); }
@@ -208,7 +203,7 @@
   }
   .step p { margin: 0; font-size: .87rem; color: var(--muted); }
   .arch { padding: 1rem; display: grid; place-items: center; }
-  .arch img { width: 100%; max-width: 640px; border-radius: 10px; }
+  .arch img { width: 100%; max-width: 460px; border-radius: 10px; }
   html[data-theme="dark"] .arch-light { display: none; }
   html[data-theme="light"] .arch-dark { display: none; }
   .caption { margin: .65rem 0 0; font-size: .78rem; color: var(--muted); text-align: center; }
@@ -360,13 +355,13 @@
           <span class="pill">Apache-2.0</span>
           <span class="pill" data-i18n="hero.badge2">local only</span>
         </div>
-        <h1><span data-i18n="hero.title1">Your secrets should not be</span> <span class="grad" data-i18n="hero.title2">in the prompt.</span></h1>
-        <p class="sub" data-i18n="hero.sub">LeakShield sits between your editor and the model. It scans prompts, history and tool output for keys, tokens, private keys and PII — then restores the originals on your machine.</p>
+        <h1><span data-i18n="hero.title1">Let AI read your code,</span> <span data-i18n="hero.title2">not your secrets.</span></h1>
+        <p class="sub" data-i18n="hero.sub">LeakShield scans intercepted model requests for API keys, tokens, private keys and personal data. It masks detected values before sending the request.</p>
         <div class="cta-row">
           <a class="btn btn-primary" href="#install" data-i18n="hero.cta1">Quickstart</a>
           <a class="btn btn-ghost" href="https://github.com/jwcrystal/leakshield#readme" rel="noopener" data-i18n="hero.cta2">Read the docs</a>
         </div>
-        <p class="hero-note" data-i18n="hero.note">Node 20+ · OpenCode v2, pi and Claude Code · fail-closed by default</p>
+        <p class="hero-note" data-i18n="hero.note">Node 20+ · OpenCode v2, Pi coding agent and Claude Code</p>
       </div>
 
       <div class="card demo" aria-label="Example of masking and restoring">
@@ -384,7 +379,7 @@
             <code>psql postgres://app:<span class="masked">[&#83;GP2:SECRET-••••]</span>@db.internal/prod</code>
           </div>
           <div class="demo-line safe">
-            <span class="label" data-i18n="demo.tool">Restored locally, for tool calls</span>
+            <span class="label" data-i18n="demo.tool">Restored locally for supported tool calls</span>
             <code>psql postgres://app:<span class="val">s3cr3t-Pa55</span>@db.internal/prod</code>
           </div>
         </div>
@@ -397,8 +392,8 @@
     <div class="wrap strip-grid">
       <div class="strip-item">
         <span class="k" data-i18n="strip.k1">Fail-closed</span>
-        <h3 data-i18n="strip.t1">Refuse, never forward</h3>
-        <p data-i18n="strip.d1">Anything the guard cannot mask safely stops the request instead of sending the original.</p>
+        <h3 data-i18n="strip.t1">Block if masking fails</h3>
+        <p data-i18n="strip.d1">Intercepted requests are blocked if masking fails.</p>
       </div>
       <div class="strip-item">
         <span class="k" data-i18n="strip.k2">Local</span>
@@ -412,8 +407,8 @@
       </div>
       <div class="strip-item">
         <span class="k" data-i18n="strip.k4">Portable</span>
-        <h3 data-i18n="strip.t4">One core, four entry points</h3>
-        <p data-i18n="strip.d4">OpenCode plugin, pi extension, Claude Code proxy, CLI and web UI share the same scanner.</p>
+        <h3 data-i18n="strip.t4">One scanner, five entry points</h3>
+        <p data-i18n="strip.d4">OpenCode plugin, Pi extension, Claude Code proxy, CLI and Web UI share the same scanner.</p>
       </div>
     </div>
   </div>
@@ -422,13 +417,13 @@
     <div class="wrap">
       <p class="eyebrow" data-i18n="how.eyebrow">How it works</p>
       <h2 data-i18n="how.title">Scan, mask, restore — inside the loop</h2>
-      <p class="lede" data-i18n="how.sub">The guard hooks the request path of the host you already use. Sensitive spans are replaced with stable per-session placeholders before they leave the process, and turned back into the real values when a tool runs locally.</p>
+      <p class="lede" data-i18n="how.sub">LeakShield replaces detected sensitive values with placeholders in intercepted model requests. The reverse mapping stays local.</p>
 
       <div class="steps">
         <div class="card step">
           <span class="n">1</span>
-          <h3 data-i18n="how.t1">Scan every boundary</h3>
-          <p data-i18n="how.d1">Prompts, replayed history, system prompts and tool results pass through the same rule set before a model can read them.</p>
+          <h3 data-i18n="how.t1">Scan intercepted requests</h3>
+          <p data-i18n="how.d1">The same rules scan supported content in intercepted requests, including prompts, replayed history and tool results.</p>
         </div>
         <div class="card step">
           <span class="n">2</span>
@@ -438,15 +433,20 @@
         <div class="card step">
           <span class="n">3</span>
           <h3 data-i18n="how.t3">Restore on your side</h3>
-          <p data-i18n="how.d3">Tool arguments and assistant text are decoded locally, so your editor, shell and files still get the original.</p>
+          <p data-i18n="how.d3">Restoration varies by integration. The Claude Code proxy restores assistant text, not tool arguments.</p>
         </div>
       </div>
 
       <div class="card arch">
-        <img class="arch-light" src="assets/leakshield-architecture.svg" width="640" height="608" loading="lazy" alt="Architecture: OpenCode, pi and Claude Code feed a shared core that masks requests before any provider, with detection rules and a documented not-covered band.">
-        <img class="arch-dark" src="assets/leakshield-architecture-dark.svg" width="640" height="608" loading="lazy" alt="Architecture: OpenCode, pi and Claude Code feed a shared core that masks requests before any provider, with detection rules and a documented not-covered band.">
+        <img class="arch-light" src="assets/leakshield-architecture-simple.svg" width="460" height="440" loading="lazy" alt="">
+        <img class="arch-dark" src="assets/leakshield-architecture-simple-dark.svg" width="460" height="440" loading="lazy" alt="">
       </div>
-      <p class="caption" data-i18n="how.cap">The core is host-independent. Provider traffic is masked; telemetry, cloud sessions and on-disk transcripts are outside its boundary.</p>
+      <p class="caption" data-i18n="how.cap">Unintercepted traffic, tool network traffic, and on-disk transcripts and logs are outside this boundary.</p>
+      <p class="caption" data-i18n="how.diagram">LeakShield masks detected sensitive values before forwarding intercepted requests to a model. The reverse mapping stays local.</p>
+      <p class="caption">
+        <a class="arch-light" href="assets/leakshield-architecture.svg" data-i18n="how.full">View full architecture diagram</a>
+        <a class="arch-dark" href="assets/leakshield-architecture-dark.svg" data-i18n="how.full">View full architecture diagram</a>
+      </p>
     </div>
   </section>
 
@@ -581,7 +581,7 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
           <p data-i18n="hosts.d1">Enforced ingress gate. Scans prompts, history, tool output and tool definitions; transparent mode also inspects the final provider body. Verified on v2.0.28 and v2.2.5.</p>
         </div>
         <div class="card host">
-          <div class="host-top"><h3>pi</h3><span class="status v" data-i18n="hosts.verified">verified</span></div>
+          <div class="host-top"><h3>Pi</h3><span class="status v" data-i18n="hosts.verified">verified</span></div>
           <p data-i18n="hosts.d2">In-process extension that wraps <code>fetch</code>, masks the three wire APIs it supports, and restores <code>read</code>/<code>write</code>/<code>edit</code>/<code>bash</code> arguments. Verified on pi 1.6.0.</p>
         </div>
         <div class="card host">
@@ -684,23 +684,23 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
 
     "hero.badge1": "實驗性",
     "hero.badge2": "全程本機",
-    "hero.title1": "你的密鑰，不該留在",
-    "hero.title2": "prompt 裡。",
-    "hero.sub": "LeakShield 站在你的編輯器與模型之間：在送出前掃描 prompt、歷史訊息與工具輸出裡的密鑰、權杖、私鑰與個資，再於你的機器上把原值還原。",
+    "hero.title1": "讓 AI 讀懂你的程式碼，",
+    "hero.title2": "而不是你的機密。",
+    "hero.sub": "LeakShield 會掃描已攔截的模型請求，找出 API 金鑰、權杖、私鑰與個資，並在送出前遮罩偵測到的值。",
     "hero.cta1": "快速開始",
     "hero.cta2": "閱讀文件",
-    "hero.note": "Node 20+ · OpenCode v2、pi、Claude Code · 預設 fail-closed",
+    "hero.note": "Node 20+ · OpenCode v2、Pi coding agent 與 Claude Code",
 
     "demo.title": "模型實際看到的內容",
     "demo.tag": "已遮罩",
     "demo.you": "你輸入的內容",
     "demo.model": "送往模型",
-    "demo.tool": "工具執行前在本機還原",
+    "demo.tool": "支援的工具呼叫會在本機還原",
     "demo.note": "示意輸出，數值皆為合成範例。反向對照表不會離開這台機器。",
 
     "strip.k1": "Fail-closed",
-    "strip.t1": "擋下，絕不轉送",
-    "strip.d1": "無法安全遮罩的內容會直接中止請求，不會把原文送出去。",
+    "strip.t1": "無法遮罩就擋下",
+    "strip.d1": "已攔截的請求若無法完成遮罩，就會被擋下。",
     "strip.k2": "本機",
     "strip.t2": "對照表留在本機",
     "strip.d2": "佔位符會送到模型，能換回原值的對照表留在本機。對照表預設只在記憶體，要持久化需自行開啟加密儲存。",
@@ -708,20 +708,22 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
     "strip.t3": "缺口寫得清楚",
     "strip.d3": "每個已知盲點都有紀錄與量測，不會默默略過。",
     "strip.k4": "通用",
-    "strip.t4": "一套核心，四個入口",
-    "strip.d4": "OpenCode plugin、pi extension、Claude Code proxy、CLI 與 Web UI 共用同一個掃描器。",
+    "strip.t4": "一套掃描器，五個入口",
+    "strip.d4": "OpenCode 外掛、Pi 擴充套件、Claude Code 代理、CLI 與 Web UI 共用同一套掃描器。",
 
     "how.eyebrow": "運作方式",
     "how.title": "掃描、遮罩、還原，都在流程裡",
-    "how.sub": "守門員掛在你原本就在用的宿主請求路徑上。敏感片段在離開行程前換成每個 session 固定的佔位符，工具在本機執行時再換回真值。",
-    "how.t1": "掃描每一道邊界",
-    "how.d1": "prompt、重播的歷史、system prompt 與工具結果，在模型讀到之前都經過同一組規則。",
+    "how.sub": "LeakShield 會將已攔截的模型請求中偵測到的敏感值換成佔位符。還原用的對照表留在本機。",
+    "how.t1": "掃描已攔截的請求",
+    "how.d1": "同一套規則掃描已攔截請求中支援的內容，例如提示詞、重播的歷史訊息與工具結果。",
     "how.t2": "以偽名遮罩",
     "how.d2": "每個命中都換成 SGP2 佔位符。模型只看到穩定的代號，看不到真值。",
     "how.t3": "在你這一側還原",
-    "how.d3": "工具參數與助理文字在本機解碼，編輯器、shell 與檔案拿到的仍是原始值。",
+    "how.d3": "還原範圍因整合而異。Claude Code 代理會還原助理回覆文字，但不會還原工具參數。",
 
-    "how.cap": "核心與宿主無關。provider 流量會被遮罩；遙測、雲端 session 與磁碟上的逐字稿不在守備範圍。",
+    "how.cap": "未經攔截的流量、工具自身的網路流量，以及磁碟上的對話紀錄與日誌，都不在防護範圍內。",
+    "how.diagram": "LeakShield 會先遮罩已攔截請求中偵測到的敏感值，再將請求送給模型。還原用的對照表留在本機。",
+    "how.full": "查看完整架構圖",
 
     "cov.eyebrow": "偵測範圍",
     "cov.title": "會抓到什麼",
@@ -831,8 +833,8 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
   };
 
   var TITLE = {
-    en: "LeakShield — scan for secrets before you send",
-    zh: "LeakShield — 送出前先掃描敏感內容"
+    en: "LeakShield — Let AI read your code, not your secrets.",
+    zh: "LeakShield — 讓 AI 讀懂你的程式碼，而不是你的機密。"
   };
 
   var original = new Map();

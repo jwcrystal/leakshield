@@ -18,13 +18,13 @@ pi's own provider traffic is guarded wherever LeakShield sits in the load order:
 
 ## Install
 
-LeakShield is also a pi package: its manifest points pi at the compiled extension, while the default package entry remains the OpenCode plugin. After the next release, install it with:
+LeakShield is also a pi package: its manifest points pi at the compiled extension, while the default package entry remains the OpenCode plugin. Install the published package with:
 
 ```bash
 pi install npm:leakshield
 ```
 
-The currently published npm 0.3.1 does not include pi support. Until a newer version is published, build a checkout and register the package directory:
+pi support starts at 0.4.0. To run a local build instead, register the package directory:
 
 ```bash
 npm ci

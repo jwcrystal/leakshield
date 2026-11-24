@@ -20,7 +20,7 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 | 模式 | 啟動方式 | 適用情境 |
 |------|----------|----------|
 | OpenCode Plugin | 在 `opencode.json` 加入 `leakshield` 套件或 `dist` 目錄（OpenCode v2） | 自動且 fail-closed 地保護 OpenCode 模型輸入與工具輸出 |
-| pi adapter | `pi install /absolute/path/to/built/leakshield`（下一版 npm：`pi install npm:leakshield`；[安裝說明](docs/pi.zh-TW.md)） | 遮罩 pi 的 provider 請求並還原 read/write/edit/bash 參數 |
+| pi adapter | `pi install npm:leakshield`（0.4.0 起；本機建置可用 `pi install /absolute/path/to/built/leakshield`；[安裝說明](docs/pi.zh-TW.md)） | 遮罩 pi 的 provider 請求並還原 read/write/edit/bash 參數 |
 | CLI | `npm run scan -- --file ./path`（全域安裝或 `npm link` 後可用 `leakshield --file ./path`） | 明確的本機或 CI 掃描；不會把內容送到模型 |
 | Web UI | `npm run web` | 在 `http://localhost:3000` 手動以瀏覽器掃描 |
 
@@ -290,6 +290,7 @@ Doctor 會分開印出 `Configuration status`、`Wire protection` 與宿主整�
 - [映射持久化](docs/plugin/persistence.zh-TW.md): 選擇性開啟的加密儲存、金鑰保管、清除
 - [容量與生命週期](docs/plugin/capacity.zh-TW.md): 預算、session 上限、保留
 - [唯讀 env 查詢](docs/plugin/env-queries.zh-TW.md): 選擇性開啟、不回傳 value 的設定查詢工具
+- [Agent hook 對照](docs/hooks.zh-TW.md): OpenCode、pi、Claude Code 的 hook 設計與 API，以及可用於遮罩／還原的攔截點
 
 #### 持久化風險須知（開啟前必讀）
 

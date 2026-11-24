@@ -143,6 +143,10 @@
     border: 1px solid var(--border); border-radius: var(--radius);
     background: var(--card); box-shadow: var(--shadow);
   }
+  /* Grid items default to min-width:auto, which lets a code block widen the
+     whole page on a phone. */
+  .hero-grid > *, .steps > *, .install-grid > *, .hosts > *, .limits > *,
+  .decisions > *, .strip-grid > *, .step-block > * { min-width: 0; }
 
   .hero { position: relative; overflow: hidden; padding: clamp(3rem, 7vw, 5.5rem) 0 clamp(2.5rem, 5vw, 4rem); }
   .hero::before {
@@ -399,7 +403,7 @@
       <div class="strip-item">
         <span class="k" data-i18n="strip.k2">Local</span>
         <h3 data-i18n="strip.t2">Mapping stays home</h3>
-        <p data-i18n="strip.d2">Placeholders are local-only; the encrypted store sits on your disk with the key in the OS keychain.</p>
+        <p data-i18n="strip.d2">Placeholders travel to the model; the mapping that turns them back stays here. Persistence is opt-in and encrypted.</p>
       </div>
       <div class="strip-item">
         <span class="k" data-i18n="strip.k3">Honest</span>
@@ -429,7 +433,7 @@
         <div class="card step">
           <span class="n">2</span>
           <h3 data-i18n="how.t2">Mask with pseudonyms</h3>
-          <p data-i18n="how.d2">Each finding becomes an <abbr title="pseudonym">SGP2</abbr> placeholder. The model reasons about a stable token without ever seeing the value.</p>
+          <p data-i18n="how.d2">Each finding becomes an SGP2 placeholder. The model reasons about a stable token without ever seeing the value.</p>
         </div>
         <div class="card step">
           <span class="n">3</span>
@@ -440,7 +444,7 @@
 
       <div class="card arch">
         <img class="arch-light" src="assets/leakshield-architecture.svg" width="640" height="608" loading="lazy" alt="Architecture: OpenCode, pi and Claude Code feed a shared core that masks requests before any provider, with detection rules and a documented not-covered band.">
-        <img class="arch-dark" src="assets/leakshield-architecture-dark.svg" width="640" height="608" loading="lazy" alt="">
+        <img class="arch-dark" src="assets/leakshield-architecture-dark.svg" width="640" height="608" loading="lazy" alt="Architecture: OpenCode, pi and Claude Code feed a shared core that masks requests before any provider, with detection rules and a documented not-covered band.">
       </div>
       <p class="caption" data-i18n="how.cap">The core is host-independent. Provider traffic is masked; telemetry, cloud sessions and on-disk transcripts are outside its boundary.</p>
     </div>
@@ -543,12 +547,10 @@
         <div>
           <h3 style="margin-bottom:.5rem" data-i18n="ins.cliT">Or scan from the terminal</h3>
           <div class="code-card">
-            <pre><code># scan a string
-leakshield --text "my password is hunter2-not-real"
-
-# one file, or a whole tree
+            <pre><code># a file, a tree, or stdin
 leakshield --file ./src/config.ts
 leakshield --dir ./src --format json
+cat .env | leakshield --format json
 
 # write a redacted copy
 leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
@@ -629,7 +631,7 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
       <div class="faq">
         <details>
           <summary data-i18n="faq.q1">Does it send my data anywhere?</summary>
-          <p data-i18n="faq.a1">No. Scanning, masking and restoring happen locally. The only outbound traffic is the masked request your host would already have sent to the provider you configured.</p>
+          <p data-i18n="faq.a1">LeakShield itself sends nothing. Scanning, masking and restoring happen on your machine, and only the masked request your host already makes reaches the provider. Host telemetry, traffic that bypasses the interception point (Claude Code's WebFetch hostname check, for one), and tools you allow to run are outside that boundary.</p>
         </details>
         <details>
           <summary data-i18n="faq.q2">What happens when masking is impossible?</summary>
@@ -637,7 +639,7 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
         </details>
         <details>
           <summary data-i18n="faq.q3">Where do the placeholders and keys live?</summary>
-          <p data-i18n="faq.a3">Placeholders are per-session pseudonyms stored in an encrypted local database (SGP.db). The key is held by the OS keychain, and the reverse mapping never leaves the machine.</p>
+          <p data-i18n="faq.a3">Placeholders are per-session pseudonyms. Their reverse mapping stays on your machine: in memory by default, or in an opt-in encrypted database (SGP.db) whose key the OS keychain holds, with a keyfile fallback for headless machines.</p>
         </details>
         <details>
           <summary data-i18n="faq.q4">How do I add my own keywords and domains?</summary>
@@ -701,7 +703,7 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
     "strip.d1": "無法安全遮罩的內容會直接中止請求，不會把原文送出去。",
     "strip.k2": "本機",
     "strip.t2": "對照表留在本機",
-    "strip.d2": "佔位符只存在本機；加密資料庫放在磁碟，金鑰由作業系統 keychain 保管。",
+    "strip.d2": "佔位符會送到模型，能換回原值的對照表留在本機。對照表預設只在記憶體，要持久化需自行開啟加密儲存。",
     "strip.k3": "誠實",
     "strip.t3": "缺口寫得清楚",
     "strip.d3": "每個已知盲點都有紀錄與量測，不會默默略過。",
@@ -809,11 +811,11 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
     "faq.eyebrow": "常見問題",
     "faq.title": "大家最先問的問題",
     "faq.q1": "它會把我的資料送到哪裡嗎？",
-    "faq.a1": "不會。掃描、遮罩與還原都在本機完成。唯一的對外流量，是你的宿主原本就會送給 provider 的已遮罩請求。",
+    "faq.a1": "LeakShield 本身不會送出任何內容。掃描、遮罩與還原都在你的機器上完成，只有你的宿主原本就會發出的已遮罩請求會到達 provider。宿主的遙測、繞過攔截點的流量（例如 Claude Code 的 WebFetch 網域檢查），以及你允許執行的工具，都不在這個邊界內。",
     "faq.q2": "無法遮罩時會怎樣？",
     "faq.a2": "請求會被拒絕。LeakShield 是 fail-closed：無法辨識的格式、無效的設定或缺少對照，都會中止呼叫，而不是送出原文。",
     "faq.q3": "佔位符與金鑰放在哪裡？",
-    "faq.a3": "佔位符是每個 session 的偽名，存在本機加密資料庫（SGP.db）。金鑰由作業系統 keychain 保管，反向對照表不會離開這台機器。",
+    "faq.a3": "佔位符是每個 session 的偽名，能換回原值的對照表留在你的機器上：預設只在記憶體；要持久化需自行開啟加密資料庫（SGP.db），金鑰由作業系統 keychain 保管，無 keychain 的環境可改用金鑰檔。",
     "faq.q4": "怎麼加入自己的關鍵字與網域？",
     "faq.a4": "編輯 <code>config/guard.config.yaml</code>：NDA 關鍵字、私有網域、allowlist 與 <code>settings.rule_overrides</code>。未知的規則 id 會讓設定載入失敗，不會被忽略。",
     "faq.q5": "可以上生產環境了嗎？",

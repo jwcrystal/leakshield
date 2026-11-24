@@ -9,6 +9,9 @@
 
 **A gatekeeper that scans for sensitive content before you feed code, documents, or data to AI services.**
 
+> **Design principles:** Invisible by default. Observable on demand. Fail-closed at the model boundary.
+> New adapter work is built and accepted against these ([ADR 0008](docs/adr/0008-transparent-protection-and-native-ux.md)). They are a contract for adapter work, not a claim that every host meets them today; see [host capabilities](docs/host-capabilities.md) for current status.
+
 Four supported modes:
 - **OpenCode Plugin**: The enforced ingress gate for OpenCode. Use this when OpenCode sends content to a model.
 - **pi adapter**: An in-process pi extension that guards the agent's provider requests through the shared wire core.

@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-24
 ---
 
@@ -15,7 +15,7 @@ date: 2026-11-24
 
 截至 2026-11-24，main 的 pi adapter 已具備 fetch 邊界及 Code Mode 內層工具還原。Claude Code 仍是實驗性 proxy：工具參數尚未還原（[#91](https://github.com/jwcrystal/leakshield/issues/91)），背景請求與 WebSocket 另有待驗證項目（[#111](https://github.com/jwcrystal/leakshield/issues/111)、[#113](https://github.com/jwcrystal/leakshield/issues/113)）。[PR #101](https://github.com/jwcrystal/leakshield/pull/101) 的 ADR-0005 尚未合併，不能當成 main 已實裝的能力。
 
-兩份既有 ADR 共用 0007 編號，本文均以完整檔名連結辨識；[ADR 索引](README.md)列出兩者。本提案不重新編號歷史文件。
+兩份既有 ADR 共用 0007 編號，本文均以完整檔名連結辨識；[ADR 索引](README.md)列出兩者。本文不重新編號歷史文件。
 
 ## Decision
 
@@ -70,6 +70,8 @@ Managed Proxy 是後續設計工作；本文不新增 `setup` 指令、不改啟
 | 效能 | 同宿主／模型／輸入比較開關保護的額外首字延遲、總時間與資源，分開冷啟動、暖機及工具回呼；記錄樣本數與 p50／p95，門檻由功能 PR 說明，本文不捏造預算 |
 | 隔離 | 共用 core 或政策介面改動需重跑其他 adapter 回歸；特定宿主限制留在該 adapter |
 
+PR 說明需列出適用的面向；不適用的面向各附一句理由。
+
 真實 provider 與本機 stub 證據分開記錄，未錄製 outbound body 時清楚標示推論。未知 transport 不因另一條路徑成功而提升為已保護。
 
 ## Existing work and sequencing
@@ -94,4 +96,4 @@ pi 發版沿用 [PR #126（0.4.0）](https://github.com/jwcrystal/leakshield/pul
 
 後續功能可用同一組驗收面向討論原生體驗，同時保留各宿主的安全政策。額外的生命週期、相容性與效能證據需要持續維護，支援聲明必須隨版本與證據更新。
 
-本 ADR 為 proposed、僅含文件；不變更實作、預設模式、doctor 結果、能力宣告、發版內容或既有 accepted ADR。README 產品承諾與 AGENTS 開發準則的調整，待本提案採納後再對齊。
+本 ADR 僅含文件；不變更實作、預設模式、doctor 結果、能力宣告、發版內容或既有 accepted ADR。採納後，README 以「設計原則」呈現三句口號並連回本文，第三句依 Decision 1 收窄為模型邊界；AGENTS 開發準則另行對齊。

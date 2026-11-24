@@ -34,8 +34,11 @@ export const PI_CAPABILITIES: HostCapabilities = {
   surfaces: {
     toolArgs: {
       state: "protected",
-      mechanism: "the tool gate restores known safe arguments per tool and refuses unknown tools",
+      mechanism:
+        "the tool gate restores known safe arguments per tool and refuses unknown tools; a codemode script's inner calls go through the same gate",
       evidence: "tests/pi-tool-policy.test.ts",
+      note:
+        "codemode source stays literal: the QuickJS sandbox has no egress of its own and pi re-fires tool_call for every call the script makes, where the field rules apply. Direct MCP, custom and extension tools are still refused.",
     },
     replyDisplay: {
       state: "protected",
@@ -54,5 +57,6 @@ export const PI_CAPABILITIES: HostCapabilities = {
     "transports.http: an extension loaded before LeakShield can keep the raw fetch and reach the provider unmasked; pi's own requests stay guarded.",
     "transports.http: a run without the extension, or with --no-extensions, is not protected at all.",
     "surfaces.toolArgs: shell restoration covers a literal argument; pipelines, chaining, expansions and a tokenized redirect target refuse the call.",
+    "surfaces.toolArgs: a codemode script that prints a placeholder through text()/return hands the placeholder, not the original, to the model.",
   ],
 };

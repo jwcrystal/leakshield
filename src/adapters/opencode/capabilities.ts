@@ -36,6 +36,7 @@ export const OPENCODE_CAPABILITIES: HostCapabilities = {
       state: "protected",
       mechanism: "the tool gate restores known safe arguments and refuses unsafe mappings",
       evidence: "tests/opencode-tool-policy.test.ts",
+      note: "A tool holding a placeholder can still send it; `curl` and `http` restore inside an argument by design. Unlike pi, unknown tools restore by field instead of refusing, because they run in the host process (ADR-0001, ADR-0006).",
     },
     replyDisplay: {
       state: "protected",

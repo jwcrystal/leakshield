@@ -133,4 +133,38 @@ describe("pi tool policy", () => {
     expect(() => assertPiToolBoundary("read", { path: token })).not.toThrow();
     expect(() => assertPiToolBoundary("mcp__remote__send", { text: "no placeholder" })).not.toThrow();
   });
+  it("names the refused tool in the error", async () => {
+    const core = coreWith(["PI_TEST_SECRET"]);
+    const token = await mint(core, "use PI_TEST_SECRET here");
+    expect(() => assertPiToolBoundary("mcp__remote__send", { text: token })).toThrow("`mcp__remote__send`");
+  });
+  it("keeps a codemode script literal and restores at the inner call", async () => {
+    const core = coreWith(["PI_TEST_SECRET"]);
+    const token = await mint(core, "use PI_TEST_SECRET here");
+    const source = `const v = ${JSON.stringify(token)};\ntools.bash({ command: "cat " + v });`;
+    expect(restore(core, "codemode", { code: source })).toEqual({ code: source });
+    // The sandbox re-fires the hook with evaluated arguments; that is where
+    // the shell rule applies.
+    expect(restore(core, "bash", { command: `cat ${token}` })).toEqual({ command: "cat PI_TEST_SECRET" });
+  });
+  it("keeps a stale placeholder in a codemode script literal", async () => {
+    const core = coreWith(["PI_TEST_SECRET"]);
+    const stale = await staleToken();
+    const source = `return ${JSON.stringify(stale)};`;
+    expect(restore(core, "codemode", { code: source })).toEqual({ code: source });
+  });
+  it("lets codemode through the boundary and still refuses an unknown inner tool", async () => {
+    const core = coreWith(["PI_TEST_SECRET"]);
+    const token = await mint(core, "use PI_TEST_SECRET here");
+    expect(() => assertPiToolBoundary("codemode", { code: `tools.bash({ command: "${token}" });` })).not.toThrow();
+    expect(() => assertPiToolBoundary("mcp__remote__send", { query: token })).toThrow();
+  });
+  it("treats only a codemode call with a code string as code mode", async () => {
+    const core = coreWith(["PI_TEST_SECRET"]);
+    const token = await mint(core, "use PI_TEST_SECRET here");
+    expect(piToolPolicy.isCodeModeCall({ tool: "codemode", input: { code: token } })).toBe(true);
+    expect(piToolPolicy.isCodeModeCall({ tool: "codemode", input: { code: 1 } })).toBe(false);
+    expect(piToolPolicy.isCodeModeCall({ tool: "bash", input: { code: token } })).toBe(false);
+    expect(() => assertPiToolBoundary("codemode", { script: token })).toThrow();
+  });
 });

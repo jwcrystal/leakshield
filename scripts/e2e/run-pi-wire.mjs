@@ -5,7 +5,7 @@
  * Registers the built extension in a temporary pi agent directory and runs
  * real pi 1.6.0 against a recording loopback stub for one wire format:
  *
- *   node scripts/e2e/run-pi-wire.mjs <pi-binary> <api>
+ *   node scripts/e2e/run-pi-wire.mjs <pi-binary> <api> [--package <installed-dir>]
  *
  * `api` is openai-completions, anthropic-messages or openai-responses.
  * Asserts the provider received only placeholders and that pi displayed the
@@ -22,11 +22,13 @@ import { PSEUDONYM_TOKEN_PREFIX_V2 } from "../../dist/decision/pseudonymization.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const piBinary = process.argv[2];
 const api = process.argv[3];
+const packageDir = process.argv[4] === "--package" && process.argv[5]
+  ? path.resolve(process.argv[5]) : undefined;
 if (piBinary === undefined || !["openai-completions", "anthropic-messages", "openai-responses"].includes(api)) {
-  console.error("usage: node scripts/e2e/run-pi-wire.mjs <pi-binary> <openai-completions|anthropic-messages|openai-responses>");
+  console.error("usage: node scripts/e2e/run-pi-wire.mjs <pi-binary> <openai-completions|anthropic-messages|openai-responses> [--package <installed-dir>]");
   process.exit(2);
 }
-const extensionPath = path.join(root, "dist/adapters/pi/extension.js");
+const extensionPath = path.join(packageDir ?? root, "dist/adapters/pi/extension.js");
 if (!fs.existsSync(extensionPath)) {
   console.error(`missing ${extensionPath}; run npm run build first`);
   process.exit(2);
@@ -50,7 +52,7 @@ fs.mkdirSync(agentDir, { recursive: true });
 fs.mkdirSync(work, { recursive: true });
 fs.writeFileSync(
   path.join(agentDir, "settings.json"),
-  `${JSON.stringify({ defaultProvider: "stub", defaultModel: "stub-model", extensions: [extensionPath] }, null, 2)}\n`,
+  `${JSON.stringify({ defaultProvider: "stub", defaultModel: "stub-model", ...(packageDir ? {} : { extensions: [extensionPath] }) }, null, 2)}\n`,
 );
 fs.writeFileSync(
   path.join(tmp, "guard.config.yaml"),
@@ -124,6 +126,26 @@ fs.writeFileSync(
 );
 
 try {
+  const packageEnv = {
+    ...process.env,
+    HOME: tmp,
+    PI_CODING_AGENT_DIR: agentDir,
+    LEAKSHIELD_CONFIG: path.join(tmp, "guard.config.yaml"),
+    PI_OFFLINE: "1",
+    PI_SKIP_VERSION_CHECK: "1",
+    PATH: `${path.dirname(path.resolve(piBinary))}${path.delimiter}${process.env.PATH ?? ""}`,
+  };
+  if (packageDir) {
+    const install = await runPackageCommand(piBinary, ["install", packageDir], packageEnv);
+    pass(`${api}: pi install exits 0`, install.code === 0, install.stderr);
+    const settings = JSON.parse(fs.readFileSync(path.join(agentDir, "settings.json"), "utf8"));
+    pass(`${api}: installed through settings.packages only`, settings.packages?.some(
+      (entry) => typeof entry === "string" && path.resolve(agentDir, entry) === packageDir,
+    ) && !settings.extensions?.length);
+    const doctor = await runPackageCommand(process.execPath, [path.join(packageDir, "dist/cli.js"), "--doctor", "pi"], packageEnv);
+    pass(`${api}: packaged doctor recognizes package with PARTIAL coverage`,
+      doctor.code === 0 && doctor.stdout.includes("settings.packages") && doctor.stdout.includes("PARTIAL"), doctor.stdout + doctor.stderr);
+  }
   const result = await new Promise((resolve) => {
     const child = spawn(
       piBinary,
@@ -176,6 +198,11 @@ try {
     requests.some((request) => (request.body.match(TOKEN) ?? []).length > 0),
   );
   pass(`${api}: reply was restored for display`, result.stdout.includes(CANARY), `stdout=${JSON.stringify(result.stdout.slice(0, 200))}`);
+  if (packageDir) {
+    const remove = await runPackageCommand(piBinary, ["remove", packageDir], packageEnv);
+    const settings = JSON.parse(fs.readFileSync(path.join(agentDir, "settings.json"), "utf8"));
+    pass(`${api}: pi remove clears package registration`, remove.code === 0 && settings.packages?.length === 0);
+  }
 } finally {
   await new Promise((resolve) => stub.close(resolve));
   if (failures.length === 0) fs.rmSync(tmp, { recursive: true, force: true });
@@ -187,3 +214,15 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(`${api}: wire check passed`);
+
+async function runPackageCommand(command, args, env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd: work, env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "", stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const timer = setTimeout(() => child.kill("SIGTERM"), 30000);
+    child.once("error", (error) => { clearTimeout(timer); reject(error); });
+    child.once("close", (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
+  });
+}

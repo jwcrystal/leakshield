@@ -15,6 +15,7 @@
   "keywords": [
     "opencode",
     "opencode-plugin",
+    "pi-package",
     "secrets",
     "pii",
     "redaction",
@@ -36,6 +37,9 @@
     "dist",
     "NOTICE"
   ],
+  "pi": {
+    "extensions": ["./dist/adapters/pi/extension.js"]
+  },
   "engines": {
     "node": ">=20"
   },

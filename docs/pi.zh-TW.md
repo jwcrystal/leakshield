@@ -18,6 +18,26 @@ pi 自己的 provider 流量不管 LeakShield 排在第幾個都會被守到：S
 
 ## 安裝
 
+LeakShield 同時是 pi 套件：manifest 指向編譯後的 extension，套件預設入口仍供 OpenCode plugin 使用。下一版發布後可執行：
+
+```bash
+pi install npm:leakshield
+```
+
+目前 npm 0.3.1 尚未包含 pi 支援。新版發布前，先建置 checkout，再註冊整個套件目錄：
+
+```bash
+npm ci
+npm run build
+pi install "$PWD"
+```
+
+pi 會寫入 `settings.packages`，依 `package.json` 找到 extension；不用再把同一份 extension 加進 `settings.extensions`。用 `pi remove <同一來源>` 移除註冊。`pi install` 不會把 `leakshield` 指令加入 shell PATH；原始碼安裝可用 `node dist/cli.js --doctor pi`，pi 管理的 npm 安裝可用 `node ~/.pi/agent/npm/node_modules/leakshield/dist/cli.js --doctor pi`（自訂 `PI_CODING_AGENT_DIR` 時請調整路徑）。
+
+doctor 可辨識使用者設定中的 npm 與本機目錄註冊，並檢查已安裝 manifest 的入口宣告與檔案。套件、CLI、專案之間的載入順序無法確認，因此回報 `PARTIAL`。空的 extension 篩選陣列會回報停用；其他資源篩選、git 來源與僅專案註冊則維持未驗證。這是設定檢查，不代表 pi 已成功載入；安裝後仍應用合成 canary 試跑。套件安裝或載入失敗時，pi 可能只警告並繼續執行。
+
+### 直接指定 extension 路徑
+
 把 extension 加進 pi `settings.json`（`~/.pi/agent/settings.json`）。建議排在第一個，讓更早載入的 extension 拿不到原始 fetch：
 
 ```json
@@ -167,6 +187,7 @@ mapping 預設只在行程存活期間有效：resume 後的舊 placeholder 維�
 ## 驗證
 
 - `node scripts/e2e/run-pi-wire.mjs <pi> openai-completions|anthropic-messages|openai-responses`：真實 pi + 錄製 stub，每種格式一個請求，stub 只看到 placeholder，顯示有還原。
+- `node scripts/e2e/run-pi-package.mjs <pi 絕對路徑>`：建置後將 npm 打包產物安裝到隔離目錄，用真實 pi 1.6.0 驗證套件安裝、入口發現、doctor 與移除，涵蓋三種 API。不發布套件、不用真實 provider 金鑰；依賴從 npm 安裝。見[套件安裝驗證](evidence/2026-11-24-pi-package-install.md)。
 - `node scripts/e2e/run-pi-extension.mjs <pi>`：真實 pi，腳本化 read → write → edit → bash → `--continue`，原值只到得了本機工具。
 - `node scripts/e2e/run-pi-compaction-refusal.mjs <pi>`：真實 pi，先在受保護模型上建立對話，再切到 `bedrock-converse-stream`；手動 compaction 會被取消，provider 收不到任何請求。
 - `node scripts/e2e/run-pi-config-refusal.mjs <pi>`：`LEAKSHIELD_PI_PERSIST` 設成不合法值時，pi 以 `Failed to load extension`、exit 1 結束，且沒有送出請求。

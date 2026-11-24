@@ -18,6 +18,7 @@
 | 各 transport 是否支援（Responses WS、AI SDK） | [Responses WS](2026-10-11-responses-ws-verification.md)、[AI SDK HTTP](2026-10-11-aisdk-http-verification.md) |
 | Claude Code 經本機 proxy 是否遮罩與還原 | [Claude Code proxy 驗證 2026-11-21](2026-11-21-claude-code-proxy.md) |
 | pi 行程內 extension：遮罩、工具還原、session 續用 | [pi extension 驗證 2026-11-23](2026-11-23-pi-extension.md) |
+| pi 套件入口、打包安裝與移除是否可用 | [pi 套件安裝驗證 2026-11-24](2026-11-24-pi-package-install.md) |
 | pi hook-only 是否可行、例外與取消是否能阻擋 | [pi hook-only 雲端驗證 2026-11-23](2026-11-23-pi-hook-only-feasibility.md) |
 
 ## 比較
@@ -37,6 +38,7 @@
 
 | 日期 | 檔案 | 狀態 |
 |---|---|---|
+| 11-24 | [pi 套件入口與打包安裝驗證](2026-11-24-pi-package-install.md) | 現行（Node 22.19／24，三種 API） |
 | 11-23 | [pi hook-only：內容 hooks、背景請求與明確取消（#118）](2026-11-23-pi-hook-only-feasibility.md) | 研究（37 情境、146 斷言；尚非正式模式） |
 | 11-23 | [pi extension：行程內遮罩、工具還原、session 續用（#98）](2026-11-23-pi-extension.md) | 現行 |
 | 11-23 | [pi adapter：受管啟動版（已由 extension 取代）](2026-11-23-pi-adapter.md) | 已被取代 |

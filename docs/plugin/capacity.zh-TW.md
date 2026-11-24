@@ -2,7 +2,7 @@
 
 > 🌐 [English](./capacity.md) | 繁體中文
 
-[← README](../../README.zh-TW.md#opencode-plugin建議使用)
+[← OpenCode plugin](../opencode.zh-TW.md)
 
 guard 每次遮罩／還原操作使用輸入＋輸出合計 8 Mi UTF-16 units、100,000 個 value nodes 的有限預算，不再把 standalone core 的 1 Mi-unit 小預算套在整份歷史。HTTP body／WS frame 仍限 4 MiB；scanner `max_chars`、深度 32、mapping entry 與總記憶體預算仍檢查。每個 guard 最多保留 4,096 個 session，不用 LRU 任意丟棄仍可續用的 mapping。
 

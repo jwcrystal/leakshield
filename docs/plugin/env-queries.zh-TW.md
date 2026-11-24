@@ -2,7 +2,7 @@
 
 > 🌐 [English](./env-queries.md) | 繁體中文
 
-[← README](../../README.zh-TW.md#opencode-plugin建議使用)
+[← OpenCode plugin](../opencode.zh-TW.md)
 
 `envQueries` 選項（預設 `false`）針對 `settings.env_files` 所列檔案提供三個唯讀工具，讓 agent 能回答設定問題而不看到任何 value。這個選項不支援 transparent 模式，所以在 v2 要明確設定 `mode` 為 `block` 或 `redact`：
 

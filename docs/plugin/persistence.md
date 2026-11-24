@@ -2,7 +2,7 @@
 
 > 🌐 English | [繁體中文](./persistence.zh-TW.md)
 
-[← README](../../README.md#opencode-plugin-recommended)
+[← OpenCode plugin](../opencode.md)
 
 > ⚠️ Read the [persistence risk notes](../../README.md#persistence-risk-notes-read-before-enabling) before enabling.
 

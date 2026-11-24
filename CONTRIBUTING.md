@@ -16,7 +16,15 @@ npm test
 
 CI runs both on every pull request.
 
-Host end-to-end checks need a local OpenCode binary (`opencode` on `PATH` or `OPENCODE_BIN`): see `scripts/e2e/` and [`scripts/e2e/compare/README.md`](scripts/e2e/compare/README.md). They use a loopback provider and synthetic values; no credentials are needed.
+Host end-to-end checks live in `scripts/e2e/` and need the host binary installed locally. Run `npm run build` first. They use a loopback or recording stub provider and synthetic values; no credentials are needed.
+
+| Host | Needs | Scripts |
+|------|-------|---------|
+| OpenCode | `opencode` on `PATH` or `OPENCODE_BIN` | `run-boundary.mjs` and others in `scripts/e2e/`; see [`scripts/e2e/README.md`](scripts/e2e/README.md) and [`scripts/e2e/compare/README.md`](scripts/e2e/compare/README.md) |
+| pi | a pi 1.6 binary (pass its path) | `run-pi-*.mjs`; see [Verification in docs/pi.md](docs/pi.md#verification) |
+| Claude Code | `claude` on `PATH` | `scripts/e2e/claude-code/run.mjs [--scenario mask\|refuse]`; see the [verification record](docs/evidence/2026-11-21-claude-code-proxy.md) |
+
+A change to shared code (`src/core/`, the scanner or rules) can affect every host; run the checks for each host you have available and say in the pull request which ones you ran.
 
 ## Guidelines
 

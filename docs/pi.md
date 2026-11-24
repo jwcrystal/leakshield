@@ -18,6 +18,26 @@ pi's own provider traffic is guarded wherever LeakShield sits in the load order:
 
 ## Install
 
+LeakShield is also a pi package: its manifest points pi at the compiled extension, while the default package entry remains the OpenCode plugin. After the next release, install it with:
+
+```bash
+pi install npm:leakshield
+```
+
+The currently published npm 0.3.1 does not include pi support. Until a newer version is published, build a checkout and register the package directory:
+
+```bash
+npm ci
+npm run build
+pi install "$PWD"
+```
+
+pi records this in `settings.packages` and discovers the extension from `package.json`; do not also add the same extension to `settings.extensions`. `pi remove <same-source>` removes the registration. `pi install` does not add the `leakshield` command to your shell PATH. To check a source build, run `node dist/cli.js --doctor pi`; for a pi-managed npm install, run `node ~/.pi/agent/npm/node_modules/leakshield/dist/cli.js --doctor pi` (adjust for `PI_CODING_AGENT_DIR`).
+
+Doctor recognizes user npm and local-directory registrations when the installed manifest declares the extension and its file exists. It reports `PARTIAL` because package/CLI/project load order is not verified. Empty extension filters are reported as disabled; other resource filters, git sources and project-only registrations are not verified. This is a configuration check, not proof that pi loaded the package; after installation, try a synthetic canary. pi may warn and continue without a package that failed to install or load.
+
+### Explicit extension path
+
 Add the extension to pi's `settings.json` (`~/.pi/agent/settings.json`). First position is recommended so that an extension loaded earlier cannot hold the raw fetch:
 
 ```json
@@ -167,6 +187,7 @@ The declared coverage, and the residuals that qualify it, are printed by `leaksh
 ## Verification
 
 - `node scripts/e2e/run-pi-wire.mjs <pi> openai-completions|anthropic-messages|openai-responses` — real pi, recording stub, one request per format, placeholder at the stub, restored display.
+- `node scripts/e2e/run-pi-package.mjs <absolute-pi-path>` — after building, packs and installs the npm artifact into an isolated directory, then uses real pi 1.6.0 to install/discover/check/remove that local package on all three APIs. No publishing or live provider credentials; dependencies install from npm. See the [package-install evidence](evidence/2026-11-24-pi-package-install.md).
 - `node scripts/e2e/run-pi-extension.mjs <pi>` — real pi, scripted read → write → edit → bash → `--continue`, with the original values reaching only the local tools.
 - `node scripts/e2e/run-pi-compaction-refusal.mjs <pi>` — real pi, a conversation on a guarded model, then a switch to a `bedrock-converse-stream` model: manual compaction is cancelled and nothing reaches the provider.
 - `node scripts/e2e/run-pi-config-refusal.mjs <pi>` — an invalid `LEAKSHIELD_PI_PERSIST` value: pi exits 1 with `Failed to load extension` and no request.

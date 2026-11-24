@@ -20,7 +20,7 @@ MCP server mode has been removed. It depended on the model voluntarily calling a
 | Mode | Start it with | Use it for |
 |------|---------------|------------|
 | OpenCode Plugin | Add the `leakshield` package or the `dist` directory to `opencode.json` (OpenCode v2) | Automatic, fail-closed protection for OpenCode model inputs and tool outputs |
-| pi adapter | `pi -e node_modules/leakshield/dist/adapters/pi/extension.js` (or first in pi `settings.extensions`) | Masked pi provider requests and restored read/write/edit/bash arguments |
+| pi adapter | `pi install /absolute/path/to/built/leakshield` (next npm release: `pi install npm:leakshield`; [setup](docs/pi.md)) | Masked pi provider requests and restored read/write/edit/bash arguments |
 | CLI | `npm run scan -- --file ./path` (or `leakshield --file ./path` after a global install / `npm link`) | Explicit local or CI scans; it never sends content to a model |
 | Web UI | `npm run web` | Manual browser scans at `http://localhost:3000` |
 

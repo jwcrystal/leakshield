@@ -70,6 +70,48 @@ export function extensionIndex(
   );
 }
 
+/** Inspect the standard user npm install or a local package, without loading it.
+ * Resource filters and actual extension ordering need host/runtime inspection. */
+function packageRegistrationCheck(agent: PiUserAgent, deps: PiDoctorDeps): DoctorCheck | null {
+  const check = (state: DoctorCheck["state"], detail: string): DoctorCheck => ({
+    id: "pi-extension-registered", state, detail,
+  });
+  for (const entry of agent.settings.packages ?? []) {
+    const options = entry !== null && typeof entry === "object" && !Array.isArray(entry)
+      ? entry as Record<string, unknown> : undefined;
+    const source = typeof entry === "string" ? entry : options?.source;
+    if (typeof source !== "string") continue;
+    const npm = /^npm:leakshield(?:@[^\s]+)?$/.test(source);
+    const local = path.isAbsolute(source) || source.startsWith("./") || source.startsWith("../") || source.startsWith("~/");
+    if (!npm && !local) continue;
+    const root = npm ? path.join(agent.agentDir, "npm", "node_modules", "leakshield")
+      : source.startsWith("~/") ? path.join(deps.home, source.slice(2)) : path.resolve(agent.agentDir, source);
+    let manifest: { name?: string; pi?: { extensions?: unknown[] } } | null = null;
+    try {
+      const raw = deps.readFile(path.join(root, "package.json"));
+      if (raw !== null) manifest = JSON.parse(raw);
+    } catch { /* An unreadable manifest cannot verify registration. */ }
+    if (!npm && manifest?.name !== "leakshield") continue;
+    if (manifest?.name !== "leakshield") {
+      return check("fail", `LeakShield is configured in settings.packages but its installed manifest is missing or invalid at ${root}. Reinstall the package.`);
+    }
+    if (options?.extensions !== undefined) {
+      if (Array.isArray(options.extensions) && options.extensions.length === 0) {
+        return check("fail", "LeakShield's settings.packages entry disables all extensions.");
+      }
+      return check("skip", "LeakShield has package extension filters; this check cannot verify that they enable the guard. Inspect pi config or register the extension path explicitly.");
+    }
+    const extension = path.join(root, "dist", "adapters", "pi", "extension.js");
+    if (!Array.isArray(manifest.pi?.extensions) || !manifest.pi.extensions.some(
+      (entry) => typeof entry === "string" && path.resolve(root, entry) === extension,
+    ) || !deps.fileExists(extension)) {
+      return check("fail", `LeakShield's package at ${root} does not provide its declared pi extension. Install a version that includes pi support.`);
+    }
+    return check("warn", `LeakShield is registered in settings.packages (${source}); its manifest and extension exist. Package/CLI/project load order is not verified; earlier extensions can retain the raw fetch.`);
+  }
+  return null;
+}
+
 export async function runPiDoctor(deps: PiDoctorDeps): Promise<DoctorCheck[]> {
   const checks: DoctorCheck[] = [];
   const version = deps.piVersion();
@@ -149,10 +191,10 @@ export async function runPiDoctor(deps: PiDoctorDeps): Promise<DoctorCheck[]> {
     const entries = (agent.settings.extensions ?? []).filter((entry): entry is string => typeof entry === "string");
     const index = extensionIndex(entries, extensionPath, deps.cwd, agent.agentDir);
     if (index === -1) {
-      checks.push({
+      checks.push(packageRegistrationCheck(agent, deps) ?? {
         id: "pi-extension-registered",
         state: "skip",
-        detail: "LeakShield is not in pi settings.extensions; a run started with `-e` cannot be seen from here.",
+        detail: "LeakShield was not verified in user settings.extensions or supported settings.packages entries; CLI -e and project/git packages are not verified here.",
         fix: `Add "${extensionPath}" first in settings.extensions to make this check meaningful, or keep using -e (which always loads before settings extensions).`,
       });
     } else if (index > 0) {

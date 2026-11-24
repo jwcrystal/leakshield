@@ -250,6 +250,14 @@ installing.
 
 Can't use Node.js or npm? Build a standalone binary with [Bun](https://bun.sh) — no runtime needed on the target machine.
 
+The binary is the CLI compiled into one executable (`src/cli.ts`), not a separate mode:
+
+| Feature | Binary |
+|---------|--------|
+| CLI scan and redaction, Web UI | Supported |
+| `--claude-code-proxy`, `--doctor` | Included but not verified in a Bun-compiled binary; use the npm package for host protection |
+| OpenCode plugin, pi extension | Not available: the host loads the npm package, not an executable |
+
 ```bash
 # One-command build for current platform
 npm run binary

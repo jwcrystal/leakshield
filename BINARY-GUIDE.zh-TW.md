@@ -2,6 +2,8 @@
 
 你手上是一個 `leakshield`（或 `leakshield.exe`）單一執行檔。不用 Node.js、不用 npm，直接跑。
 
+它是 LeakShield CLI 的執行檔版本：用來明確掃描、脫敏和開 Web UI，本身不會保護 AI agent。OpenCode plugin 和 pi extension 由宿主從 npm 套件載入，Claude Code proxy 也還沒在這個執行檔中驗證過；要保護這些宿主，請安裝 npm 套件（`npm install -g leakshield`），並參考 [README](https://github.com/jwcrystal/leakshield/blob/main/README.zh-TW.md#快速開始)。
+
 ## 執行
 
 ```bash

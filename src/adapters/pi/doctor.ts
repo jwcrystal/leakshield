@@ -71,21 +71,24 @@ export function extensionIndex(
 }
 
 /** Inspect the standard user npm install or a local package, without loading it.
- * Resource filters and actual extension ordering need host/runtime inspection. */
+ * Resource filters and actual extension ordering need host/runtime inspection.
+ * A valid registration anywhere in the list wins; otherwise the first broken
+ * or unverifiable LeakShield entry is reported. */
 function packageRegistrationCheck(agent: PiUserAgent, deps: PiDoctorDeps): DoctorCheck | null {
   const check = (state: DoctorCheck["state"], detail: string): DoctorCheck => ({
     id: "pi-extension-registered", state, detail,
   });
+  let fallback: DoctorCheck | null = null;
   for (const entry of agent.settings.packages ?? []) {
     const options = entry !== null && typeof entry === "object" && !Array.isArray(entry)
       ? entry as Record<string, unknown> : undefined;
     const source = typeof entry === "string" ? entry : options?.source;
     if (typeof source !== "string") continue;
     const npm = /^npm:leakshield(?:@[^\s]+)?$/.test(source);
-    const local = path.isAbsolute(source) || source.startsWith("./") || source.startsWith("../") || source.startsWith("~/");
+    const local = path.isAbsolute(source) || /^(?:\.{1,2}|~)[\\/]/.test(source);
     if (!npm && !local) continue;
     const root = npm ? path.join(agent.agentDir, "npm", "node_modules", "leakshield")
-      : source.startsWith("~/") ? path.join(deps.home, source.slice(2)) : path.resolve(agent.agentDir, source);
+      : /^~[\\/]/.test(source) ? path.join(deps.home, source.slice(2)) : path.resolve(agent.agentDir, source);
     let manifest: { name?: string; pi?: { extensions?: unknown[] } } | null = null;
     try {
       const raw = deps.readFile(path.join(root, "package.json"));
@@ -93,23 +96,34 @@ function packageRegistrationCheck(agent: PiUserAgent, deps: PiDoctorDeps): Docto
     } catch { /* An unreadable manifest cannot verify registration. */ }
     if (!npm && manifest?.name !== "leakshield") continue;
     if (manifest?.name !== "leakshield") {
-      return check("fail", `LeakShield is configured in settings.packages but its installed manifest is missing or invalid at ${root}. Reinstall the package.`);
+      fallback ??= check("fail", `LeakShield is configured in settings.packages but its installed manifest is missing or invalid at ${root}. Reinstall the package.`);
+      continue;
     }
     if (options?.extensions !== undefined) {
-      if (Array.isArray(options.extensions) && options.extensions.length === 0) {
-        return check("fail", "LeakShield's settings.packages entry disables all extensions.");
-      }
-      return check("skip", "LeakShield has package extension filters; this check cannot verify that they enable the guard. Inspect pi config or register the extension path explicitly.");
+      fallback ??= Array.isArray(options.extensions) && options.extensions.length === 0
+        ? check("fail", "LeakShield's settings.packages entry disables all extensions.")
+        : check("skip", "LeakShield has package extension filters; this check cannot verify that they enable the guard. Inspect pi config or register the extension path explicitly.");
+      continue;
     }
     const extension = path.join(root, "dist", "adapters", "pi", "extension.js");
     if (!Array.isArray(manifest.pi?.extensions) || !manifest.pi.extensions.some(
       (entry) => typeof entry === "string" && path.resolve(root, entry) === extension,
     ) || !deps.fileExists(extension)) {
-      return check("fail", `LeakShield's package at ${root} does not provide its declared pi extension. Install a version that includes pi support.`);
+      fallback ??= check("fail", `LeakShield's package at ${root} does not provide its declared pi extension. Install a version that includes pi support.`);
+      continue;
     }
     return check("warn", `LeakShield is registered in settings.packages (${source}); its manifest and extension exist. Package/CLI/project load order is not verified; earlier extensions can retain the raw fetch.`);
   }
-  return null;
+  return fallback;
+}
+
+/** Adds a hint, without changing the state, when settings.packages also names LeakShield. */
+function withDuplicateNote(agent: PiUserAgent, deps: PiDoctorDeps, registered: DoctorCheck): DoctorCheck {
+  if (packageRegistrationCheck(agent, deps) === null) return registered;
+  return {
+    ...registered,
+    detail: `${registered.detail}. LeakShield is also listed in settings.packages, so pi may load it twice; keep only one registration.`,
+  };
 }
 
 export async function runPiDoctor(deps: PiDoctorDeps): Promise<DoctorCheck[]> {
@@ -199,18 +213,18 @@ export async function runPiDoctor(deps: PiDoctorDeps): Promise<DoctorCheck[]> {
       });
     } else if (index > 0) {
       const earlier = entries.slice(0, index).join(", ");
-      checks.push({
+      checks.push(withDuplicateNote(agent, deps, {
         id: "pi-extension-registered",
         state: "warn",
         detail: `LeakShield is extension #${index + 1}; ${earlier} loads first and can keep the raw fetch. pi's own requests are still guarded.`,
         fix: "Move the LeakShield entry to the top of settings.extensions so no earlier extension can hold the raw fetch.",
-      });
+      }));
     } else {
-      checks.push({
+      checks.push(withDuplicateNote(agent, deps, {
         id: "pi-extension-registered",
         state: "ok",
         detail: "LeakShield is the first entry of settings.extensions (CLI -e and package entries are not visible to this check)",
-      });
+      }));
     }
 
     const selected = resolvePiSelectedModel(agent, deps.env);

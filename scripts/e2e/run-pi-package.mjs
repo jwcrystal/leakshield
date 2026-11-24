@@ -15,7 +15,10 @@ const pi = process.argv[2];
 if (!pi || !path.isAbsolute(pi)) throw new Error("Pass an absolute path to pi 1.6.0");
 assert.equal(spawnSync(pi, ["--version"], { encoding: "utf8", timeout: 10000 }).stdout.trim(), "1.6.0");
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-pi-package-"));
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+// Node >=20.12 refuses to spawn npm.cmd without a shell, and a shell would split
+// temp paths that contain spaces, so on Windows run npm's JS entry with node.
+const npmCli = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+const npm = (args) => process.platform === "win32" ? [process.execPath, [npmCli, ...args]] : ["npm", args];
 let complete = false;
 function run(command, args, cwd = root) {
   const result = spawnSync(command, args, { cwd, encoding: "utf8", timeout: 60000 });
@@ -24,10 +27,10 @@ function run(command, args, cwd = root) {
 }
 try {
   assert.ok(fs.existsSync(path.join(root, "dist/adapters/pi/extension.js")), "Run npm run build first");
-  const packed = JSON.parse(run(npm, ["pack", "--ignore-scripts", "--json", "--pack-destination", tmp, "--cache", path.join(tmp, "cache")]));
+  const packed = JSON.parse(run(...npm(["pack", "--ignore-scripts", "--json", "--pack-destination", tmp, "--cache", path.join(tmp, "cache")])));
   assert.ok(packed[0].files.some((file) => file.path === "dist/adapters/pi/extension.js"));
   const prefix = path.join(tmp, "installed");
-  run(npm, ["install", "--prefix", prefix, "--cache", path.join(tmp, "cache"), "--ignore-scripts", "--omit=dev", "--no-audit", "--no-fund", path.join(tmp, packed[0].filename)]);
+  run(...npm(["install", "--prefix", prefix, "--cache", path.join(tmp, "cache"), "--ignore-scripts", "--omit=dev", "--no-audit", "--no-fund", path.join(tmp, packed[0].filename)]));
   const installed = path.join(prefix, "node_modules", "leakshield");
   const manifest = JSON.parse(fs.readFileSync(path.join(installed, "package.json"), "utf8"));
   assert.deepEqual(manifest.pi.extensions, ["./dist/adapters/pi/extension.js"]);

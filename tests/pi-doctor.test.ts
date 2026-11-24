@@ -169,6 +169,30 @@ describe("pi doctor", () => {
     },
   );
 
+  it("prefers a valid package registration over an earlier broken one", async () => {
+    const files = agent({ defaultProvider: "anthropic", packages: ["npm:leakshield", "/pkg"] }, ANTHROPIC);
+    files["/pkg/package.json"] = JSON.stringify({ name: "leakshield", pi: { extensions: ["./dist/adapters/pi/extension.js"] } });
+    const checks = await runPiDoctor(deps(files));
+    expect(stateOf(checks, "pi-extension-registered")).toBe("warn");
+    expect(checksDetail(checks, "pi-extension-registered")).toContain("(/pkg)");
+  });
+
+  it("resolves a home-relative package written with a Windows separator", async () => {
+    const root = "/home/test/pkg";
+    const files = agent({ defaultProvider: "anthropic", packages: ["~\\pkg"] }, ANTHROPIC);
+    files[`${root}/package.json`] = JSON.stringify({ name: "leakshield", pi: { extensions: ["./dist/adapters/pi/extension.js"] } });
+    const checks = await runPiDoctor(deps(files, { fileExists: (file) => file === EXTENSION || file === `${root}/dist/adapters/pi/extension.js` }));
+    expect(stateOf(checks, "pi-extension-registered")).toBe("warn");
+  });
+
+  it("notes a duplicate package registration without changing the extension verdict", async () => {
+    const files = agent({ defaultProvider: "anthropic", extensions: [EXTENSION], packages: ["/pkg"] }, ANTHROPIC);
+    files["/pkg/package.json"] = JSON.stringify({ name: "leakshield", pi: { extensions: ["./dist/adapters/pi/extension.js"] } });
+    const checks = await runPiDoctor(deps(files));
+    expect(stateOf(checks, "pi-extension-registered")).toBe("ok");
+    expect(checksDetail(checks, "pi-extension-registered")).toContain("may load it twice");
+  });
+
   it("reports a later position as partial rather than protected", async () => {
     const checks = await runPiDoctor(
       deps(agent({ defaultProvider: "anthropic", extensions: ["/other/before.js", EXTENSION] }, ANTHROPIC)),

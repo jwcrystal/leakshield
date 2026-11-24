@@ -25,7 +25,7 @@ const api = process.argv[3];
 const packageDir = process.argv[4] === "--package" && process.argv[5]
   ? path.resolve(process.argv[5]) : undefined;
 if (piBinary === undefined || !["openai-completions", "anthropic-messages", "openai-responses"].includes(api)) {
-  console.error("usage: node scripts/e2e/run-pi-wire.mjs <pi-binary> <openai-completions|anthropic-messages|openai-responses>");
+  console.error("usage: node scripts/e2e/run-pi-wire.mjs <pi-binary> <openai-completions|anthropic-messages|openai-responses> [--package <installed-dir>]");
   process.exit(2);
 }
 const extensionPath = path.join(packageDir ?? root, "dist/adapters/pi/extension.js");

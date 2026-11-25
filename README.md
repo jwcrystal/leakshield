@@ -31,7 +31,7 @@ MCP server mode has been removed. It depended on the model voluntarily calling a
 
 ## Project status
 
-**Experimental, `0.x`.** Published to npm as `leakshield`: run `npx leakshield --help` to see the commands, or build locally (`npm ci && npm run build`) and point a host at the build. Without arguments or input, the CLI waits on stdin.
+**Experimental, `0.x`.** Published to npm as `leakshield`: run `npx leakshield --help` to see the commands, or build locally (`npm ci && npm run build`) and point a host at the build. Run without arguments in a terminal, the CLI prints usage. When stdin is not a terminal (a pipe, CI or a script), it reads stdin until EOF, so close or redirect stdin there.
 
 None of the hosts is a guarantee that nothing sensitive reaches a model. `leakshield --doctor <host>` prints each host's declared coverage and residuals; the [host capability matrix](docs/host-capabilities.md) summarizes them.
 

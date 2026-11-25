@@ -67,3 +67,5 @@ See full options: [Configuration Reference](https://github.com/jwcrystal/leakshi
 ```bash
 ./leakshield    # shows usage and all options
 ```
+
+This applies when you run it in a terminal. In a pipe, CI or a script, where stdin is not a terminal, it reads stdin until EOF instead; close or redirect stdin there so it does not wait.

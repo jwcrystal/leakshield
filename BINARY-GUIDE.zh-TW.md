@@ -65,3 +65,5 @@ mkdir -p ~/.leakshield
 ```bash
 ./leakshield    # 顯示所有用法與選項
 ```
+
+這是在終端機執行時的行為。在 pipe、CI 或腳本裡，stdin 不是終端機，它會改為讀取 stdin 直到 EOF；在這些環境請關閉或重導 stdin，以免一直等待。

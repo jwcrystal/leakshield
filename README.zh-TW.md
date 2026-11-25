@@ -31,7 +31,7 @@ MCP Server 模式已移除。它依賴模型在已收到相關 context 後自行
 
 ## 目前狀態
 
-**實驗性，`0.x` 版本。** 已發佈到 npm（`leakshield`）：可用 `npx leakshield --help` 查看指令，或在本機建置（`npm ci && npm run build`）再讓宿主指向建置結果。沒有參數也沒有輸入時，CLI 會等待 stdin。
+**實驗性，`0.x` 版本。** 已發佈到 npm（`leakshield`）：可用 `npx leakshield --help` 查看指令，或在本機建置（`npm ci && npm run build`）再讓宿主指向建置結果。在終端機不帶參數執行時，CLI 會印出用法。stdin 不是終端機時（pipe、CI 或腳本），它會讀取 stdin 直到 EOF，所以在這些環境請關閉或重導 stdin。
 
 沒有任何一個宿主能保證敏感內容絕不會送到模型。`leakshield --doctor <host>` 會印出各宿主宣告的涵蓋範圍與殘餘缺口，[宿主能力矩陣](docs/host-capabilities.md)是彙整版。
 

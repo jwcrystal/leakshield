@@ -128,6 +128,42 @@ settings:
 Allowlist entries are part of the config file, so they change its fingerprint
 (sha256 of the file), which is what authorizations compare against.
 
+### Label-gated PII
+
+The built-in rules recognise formats that stand on their own. Names, addresses,
+dates of birth, medical record numbers, passport numbers, US SSNs and MAC
+addresses do not: the same characters fill ordinary code and prose.
+`config/guard.config.example.yaml` ships a commented set of patterns for them.
+Every one fires only after a field label, except the Taiwan address shape, which
+is anchored on a city name instead.
+
+Four things were measured while writing them, and they are why the patterns
+look the way they do:
+
+- **Keep `flags: ""` on the name rule.** The default flag is `i`, so a `Name`
+  label also matches every `name:` key in code, CI job names and sentences such
+  as "Name this route". Over 18 lines of ordinary code and prose the
+  case-insensitive form produced 4 false matches; the case-sensitive form
+  produced none.
+- **Mask a free-text value together with its label.** A lookbehind with a
+  variable-width separator is matched right-to-left, so it can start at the
+  colon itself and redact the colon; matching label, separator and value as one
+  unit has no such edge, and restoration returns the same text.
+- **JSON keys arrive quoted.** A key such as `"mrn"` puts a `"` between the name
+  and the colon, so the separator class includes it; without that the rule never
+  fires on tool arguments or config dumps.
+- **The English address branch needs a colon and a digit.** An assignment named
+  `address` is common in code (`address = server.address()`), and on this
+  repository it produced 5 false matches before that gate. The Taiwan shape uses
+  a city list for the same reason: a generic `…市…區…路…號` also swallows the
+  verb in front of an address.
+
+The repository's own text is not a corpus for these shapes: scanning `src/`,
+`docs/`, `tests/` and `config/` (248 files) produced no match at all. A zero
+means the shapes are absent, not that a pattern is safe. Measure against your
+own traffic, and drop the labels you never use. The measurement record is
+[2026-11-25 label-gated PII](../evidence/2026-11-25-label-gated-pii.md).
+
 ## Configuration Validation
 
 Input lengths for dynamic rules are validated when the config is loaded:

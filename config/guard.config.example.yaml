@@ -46,6 +46,63 @@ custom_rules: []
 #
 # More options (flags, word_boundary, per-rule allow list) are described in
 # docs/configuration.md, "Custom Rules".
+# ─── PII the built-in rules do not cover ────────────────────────────────
+# Built-ins cover email, credit cards, IBAN, Taiwan national ID and public
+# IPv4. The patterns below add PII that is only recognisable next to a field
+# label: medical record numbers, dates of birth, names, addresses, US SSNs,
+# MAC addresses and passport numbers. They stay commented out on purpose.
+#
+# Why a label instead of a bare shape: in ordinary code and prose the same
+# characters are everywhere. `name:` is a key in almost every config, CI job
+# names look like person names, and a generic `…市…區…路…號` pattern also
+# matches the verb before the address. A label is what makes the match mean
+# "someone declared this field", which is the case that actually reaches a
+# model. Measure against your own traffic before enabling any of these.
+#
+# Copy the rules you need into the `custom_rules: []` list above. Keep each
+# `flags` line: `flags: ""` turns off the case-insensitive default, and
+# without it a `Name` label also matches every `name:` key in code.
+#
+# Not here on purpose — these need a check digit that a regular expression
+# cannot compute, so they can only be built-in rules:
+#   - passport MRZ line (ICAO 9303 check digits)
+#   - Taiwan 8-digit business number (統一編號)
+#
+# Two details these patterns depend on, learned the hard way:
+#   - JSON keys arrive quoted, so the separator class includes `"`. A single
+#     quote needs `''` inside YAML's single-quoted string and is left out.
+#   - The address rule matches label + separator + value as one unit. A
+#     lookbehind with a variable-width separator starts matching at the colon
+#     itself, which then disappears; masking the whole unit restores to the
+#     same text.
+#
+# custom_rules:
+#   - description: "Medical record number"
+#     pattern: '(?<=(?:病歷號|病歷編號|病歷|MRN|Medical Record (?:Number|No\.?)|Chart No\.?)[ \t:：#"=]{0,5})[A-Z]{0,3}-?\d{6,10}\b'
+#     severity: HIGH
+#   - description: "Date of birth"
+#     pattern: '(?<=(?:生日|出生年月日|出生日期|DOB|Date of Birth|Birthday)[ \t:：="]{0,5})\d{2,4}[-/.年]\d{1,2}[-/.月]\d{1,4}日?(?![0-9])'
+#     severity: MEDIUM
+#   - description: "Person name"
+#     pattern: '(?<=(?:姓名|Name)[ \t:：="]{0,5})(?:[\u4e00-\u9fff]{2,4}|[A-Z][a-z]+(?: [A-Z][a-z]+){1,2})(?=[\s,，。;；、\n"]|$)'
+#     severity: MEDIUM
+#     flags: ""
+#   - description: "Taiwan address"
+#     pattern: '(?:台北|新北|桃園|台中|台南|高雄|基隆|新竹|嘉義|苗栗|彰化|南投|雲林|屏東|宜蘭|花蓮|台東|澎湖|金門|連江)(?:市|縣)[\u4e00-\u9fff]{1,4}(?:區|鄉|鎮|市)[^\n，,。]{0,30}?(?:路|街|大道)[^\n，,。]{0,30}?號(?:\d+樓)?'
+#     severity: MEDIUM
+#   - description: "Address after a label"
+#     pattern: '(?:(?:地址|住址|通訊地址)[ \t]{0,2}[:：=][ \t]{0,2}|Address"?[ \t]{0,2}:[ \t]{0,2}(?=[^\n]{0,60}\d))[^\n]{4,60}'
+#     severity: MEDIUM
+#   - description: "US SSN"
+#     pattern: '\b(?!000|666|9\d{2})\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b'
+#     severity: HIGH
+#   - description: "MAC address"
+#     pattern: '\b(?:[0-9A-F]{2}[:-]){5}[0-9A-F]{2}\b'
+#     severity: LOW
+#     flags: "i"
+#   - description: "Passport number"
+#     pattern: '(?<=(?:護照(?:號碼|號)?|Passport(?: No\.?| Number)?)[ \t:：#"=]{0,5})(?=[A-Z0-9]*\d)[A-Z0-9]{6,9}\b'
+#     severity: HIGH
 
 # ─── Scan settings ──────────────────────────────────────────────────────
 settings:

@@ -69,7 +69,8 @@ export const PluginOptionsSchema = z
     message: "deidentify requires mode 'redact'",
   })
   .refine((options) => options.mode !== "transparent" || !options.envQueries, {
-    message: "envQueries is not supported in mode 'transparent'",
+    message:
+      "envQueries cannot be used in mode 'transparent'. In transparent mode the agent can read env files directly with their values masked; to keep env contents out of the conversation entirely, set mode to 'block' or 'redact'.",
   })
   .refine((options) => options.attachments === "block" || options.mode === "transparent", {
     message: 'attachments "allow" requires mode "transparent"',

@@ -730,6 +730,14 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     detail: `mode=${options.mode}${(weakest.entry.options as { mode?: unknown } | undefined)?.mode === undefined ? " (default)" : ""}${options.mode === "transparent" ? ` wireProtection=${options.wireProtection ?? true}` : ""}${options.attachments === "allow" ? " attachments=allow" : ""}${options.deidentify ? " +deidentify" : ""}${options.envQueries ? " +envQueries" : ""}${options.configPath ? ` configPath=${options.configPath}` : ""}${across}`,
   });
   checks.push(persistenceCheck(options, deps));
+  if (validated.some((candidate) => candidate.options.mode === "transparent" && candidate.options.envQueries)) {
+    checks.push({
+      id: "env-queries",
+      state: "warn",
+      detail: "envQueries is ignored in transparent mode; the guard_env_* tools are not registered.",
+      fix: 'Remove envQueries, or set mode to "block" or "redact" to use the env query tools.',
+    });
+  }
 
   // Guard config load. Every configured entry's guard config must load: the
   // weakest entry supplies the summary, but a broken configPath in another

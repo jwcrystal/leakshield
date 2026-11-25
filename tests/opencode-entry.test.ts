@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -581,7 +581,7 @@ describe("OpenCode plugin entry", () => {
     expect(typeof cleanup).toBe("function");
   });
 
-  it("fails closed on every route when transparent is combined with envQueries (v2 setup)", async () => {
+  it("sets up transparent mode and warns when envQueries is combined with it (v2 setup)", async () => {
     const registered: Array<{ domain: string; name: string; callback: unknown }> = [];
     const hookFor = (domain: string) => {
       return async (name: string, callback: unknown) => {
@@ -589,23 +589,58 @@ describe("OpenCode plugin entry", () => {
         return { dispose: async () => {} };
       };
     };
-    const ctx = {
-      options: { mode: "transparent", envQueries: true },
-      location: { directory: process.cwd() },
-      session: { hook: hookFor("session") },
-      tool: { hook: hookFor("tool") },
-      aisdk: { hook: hookFor("aisdk") },
-    };
+    const addedTools: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const cleanup = await leakshieldPlugin.setup({
+        options: { mode: "transparent", envQueries: true },
+        location: { directory: process.cwd() },
+        session: { hook: hookFor("session") },
+        tool: {
+          hook: hookFor("tool"),
+          transform: async (callback: (editor: unknown) => void) => {
+            callback({ add: (tool: Record<string, unknown>) => addedTools.push(tool.name as string) });
+            return { dispose: async () => {} };
+          },
+        },
+        aisdk: { hook: hookFor("aisdk") },
+        provider: { transform: async () => ({ dispose: async () => {} }) },
+      } as never);
 
-    const cleanup = await leakshieldPlugin.setup(ctx as never);
+      // Not the fail-closed fallback: the normal transparent hook set is live.
+      expect(registered.map((r) => `${r.domain}:${r.name}`)).toEqual([
+        "session:context",
+        "session:compaction",
+        "session:generate",
+        "session:title",
+        "session:http.request",
+        "session:http.response",
+        "session:experimental.ws.handshake",
+        "session:experimental.ws.send",
+        "session:experimental.ws.receive",
+        "aisdk:sdk",
+        "aisdk:language",
+        "tool:execute.before",
+      ]);
+      expect(addedTools.filter((name) => name.startsWith("guard_env_"))).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain("envQueries is ignored in transparent mode");
 
-    expect(registered).toHaveLength(12);
-    for (const record of registered) {
-      await expect((async () => record.callback({ sessionID: "s" }))()).rejects.toThrow(
-        "LeakShield initialization failed",
-      );
+      // A guarded route answers normally instead of refusing as uninitialized.
+      const contextHook = registered[0]!.callback as (event: unknown) => Promise<void> | void;
+      const event = {
+        sessionID: "session-1",
+        system: [{ type: "text", text: "safe text" }],
+        messages: [],
+        options: {},
+      };
+      await expect(Promise.resolve().then(() => contextHook(event))).resolves.toBeUndefined();
+
+      expect(typeof cleanup).toBe("function");
+      await cleanup?.();
+    } finally {
+      warn.mockRestore();
     }
-    expect(typeof cleanup).toBe("function");
   });
 
   it("fails closed across all routes when transparent config loading fails (v2 setup)", async () => {
@@ -751,8 +786,9 @@ describe("OpenCode plugin entry", () => {
       return { dispose: async () => {} };
     };
     const ctx = {
-      // envQueries is rejected in transparent mode, the v2 default.
-      options: { envQueries: true },
+      // deidentify is rejected outside redact mode; mode omitted means the
+      // transparent default, so this fails closed before setup runs.
+      options: { deidentify: true },
       location: { directory: process.cwd() },
       session: { hook: hookFor() },
       tool: { hook: hookFor() },

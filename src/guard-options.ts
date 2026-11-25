@@ -68,9 +68,6 @@ export const PluginOptionsSchema = z
   .refine((options) => !options.deidentify || options.mode === "redact", {
     message: "deidentify requires mode 'redact'",
   })
-  .refine((options) => options.mode !== "transparent" || !options.envQueries, {
-    message: "envQueries is not supported in mode 'transparent'",
-  })
   .refine((options) => options.attachments === "block" || options.mode === "transparent", {
     message: 'attachments "allow" requires mode "transparent"',
   })

@@ -63,9 +63,10 @@ const v2Setup = async (ctx: V2PluginContext): Promise<PluginNamespace.Cleanup | 
     const config = withEncodingDetection(loaded.config);
     if (options.mode === "transparent") {
       // Transparent pseudonymization arms its own bounded session service,
-      // transport hooks, and disposal; deidentify/envQueries combos were
-      // already rejected at the option schema. W2: persistence options flow
-      // into the guard only when explicitly enabled (default memory-only,
+      // transport hooks, and disposal. deidentify is still rejected at the
+      // option schema; envQueries is accepted but ignored (warned below) since
+      // the guard_env_* tools are not registered here. W2: persistence options
+      // flow into the guard only when explicitly enabled (default memory-only,
       // zero behavior change).
       const persistence = options.persistence.enabled
         ? {
@@ -82,6 +83,11 @@ const v2Setup = async (ctx: V2PluginContext): Promise<PluginNamespace.Cleanup | 
         persistence,
       );
       await guard.setup(ctx);
+      if (options.envQueries) {
+        console.warn(
+          "[leakshield] envQueries is ignored in transparent mode: the guard_env_* tools are not registered. Read env files directly (values are masked), or set mode to \"block\" or \"redact\" to use envQueries.",
+        );
+      }
       // Hook-only must leave provider routing/transport preferences untouched.
       if (options.wireProtection === false) return () => guard.dispose();
       try {

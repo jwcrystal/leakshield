@@ -4,7 +4,7 @@
 
 [← README](../../README.zh-TW.md#opencode-plugin建議使用)
 
-`envQueries` 選項（預設 `false`）針對 `settings.env_files` 所列檔案提供三個唯讀工具，讓 agent 能回答設定問題而不看到任何 value。這個選項不支援 transparent 模式，所以在 v2 要明確設定 `mode` 為 `block` 或 `redact`：
+`envQueries` 選項（預設 `false`）針對 `settings.env_files` 所列檔案提供三個唯讀工具，讓 agent 能回答設定問題而不看到任何 value。這個選項是給 `block` 與 `redact` 模式用的。在 transparent 模式（未設定 `mode` 時的 v2 預設）下會被忽略：plugin 照常啟動，但不註冊這些工具，會記錄一則警告，`--doctor` 也會顯示 warn。transparent 模式不需要它：agent 直接讀 env 檔即可，value 會被換成穩定的佔位符，仍看得出哪些 key 有值、哪些 value 相同。若要 env 檔內容完全不進入對話（連佔位符都不要），才用 envQueries：
 
 | 工具 | 契約 |
 |---|---|

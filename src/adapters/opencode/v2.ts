@@ -15,7 +15,7 @@ type V2Plugin = PluginNamespace.Plugin;
 type PluginContext = PluginNamespace.Context;
 
 const INITIALIZATION_ERROR =
-  "LeakShield initialization failed, so the request was blocked before anything was sent.";
+  "LeakShield initialization failed, so the request was blocked before anything was sent. Run `leakshield --doctor` for details.";
 
 const BLOCKED_ATTACHMENT_NOTICE =
   "[LeakShield blocked an attachment: its content cannot be scanned, so it was not sent.]";

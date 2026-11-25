@@ -32,10 +32,15 @@ describe("default mode", () => {
     if (result.ok) expect(result.options.mode).toBe(mode);
   });
 
-  it("rejects envQueries without an explicit mode, since the default is transparent", () => {
-    const result = validatePluginOptions({ envQueries: true });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("envQueries is not supported in mode 'transparent'");
+  it("accepts envQueries without an explicit mode, since the default is transparent", () => {
+    for (const input of [{ envQueries: true }, { mode: "transparent", envQueries: true }]) {
+      const result = validatePluginOptions(input);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.options.mode).toBe("transparent");
+        expect(result.options.envQueries).toBe(true);
+      }
+    }
     expect(validatePluginOptions({ mode: "block", envQueries: true }).ok).toBe(true);
   });
 
@@ -70,7 +75,6 @@ describe("persistence option (zod 4)", () => {
       return r.ok ? "" : r.error;
     };
     expect(error({ mode: "block", deidentify: true })).toContain("deidentify requires mode 'redact'");
-    expect(error({ mode: "transparent", envQueries: true })).toContain("envQueries is not supported in mode 'transparent'");
     expect(error({ mode: "block", attachments: "allow" })).toContain('attachments "allow" requires mode "transparent"');
     expect(error({ mode: "block", wireProtection: false })).toContain('wireProtection requires mode "transparent"');
     expect(error({ mode: "block", persistence: { enabled: true } })).toContain('persistence requires mode "transparent"');

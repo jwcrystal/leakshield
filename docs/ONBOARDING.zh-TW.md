@@ -157,7 +157,7 @@ npm run scan -- --dir . --min-severity high --format json
 npm run scan -- --file ../shared.env --allow-outside
 ```
 
-### Q3. 公司內部詞彙沒被抓到？
+### Q3. 想偵測自己的機密詞彙或內部網域？
 
 在設定檔加 `nda_keywords`（預設只有 `CONFIDENTIAL`、`INTERNAL ONLY`、`DO NOT SHARE`、`NDA`）、`private_domains`（預設是空的）或 `custom_rules`。設定檔依序找 `./config/guard.config.yaml`、`~/.leakshield/guard.config.yaml`；pi 可以用 `LEAKSHIELD_CONFIG`、Claude Code proxy 可以用 `--config` 指定。CLI 下次執行就會讀到新設定；OpenCode、pi、Claude Code proxy 和 Web UI 要重啟才會套用。
 

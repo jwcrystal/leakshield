@@ -4,6 +4,8 @@ All notable changes are listed here.
 
 ## Unreleased
 
+## 0.5.0 — 2026-11-25
+
 ### Added
 
 - Three identifier rules the built-in set did not cover. `passport-mrz` ships enabled and matches a TD3 machine-readable line only when its four ICAO 9303 check digits validate. `ssn-us` and `tw-business-no` are opt-in (`settings.rule_overrides`), because a hyphenated SSN carries no checksum and, under the 2023 rule, an 8-digit number passes the business-number checksum about one time in five (a date such as `20261007` passes). Numbers starting with 0 are real business numbers, so the rule does not exclude them; a repeated digit and all zeros are rejected. The new finding types `PII_PASSPORT`, `PII_SSN` and `TW_BUSINESS_NO` get their own placeholder labels in redact mode.
@@ -11,6 +13,7 @@ All notable changes are listed here.
 
 ### Changed
 
+- Passport MRZ detection is on by default, so an upgrade starts reporting a TD3 line that previously passed through; a prompt carrying one is now blocked or masked depending on the mode. Persistent SGP2 mappings minted with the new categories (`PII_PASSPORT`, `PII_SSN`, `TW_BUSINESS_NO`) cannot be hydrated by an install downgraded below 0.5.0.
 - An explicitly named guard config file that does not exist now fails the load instead of falling back to the built-in defaults, which silently dropped your keywords, domains, custom rules and `env_files`. This covers the OpenCode `configPath` option (every request is refused, with a reason that points to `leakshield --doctor`), pi's `LEAKSHIELD_CONFIG` (the extension fails to load) and the Claude Code proxy's `--config` (the proxy exits 1 before listening). `--doctor` reports `BROKEN` and names the missing path. When no path is given, the config search and the built-in defaults are unchanged. A setup that points at a file you have not created yet is now refused; create the file or remove the setting.
 - The OpenCode plugin ignores `envQueries` in transparent mode, including the default when `mode` is omitted, instead of failing every request closed. The plugin starts normally without the `guard_env_*` tools, logs a warning, and `--doctor` shows an `env-queries` warn check without changing the verdict. This supersedes the 0.4.0 note that `envQueries` is rejected with the default mode. Set `mode` to `block` or `redact` to use envQueries.
 - When the OpenCode plugin cannot start because of invalid options or a guard config that fails to load, the refusal shown for every blocked request now says why and how to fix it, instead of only "LeakShield initialization failed". Option errors name the option and the rule (never the rejected value); a config load failure is described without its details, which can contain file paths or rule descriptions, and points to `leakshield --doctor`.

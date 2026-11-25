@@ -136,10 +136,11 @@ characters fill ordinary code and prose. `config/guard.config.example.yaml` ship
 a commented set of patterns for them. Every one fires only after a field label,
 except the Taiwan address shape, which is anchored on a city name instead.
 
-Two of the identifiers below already exist as rules: `ssn-us` (opt-in, no label
+Two related identifiers already have their own rules: `ssn-us` (opt-in, no label
 needed) and `passport-mrz` (a machine-readable line, no label needed). The
 commented patterns do not repeat them; use `rule_overrides` instead. A passport
-number outside an MRZ line, and a MAC address, still need one of these patterns.
+number outside an MRZ line, and a MAC address, still need one of the example
+patterns.
 
 Four things were measured while writing them, and they are why the patterns
 look the way they do:

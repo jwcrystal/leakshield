@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -281,10 +281,11 @@ describe("OpenCode plugin entry", () => {
     await leakshieldPlugin.setup(ctx as never);
 
     expect(registered.length).toBe(6);
-    const promptHook = registered[0].callback as (event: unknown) => Promise<void>;
-    await expect(promptHook({ prompt: { text: "safe text" } })).rejects.toThrow(
-      "LeakShield initialization failed",
-    );
+    for (const record of registered) {
+      const refusal = (record.callback as (event: unknown) => Promise<void>)({ prompt: { text: "safe text" } });
+      await expect(refusal).rejects.toThrow("LeakShield initialization failed");
+      await expect(refusal).rejects.toThrow("deidentify requires mode 'redact'");
+    }
   });
 
   it("fails closed when deidentify has the wrong type (v2 setup)", async () => {
@@ -581,7 +582,7 @@ describe("OpenCode plugin entry", () => {
     expect(typeof cleanup).toBe("function");
   });
 
-  it("fails closed on every route when transparent is combined with envQueries (v2 setup)", async () => {
+  it("sets up transparent mode and warns when envQueries is combined with it (v2 setup)", async () => {
     const registered: Array<{ domain: string; name: string; callback: unknown }> = [];
     const hookFor = (domain: string) => {
       return async (name: string, callback: unknown) => {
@@ -589,23 +590,58 @@ describe("OpenCode plugin entry", () => {
         return { dispose: async () => {} };
       };
     };
-    const ctx = {
-      options: { mode: "transparent", envQueries: true },
-      location: { directory: process.cwd() },
-      session: { hook: hookFor("session") },
-      tool: { hook: hookFor("tool") },
-      aisdk: { hook: hookFor("aisdk") },
-    };
+    const addedTools: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const cleanup = await leakshieldPlugin.setup({
+        options: { mode: "transparent", envQueries: true },
+        location: { directory: process.cwd() },
+        session: { hook: hookFor("session") },
+        tool: {
+          hook: hookFor("tool"),
+          transform: async (callback: (editor: unknown) => void) => {
+            callback({ add: (tool: Record<string, unknown>) => addedTools.push(tool.name as string) });
+            return { dispose: async () => {} };
+          },
+        },
+        aisdk: { hook: hookFor("aisdk") },
+        provider: { transform: async () => ({ dispose: async () => {} }) },
+      } as never);
 
-    const cleanup = await leakshieldPlugin.setup(ctx as never);
+      // Not the fail-closed fallback: the normal transparent hook set is live.
+      expect(registered.map((r) => `${r.domain}:${r.name}`)).toEqual([
+        "session:context",
+        "session:compaction",
+        "session:generate",
+        "session:title",
+        "session:http.request",
+        "session:http.response",
+        "session:experimental.ws.handshake",
+        "session:experimental.ws.send",
+        "session:experimental.ws.receive",
+        "aisdk:sdk",
+        "aisdk:language",
+        "tool:execute.before",
+      ]);
+      expect(addedTools.filter((name) => name.startsWith("guard_env_"))).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain("envQueries is ignored in transparent mode");
 
-    expect(registered).toHaveLength(12);
-    for (const record of registered) {
-      await expect((async () => record.callback({ sessionID: "s" }))()).rejects.toThrow(
-        "LeakShield initialization failed",
-      );
+      // A guarded route answers normally instead of refusing as uninitialized.
+      const contextHook = registered[0]!.callback as (event: unknown) => Promise<void> | void;
+      const event = {
+        sessionID: "session-1",
+        system: [{ type: "text", text: "safe text" }],
+        messages: [],
+        options: {},
+      };
+      await expect(Promise.resolve().then(() => contextHook(event))).resolves.toBeUndefined();
+
+      expect(typeof cleanup).toBe("function");
+      await cleanup?.();
+    } finally {
+      warn.mockRestore();
     }
-    expect(typeof cleanup).toBe("function");
   });
 
   it("fails closed across all routes when transparent config loading fails (v2 setup)", async () => {
@@ -715,6 +751,7 @@ describe("OpenCode plugin entry", () => {
     expect(callbacks).toHaveLength(24);
     for (const callback of callbacks.slice(12)) {
       expect(() => callback({ sessionID: "s" })).toThrow("LeakShield initialization failed");
+      expect(() => callback({ sessionID: "s" })).toThrow("leakshield --doctor");
     }
     await (cleanup as () => Promise<void>)();
     expect(disposed).toBe(24);
@@ -751,8 +788,9 @@ describe("OpenCode plugin entry", () => {
       return { dispose: async () => {} };
     };
     const ctx = {
-      // envQueries is rejected in transparent mode, the v2 default.
-      options: { envQueries: true },
+      // deidentify is rejected outside redact mode; mode omitted means the
+      // transparent default, so this fails closed before setup runs.
+      options: { deidentify: true },
       location: { directory: process.cwd() },
       session: { hook: hookFor() },
       tool: { hook: hookFor() },
@@ -764,5 +802,61 @@ describe("OpenCode plugin entry", () => {
     expect(registered).toHaveLength(12);
     const httpHook = registered.find((r) => r.name === "http.request")!.callback as (event: unknown) => Promise<void>;
     await expect((async () => httpHook({ sessionID: "s" }))()).rejects.toThrow("LeakShield initialization failed");
+    await expect((async () => httpHook({ sessionID: "s" }))()).rejects.toThrow("deidentify requires mode 'redact'");
   });
+  it("does not put rejected option values into the refusal (v2 setup)", async () => {
+    const SENTINEL = "sk-LEAKCHECK-option-value";
+    const registered: Array<{ name: string; callback: unknown }> = [];
+    const hook = async (name: string, callback: unknown) => {
+      registered.push({ name, callback });
+      return { dispose: async () => {} };
+    };
+    await leakshieldPlugin.setup({
+      options: { mode: "transparent", attachments: SENTINEL },
+      location: { directory: process.cwd() },
+      session: { hook },
+      tool: { hook },
+      aisdk: { hook },
+    } as never);
+
+    expect(registered.length).toBeGreaterThan(0);
+    for (const record of registered) {
+      const refusal = (async () => (record.callback as (event: unknown) => unknown)({ sessionID: "s" }))();
+      await expect(refusal).rejects.toThrow("Invalid LeakShield options in opencode.json: attachments:");
+      await expect(refusal).rejects.not.toThrow(SENTINEL);
+    }
+  });
+
+  it.each(["block", "transparent"] as const)(
+    "names a config load failure without its details in mode %s (v2 setup)",
+    async (mode) => {
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-"));
+      temporaryDirectories.push(directory);
+      const configPath = path.join(directory, "guard.config.yaml");
+      const SENTINEL = "SENTINEL-rule-description";
+      // An uncompilable pattern makes loadConfig throw, naming the rule's description.
+      fs.writeFileSync(configPath, `custom_rules:\n  - description: "${SENTINEL}"\n    pattern: "("\n`, "utf8");
+
+      const registered: Array<{ name: string; callback: unknown }> = [];
+      const hook = async (name: string, callback: unknown) => {
+        registered.push({ name, callback });
+        return { dispose: async () => {} };
+      };
+      await leakshieldPlugin.setup({
+        options: { mode, configPath },
+        location: { directory },
+        session: { hook },
+        tool: { hook },
+        aisdk: { hook },
+      } as never);
+
+      expect(registered.length).toBeGreaterThan(0);
+      for (const record of registered) {
+        const refusal = (async () => (record.callback as (event: unknown) => unknown)({ sessionID: "s" }))();
+        await expect(refusal).rejects.toThrow("guard config file could not be loaded");
+        await expect(refusal).rejects.not.toThrow(SENTINEL);
+        await expect(refusal).rejects.not.toThrow(directory);
+      }
+    },
+  );
 });

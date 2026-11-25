@@ -7,7 +7,7 @@ import { EnvQueryService } from "./env-queries.js";
 import { createFailClosedHooks } from "./hooks.js";
 import { createFailClosedV2Setup, createV2Setup } from "./v2.js";
 import { createFailClosedTransparentGuard, createTransparentSessionGuard } from "./transparent.js";
-import { PluginOptionsSchema, withDefaultMode, type PluginOptions } from "../../guard-options.js";
+import { validatePluginOptions, withDefaultMode, type PluginOptions } from "../../guard-options.js";
 import type { GuardConfig } from "../../types.js";
 
 type V2Plugin = PluginNamespace.Plugin;
@@ -56,16 +56,43 @@ function rawModeIsTransparent(options: unknown): boolean {
   );
 }
 
+/**
+ * The refusal text appended when setup fails, so a user who never runs the
+ * doctor still sees why every request is blocked. Option validation messages
+ * name option keys and fixed rules, never the rejected values (see
+ * `validatePluginOptions`). A guard config failure is described generically:
+ * its error can carry file paths or custom rule descriptions.
+ */
+function invalidOptionsReason(error: string): string {
+  const detail = error.replace(/\(root\): /g, "").replace(/[.\s]+$/, "");
+  return `Invalid LeakShield options in opencode.json: ${detail}. Fix them and restart OpenCode; \`leakshield --doctor\` shows the details.`;
+}
+const CONFIG_LOAD_REASON =
+  "The LeakShield guard config file could not be loaded. Run `leakshield --doctor` to see why, fix it and restart OpenCode.";
+
 const v2Setup = async (ctx: V2PluginContext): Promise<PluginNamespace.Cleanup | void> => {
+  let failureReason: string | undefined;
   try {
-    const options: PluginOptions = PluginOptionsSchema.parse(withDefaultMode(ctx.options));
-    const loaded = loadConfigWithFingerprint(options.configPath, ctx.location.directory);
+    const validation = validatePluginOptions(ctx.options);
+    if (!validation.ok) {
+      failureReason = invalidOptionsReason(validation.error);
+      throw new Error("invalid plugin options");
+    }
+    const options: PluginOptions = validation.options;
+    let loaded: LoadedGuardConfig;
+    try {
+      loaded = loadConfigWithFingerprint(options.configPath, ctx.location.directory);
+    } catch (error) {
+      failureReason = CONFIG_LOAD_REASON;
+      throw error;
+    }
     const config = withEncodingDetection(loaded.config);
     if (options.mode === "transparent") {
       // Transparent pseudonymization arms its own bounded session service,
-      // transport hooks, and disposal; deidentify/envQueries combos were
-      // already rejected at the option schema. W2: persistence options flow
-      // into the guard only when explicitly enabled (default memory-only,
+      // transport hooks, and disposal. deidentify is still rejected at the
+      // option schema; envQueries is accepted but ignored (warned below) since
+      // the guard_env_* tools are not registered here. W2: persistence options
+      // flow into the guard only when explicitly enabled (default memory-only,
       // zero behavior change).
       const persistence = options.persistence.enabled
         ? {
@@ -82,6 +109,11 @@ const v2Setup = async (ctx: V2PluginContext): Promise<PluginNamespace.Cleanup | 
         persistence,
       );
       await guard.setup(ctx);
+      if (options.envQueries) {
+        console.warn(
+          "[leakshield] envQueries is ignored in transparent mode: the guard_env_* tools are not registered, and env files the agent reads are only partly masked (values shorter than 8 characters stay visible). Set mode to \"block\" or \"redact\" to use envQueries.",
+        );
+      }
       // Hook-only must leave provider routing/transport preferences untouched.
       if (options.wireProtection === false) return () => guard.dispose();
       try {
@@ -122,11 +154,11 @@ const v2Setup = async (ctx: V2PluginContext): Promise<PluginNamespace.Cleanup | 
     // option is inspected because a schema/refine failure leaves `options`
     // unset. The fallback's dispose is returned for host-triggered cleanup.
     if (rawModeIsTransparent(ctx.options)) {
-      const guard = createFailClosedTransparentGuard(ctx.options?.wireProtection !== false);
+      const guard = createFailClosedTransparentGuard(ctx.options?.wireProtection !== false, failureReason);
       await guard.setup(ctx);
       return guard.dispose;
     }
-    await createFailClosedV2Setup()(ctx);
+    await createFailClosedV2Setup(failureReason)(ctx);
   }
 };
 

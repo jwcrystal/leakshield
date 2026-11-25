@@ -151,6 +151,14 @@ export function loadConfigWithFingerprint(
   overridePath?: string,
   workspaceRoot = process.cwd(),
 ): LoadedGuardConfig {
+  // An explicit path (OpenCode configPath, pi LEAKSHIELD_CONFIG, proxy --config)
+  // that does not exist fails the load. Falling back to the built-in defaults
+  // would silently drop the user's keywords, domains, rules and env_files.
+  // Hosts fail closed on this error; only the doctor and terminal output show
+  // the path.
+  if (overridePath && !fs.existsSync(overridePath)) {
+    throw new Error(`guard config file not found: ${overridePath}`);
+  }
   const configPath = findConfigPath(overridePath);
   if (!configPath) {
     return {

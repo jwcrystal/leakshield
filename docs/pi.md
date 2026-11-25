@@ -68,7 +68,7 @@ Then check the setup:
 leakshield --doctor pi
 ```
 
-`LEAKSHIELD_CONFIG` selects the guard config file, the same way `--config` does for the Claude Code proxy. Without it, the usual discovery applies (`config/guard.config.yaml` in the working directory, then `~/.leakshield/guard.config.yaml`).
+`LEAKSHIELD_CONFIG` selects the guard config file, the same way `--config` does for the Claude Code proxy. Without it, the usual discovery applies (`config/guard.config.yaml` in the working directory, then `~/.leakshield/guard.config.yaml`). A path that does not exist makes the extension throw while pi loads it, so pi exits with `Failed to load extension` instead of running with the built-in defaults.
 
 The extension needs Node.js 22.19 or later (pi 1.6's minimum) and a built LeakShield package. It is not served from the standalone Bun binaries; use the npm package or a checkout.
 

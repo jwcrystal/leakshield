@@ -1,6 +1,13 @@
 // Component under test: the pi extension surface (src/adapters/pi/extension.ts).
 // The guard is mocked so the tests cover handler wiring and refusal flow.
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// An empty guard config on disk: LEAKSHIELD_CONFIG must name a file that exists.
+const EMPTY_CONFIG = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "leakshield-pi-")), "guard.config.yaml");
+fs.writeFileSync(EMPTY_CONFIG, "{}\n", "utf8");
 
 const state = vi.hoisted(() => ({
   created: 0,
@@ -75,7 +82,7 @@ function context(notices: string[], model: { api: string } | undefined = { api: 
 }
 
 beforeEach(() => {
-  process.env.LEAKSHIELD_CONFIG = "/nonexistent/leakshield-guard-test.yaml";
+  process.env.LEAKSHIELD_CONFIG = EMPTY_CONFIG;
   delete (globalThis as Record<symbol, unknown>)[Symbol.for("leakshield.pi.guard")];
   state.created = 0;
   state.installed = 0;
@@ -86,6 +93,14 @@ beforeEach(() => {
 });
 
 describe("pi extension", () => {
+  it("fails to load when LEAKSHIELD_CONFIG names a missing file", () => {
+    process.env.LEAKSHIELD_CONFIG = "/nonexistent/leakshield-guard-test.yaml";
+    // pi reports a throwing extension as "Failed to load extension" and exits
+    // before any request, instead of running with the defaults.
+    expect(() => leakshieldPiExtension(fakePi().api)).toThrow("guard config file not found");
+    expect(state.created).toBe(0);
+  });
+
   it("installs the guard once and binds the session and model", async () => {
     const notices: string[] = [];
     const first = fakePi();

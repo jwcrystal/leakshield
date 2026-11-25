@@ -41,9 +41,18 @@ describe("loadConfig() — 讀取真實設定檔", () => {
 
 // ─── 找不到設定檔 → 回傳預設值 ───────────────────────────────────────────────
 
-describe("loadConfig() — 預設值 fallback", () => {
-  it("路徑不存在時應回傳內建預設值", () => {
-    const config = loadConfig("/nonexistent/path/guard.config.yaml");
+describe("loadConfig() — 明確指定的路徑不存在", () => {
+  // An explicit path (OpenCode configPath, pi LEAKSHIELD_CONFIG, proxy --config)
+  // that does not exist must fail the load: falling back to the built-in defaults
+  // would silently drop the user's keywords, domains, rules and env_files.
+  it("指定的路徑不存在時丟出錯誤並寫出路徑，不回傳預設值", () => {
+    expect(() => loadConfig("/nonexistent/path/guard.config.yaml")).toThrow(
+      "guard config file not found: /nonexistent/path/guard.config.yaml",
+    );
+  });
+
+  it("內建預設值本身不變", () => {
+    const config = GuardConfigSchema.parse({});
     expect(config.nda_keywords).toContain("CONFIDENTIAL");
     expect(config.nda_keywords).toContain("NDA");
     expect(config.private_domains).toHaveLength(0);
@@ -221,11 +230,10 @@ describe("loadConfigWithFingerprint() — 單次讀取綁定", () => {
     expect(readsOfConfig).toHaveLength(1);
   });
 
-  it("沒有設定檔時 fingerprint 為 absent 且回傳預設值", () => {
-    const loaded = loadConfigWithFingerprint("/nonexistent/path/guard.config.yaml");
-    expect(loaded.fingerprint).toBe("absent");
-    expect(loaded.configPath).toBeUndefined();
-    expect(loaded.config.settings.max_chars).toBe(200000);
+  it("明確指定的路徑不存在時丟出錯誤，不以 absent 繼續", () => {
+    expect(() => loadConfigWithFingerprint("/nonexistent/path/guard.config.yaml")).toThrow(
+      "guard config file not found",
+    );
   });
 
   it("loadConfig() 委派至單次讀取載入器", () => {

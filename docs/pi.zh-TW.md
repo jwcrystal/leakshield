@@ -68,7 +68,7 @@ pi -e "$PWD/dist/adapters/pi/extension.js"
 leakshield --doctor pi
 ```
 
-`LEAKSHIELD_CONFIG` 指定 guard 設定檔，跟 Claude Code proxy 的 `--config` 一樣。沒設定時照一般搜尋順序（工作目錄的 `config/guard.config.yaml`，再找 `~/.leakshield/guard.config.yaml`）。
+`LEAKSHIELD_CONFIG` 指定 guard 設定檔，跟 Claude Code proxy 的 `--config` 一樣。沒設定時照一般搜尋順序（工作目錄的 `config/guard.config.yaml`，再找 `~/.leakshield/guard.config.yaml`）。指定的路徑不存在時，extension 在 pi 載入時就會丟出錯誤，pi 會以 `Failed to load extension` 結束，不會改用內建預設值執行。
 
 extension 需要 Node.js 22.19 以上（pi 1.6 的最低版本）與已建置的 LeakShield 套件。Bun 打包的單檔執行檔不提供這個檔案；請用 npm 套件或 checkout。
 

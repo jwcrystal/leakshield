@@ -15,8 +15,10 @@ export const PERSISTENCE_TTL_MAX_DAYS = 3650;
 // makes the parse throw, and every entry path already fails closed on that.
 // transparent is the reversible pseudonymization mode (issue #22):
 // it owns its own bounded session service and transport hooks, so combining
-// it with the second (deidentify) protection pipeline or the env query
-// tools is rejected here — every entry path fails closed on the parse error.
+// it with the second (deidentify) protection pipeline is rejected here —
+// every entry path fails closed on the parse error. envQueries is accepted
+// but ignored in transparent mode (the OpenCode plugin logs a warning and
+// does not register the env tools).
 export const PluginOptionsSchema = z
   .object({
     // No schema default: callers fill it in with withDefaultMode() before

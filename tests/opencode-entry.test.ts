@@ -751,6 +751,7 @@ describe("OpenCode plugin entry", () => {
     expect(callbacks).toHaveLength(24);
     for (const callback of callbacks.slice(12)) {
       expect(() => callback({ sessionID: "s" })).toThrow("LeakShield initialization failed");
+      expect(() => callback({ sessionID: "s" })).toThrow("leakshield --doctor");
     }
     await (cleanup as () => Promise<void>)();
     expect(disposed).toBe(24);

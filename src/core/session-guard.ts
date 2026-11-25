@@ -48,6 +48,8 @@ export type RecordLike = { [key: string]: unknown };
 
 export const INITIALIZATION_ERROR =
   "LeakShield initialization failed, so the request was blocked before anything was sent.";
+export const NO_REASON_HINT =
+  "Run `leakshield --doctor` to see why, fix it and restart OpenCode.";
 export const PROTECT_FAILED_ERROR =
   "LeakShield blocked a model request because it could not be masked safely.";
 export const ATTRIBUTION_ERROR =

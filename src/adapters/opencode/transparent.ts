@@ -43,6 +43,7 @@ import {
   ATTRIBUTION_ERROR,
   createGuardCore,
   INITIALIZATION_ERROR,
+  NO_REASON_HINT,
   PROTECT_FAILED_ERROR,
   requireSessionID,
   UNSUPPORTED_ROUTE_ERROR,
@@ -90,11 +91,12 @@ async function runDisposals(disposals: Array<() => Promise<void>>): Promise<void
 export function createFailClosedTransparentGuard(
   wireProtection = true,
   /** Why setup failed, appended to the refusal so the user sees how to fix it.
-   * Must not carry user content: option validation messages only. */
+   * Must not carry user content: option validation messages or the fixed
+   * config-load notice only. */
   reason?: string,
 ): TransparentSessionGuard {
   const disposals: Array<() => Promise<void>> = [];
-  const message = reason ? `${INITIALIZATION_ERROR} ${reason}` : INITIALIZATION_ERROR;
+  const message = reason ? `${INITIALIZATION_ERROR} ${reason}` : `${INITIALIZATION_ERROR} ${NO_REASON_HINT}`;
   const refuse = (): never => {
     throw new Error(message);
   };

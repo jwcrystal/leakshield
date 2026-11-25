@@ -556,28 +556,56 @@ curl -s -X POST http://localhost:3001/scan \
 
 LeakShield loads the first config file it finds: `./config/guard.config.yaml`, then `config/guard.config.yaml` in the LeakShield directory (source builds only), then `~/.leakshield/guard.config.yaml`. With no file, the built-in defaults apply. The OpenCode plugin also accepts a `configPath` option. The repository does not ship a `config/guard.config.yaml`, and Git ignores one you create there, so your keywords stay local. To start a new file, copy [`config/guard.config.example.yaml`](config/guard.config.example.yaml) and add your own keywords and domains. Listing `nda_keywords` replaces the four defaults (`CONFIDENTIAL`, `INTERNAL ONLY`, `DO NOT SHARE`, `NDA`); the example keeps them.
 
+### Fields
+
+Every key is optional. A key you leave out keeps its default; an unknown key is ignored.
+
+| Key | Default | What it does | Details |
+|-----|---------|--------------|---------|
+| `nda_keywords` | `CONFIDENTIAL`, `INTERNAL ONLY`, `DO NOT SHARE`, `NDA` | Words reported as HIGH. Case-insensitive. A keyword that starts and ends with an ASCII letter or digit matches whole words (`NDA` does not match `agenda`); a CJK keyword matches as a substring. A list replaces the defaults; `[]` turns keywords off | — |
+| `private_domains` | none | Hostnames reported as MEDIUM. Case-insensitive substring match; a full hostname gives fewer false matches | — |
+| `custom_rules` | none | Your own regular expressions with a `description`, `pattern` and `severity` (`HIGH` by default) | [Custom Rules](#custom-rules) |
+| `settings.max_chars` | `200000` | Scan bound per input. The CLI scans the first `max_chars` characters; transparent mode refuses longer content instead of truncating it | — |
+| `settings.show_line_numbers` | `true` | Include line and column in findings | — |
+| `settings.preview_length` | `60` | Length of the masked `safePreview` excerpt around the first finding | [Secret Preview Behavior](#secret-preview-behavior) |
+| `settings.encoding_detection` | `false` | Also decode Base64, URL and Hex text before scanning (the OpenCode plugin always enables it) | [Encoding Detection](#encoding-detection) |
+| `settings.env_files` | none | Files whose values are matched exactly | [Exact `.env` Value Detection](#exact-env-value-detection) |
+| `settings.rule_overrides` | `{}` | Turn built-in rules on or off by id, e.g. `{ url: true, email: false }`. An unknown id fails the load | [Built-in rule ids](#built-in-rule-ids) |
+| `settings.private_cidrs` | RFC 1918, CGNAT, link-local | IPv4 networks the opt-in `private-ipv4` rule reports. A list **replaces** the defaults, for example to match only your VPN. An invalid CIDR fails the load | — |
+| `settings.allowlist` | none | Exact values no rule reports. **A real bypass**: the value reaches the model unmasked | [Custom Rules](#custom-rules) |
+
+Length and count limits are listed under [Configuration Validation](#configuration-validation).
+
+### Built-in rule ids
+
+Use these ids in `settings.rule_overrides`. All rules are on by default except the four opt-in rules marked below.
+
+| Group | Ids |
+|-------|-----|
+| API keys and tokens | `openai-key`, `anthropic-key`, `google-key`, `aws-access-key`, `aws-secret`, `github-pat`, `github-fine-grained-pat`, `github-oauth-app`, `stripe-live-secret`, `stripe-live-publishable`, `slack-bot`, `slack-user-app`, `huggingface-token`, `jwt`, `generic-bearer` |
+| Secrets and credentials | `generic-secret`, `pem-private-key`, `url-userinfo`, `db-connection`, `db-connection-ado` |
+| Personal and financial data | `email`, `id-tw`, `credit-card`, `iban`, `public-ipv4`, `phone-tw` (opt-in), `phone-intl` (opt-in) |
+| Network | `private-ipv4` (opt-in), `url` (opt-in) |
+
+An example that keeps the default keywords, adds a private domain and turns on `private-ipv4` for one network:
+
 ```yaml
-# NDA keywords (case-insensitive)
 nda_keywords:
   - "CONFIDENTIAL"
   - "INTERNAL ONLY"
   - "DO NOT SHARE"
   - "NDA"
-  - "PROPRIETARY"
-  # Add your own internal keywords:
-  # - "Project Phoenix"
-  # - "MyCompany Internal"
+  # - "Project Phoenix"     # your own terms
 
-# Private domains
 private_domains:
-  - "internal.mycompany.com"
-  # - "dev.yourcompany.io"
+  - "internal.example.com"
 
 settings:
-  max_chars: 200000      # scan bound; transparent mode refuses past it instead of truncating
-  show_line_numbers: true
-  preview_length: 60
-  encoding_detection: false  # Base64/URL/Hex decoding; off by default
+  encoding_detection: false
+  rule_overrides:
+    private-ipv4: true
+  private_cidrs:
+    - 10.20.0.0/16          # replaces the default private networks
 ```
 
 After editing:
@@ -598,7 +626,7 @@ settings:
     - .env.local
 ```
 
-Paths are relative to the workspace root and must remain inside it. LeakShield reads non-empty values of at least eight characters, then detects exact occurrences in text sent to the model. It does not automatically read `.env`, process environment variables, or send, log, or serialize the loaded values. Restart OpenCode after changing an enabled env file. The opt-in `envQueries` plugin tools (see [Readonly env queries](docs/plugin/env-queries.md)) query these same files and never return their values.
+Paths are relative to the workspace root and must remain inside it. LeakShield reads non-empty values of at least eight characters, then detects exact occurrences in text sent to the model. It does not automatically read `.env`, process environment variables, or send, log, or serialize the loaded values. After changing an enabled env file, restart the host or proxy that loaded it (only the CLI re-reads on every run). The opt-in `envQueries` plugin tools (see [Readonly env queries](docs/plugin/env-queries.md)) query these same files and never return their values.
 
 ### Custom Rules
 
@@ -652,6 +680,28 @@ settings:
 Allowlist entries are part of the config file, so they change its fingerprint
 (sha256 of the file), which is what authorizations compare against.
 
+### Configuration Validation
+
+Input lengths for dynamic rules are validated when the config is loaded:
+
+| Field | Max length |
+|-------|-----------|
+| `nda_keywords` entries | 200 characters |
+| `private_domains` entries | 255 characters |
+| `custom_rules` `description` / `pattern` | 200 characters |
+
+Values exceeding these limits will cause `loadConfig()` to throw a Zod validation error, preventing oversized patterns from entering the scanner.
+
+List sizes are capped too, and a config over a cap fails the load:
+
+| Field | Max entries |
+|-------|-------------|
+| `nda_keywords` | 4096 |
+| `private_domains` | 4096 |
+| `custom_rules` | 1024 |
+
+A `custom_rules` pattern that does not compile as a regular expression also makes `loadConfig()` throw, naming the rule's index and `description` (not the pattern): a rule that cannot be enforced must not load. A pattern that compiles but runs slowly on a fixed probe input is skipped as a ReDoS suspect, with a warning on stderr and a `custom-rules` warning in `leakshield --doctor`. That check is a timing heuristic, not a guarantee: it runs the pattern once and cannot interrupt it, so it cannot prove a pattern safe.
+
 ---
 
 ## Practical Examples
@@ -688,28 +738,6 @@ fi
 ```
 
 ---
-
-## Configuration Validation
-
-Input lengths for dynamic rules are validated when the config is loaded:
-
-| Field | Max length |
-|-------|-----------|
-| `nda_keywords` entries | 200 characters |
-| `private_domains` entries | 255 characters |
-| `custom_rules` `description` / `pattern` | 200 characters |
-
-Values exceeding these limits will cause `loadConfig()` to throw a Zod validation error, preventing oversized patterns from entering the scanner.
-
-List sizes are capped too, and a config over a cap fails the load:
-
-| Field | Max entries |
-|-------|-------------|
-| `nda_keywords` | 4096 |
-| `private_domains` | 4096 |
-| `custom_rules` | 1024 |
-
-A `custom_rules` pattern that does not compile as a regular expression also makes `loadConfig()` throw, naming the rule's index and `description` (not the pattern): a rule that cannot be enforced must not load. A pattern that compiles but runs slowly on a fixed probe input is skipped as a ReDoS suspect, with a warning on stderr and a `custom-rules` warning in `leakshield --doctor`. That check is a timing heuristic, not a guarantee: it runs the pattern once and cannot interrupt it, so it cannot prove a pattern safe.
 
 ## Secret Preview Behavior
 

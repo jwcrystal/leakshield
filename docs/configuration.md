@@ -26,13 +26,13 @@ Length and count limits are listed under [Configuration Validation](#configurati
 
 ## Built-in rule ids
 
-Use these ids in `settings.rule_overrides`. All rules are on by default except the four opt-in rules marked below.
+Use these ids in `settings.rule_overrides`. All rules are on by default except the six opt-in rules marked below.
 
 | Group | Ids |
 |-------|-----|
 | API keys and tokens | `openai-key`, `anthropic-key`, `google-key`, `aws-access-key`, `aws-secret`, `github-pat`, `github-fine-grained-pat`, `github-oauth-app`, `stripe-live-secret`, `stripe-live-publishable`, `slack-bot`, `slack-user-app`, `huggingface-token`, `jwt`, `generic-bearer` |
 | Secrets and credentials | `generic-secret`, `pem-private-key`, `url-userinfo`, `db-connection`, `db-connection-ado` |
-| Personal and financial data | `email`, `id-tw`, `credit-card`, `iban`, `public-ipv4`, `phone-tw` (opt-in), `phone-intl` (opt-in) |
+| Personal and financial data | `email`, `id-tw`, `passport-mrz`, `credit-card`, `iban`, `public-ipv4`, `phone-tw` (opt-in), `phone-intl` (opt-in), `ssn-us` (opt-in), `tw-business-no` (opt-in) |
 | Network | `private-ipv4` (opt-in), `url` (opt-in) |
 
 An example that keeps the default keywords, adds a private domain and turns on `private-ipv4` for one network:

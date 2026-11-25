@@ -26,13 +26,13 @@
 
 ## 內建規則 id
 
-`settings.rule_overrides` 使用這些 id。除了下面標示的四條 opt-in 規則，其餘預設都開啟。
+`settings.rule_overrides` 使用這些 id。除了下面標示的六條 opt-in 規則，其餘預設都開啟。
 
 | 類別 | id |
 |------|----|
 | API key 與 token | `openai-key`、`anthropic-key`、`google-key`、`aws-access-key`、`aws-secret`、`github-pat`、`github-fine-grained-pat`、`github-oauth-app`、`stripe-live-secret`、`stripe-live-publishable`、`slack-bot`、`slack-user-app`、`huggingface-token`、`jwt`、`generic-bearer` |
 | 密碼與憑證 | `generic-secret`、`pem-private-key`、`url-userinfo`、`db-connection`、`db-connection-ado` |
-| 個資與金融資料 | `email`、`id-tw`、`credit-card`、`iban`、`public-ipv4`、`phone-tw`（opt-in）、`phone-intl`（opt-in） |
+| 個資與金融資料 | `email`、`id-tw`、`passport-mrz`、`credit-card`、`iban`、`public-ipv4`、`phone-tw`（opt-in）、`phone-intl`（opt-in）、`ssn-us`（opt-in）、`tw-business-no`（opt-in） |
 | 網路 | `private-ipv4`（opt-in）、`url`（opt-in） |
 
 以下範例保留預設關鍵字、加入一個私有域名，並開啟 `private-ipv4` 只偵測一個網段：

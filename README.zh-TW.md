@@ -146,6 +146,9 @@ leakshield --file ./path/to/file
 | 私鑰 | PEM 私鑰區塊 | 🔴 HIGH |
 | DB 連線字串 | MongoDB、PostgreSQL、MySQL、Redis、ADO 格式等 | 🔴 HIGH |
 | 台灣身份證字號 | 格式驗證 | 🔴 HIGH |
+| 護照（MRZ） | 僅限 TD3 第 2 列：44 個大寫字元，需通過四個 ICAO 9303 檢查碼 | 🔴 HIGH |
+| 美國 SSN | **Opt-in** —— 預設關閉（`rule_overrides: { "ssn-us": true }` 開啟）；只認連字號格式，並排除無效區段、群組與序號 | 🔴 HIGH |
+| 台灣統一編號 | **Opt-in** —— 預設關閉（`rule_overrides: { "tw-business-no": true }` 開啟）；8 位數字，需通過檢查碼 | 🟡 MEDIUM |
 | 信用卡號 | 13–19 位數字，需通過 Luhn 檢查碼 | 🔴 HIGH |
 | IBAN | 緊湊或四字一組格式，需通過 mod-97 檢查碼 | 🔴 HIGH |
 | 公共 IPv4 位址 | 排除私有／回環／CGNAT／保留段；超過四段的點分數字整段回報 | 🟡 MEDIUM |
@@ -158,7 +161,7 @@ leakshield --file ./path/to/file
 | NDA 關鍵字 | 預設值加上自訂（見[設定檔](#設定檔)） | 🔴 HIGH |
 | 私有域名 | 自訂（見[設定檔](#設定檔)） | 🟡 MEDIUM |
 
-> **偵測邊界**（依 `src/rules/builtin.ts`）：通用 secret 規則只比對關鍵字 `password`、`passwd`、`secret`、`private_key`、`client_secret`，且值須 **8 字元以上**；一般的 `api_key=`／`token=` 賦值只有在值本身符合廠商格式時才會命中。無引號的值若是程式碼表達式（如 `process.env.DB_PASSWORD`、`z.string().min(6)`）會跳過，但呼叫參數中含其他字串常值時仍會回報。信用卡與 IBAN 須通過檢查碼，信用卡規則另外跳過單一數字重複的數字串和 UUID 內的數字。URL 內嵌憑證與 DB 連線字串規則會跳過 `${…}`、`{{…}}`、`<…>` 形式的佔位密碼。IP 只涵蓋公開 IPv4，超過四段的點分數字會整段回報，避免內嵌位址漏遮（因此 `2026.10.21.14.32.59` 這類點分日期也會回報）。任何規則都不涵蓋：街道／郵遞地址、日期、IPv6，以及短於 8 字元的通用 secret 賦值。SSH 遠端位址（`user@host:path`、`ssh://user@host/…`）不會回報為 email；私有域名與路徑關鍵字仍適用，`scheme://user:password@host` 的密碼部分則回報為 URL 內嵌憑證。私有 IPv4 需手動開啟，因為這種寫法也會符合版本號與時間戳；`settings.private_cidrs` 會取代預設網段，例如改成組織自己的網段，無法解析的項目會讓設定載入失敗。每條內建規則都有固定 id，可透過設定檔的 `settings.rule_overrides` 開關（[id 清單](docs/configuration.zh-TW.md#內建規則-id)；未知 id 會讓設定載入失敗）；URL 規則預設關閉，因為全面遮罩 URL 會影響 provider endpoint。`block`、`redact`、`transparent` 三種模式和所有宿主都套用同一組規則（內建規則加上你的設定檔）。
+> **偵測邊界**（依 `src/rules/builtin.ts`）：通用 secret 規則只比對關鍵字 `password`、`passwd`、`secret`、`private_key`、`client_secret`，且值須 **8 字元以上**；一般的 `api_key=`／`token=` 賦值只有在值本身符合廠商格式時才會命中。無引號的值若是程式碼表達式（如 `process.env.DB_PASSWORD`、`z.string().min(6)`）會跳過，但呼叫參數中含其他字串常值時仍會回報。信用卡與 IBAN 須通過檢查碼，信用卡規則另外跳過單一數字重複的數字串和 UUID 內的數字。URL 內嵌憑證與 DB 連線字串規則會跳過 `${…}`、`{{…}}`、`<…>` 形式的佔位密碼。IP 只涵蓋公開 IPv4，超過四段的點分數字會整段回報，避免內嵌位址漏遮（因此 `2026.10.21.14.32.59` 這類點分日期也會回報）。護照只讀 MRZ 那一行，標籤後接的裸號碼要自訂規則；SSN 只認 3-2-4 連字號格式。任何規則都不涵蓋：街道／郵遞地址、日期、IPv6，以及短於 8 字元的通用 secret 賦值。SSH 遠端位址（`user@host:path`、`ssh://user@host/…`）不會回報為 email；私有域名與路徑關鍵字仍適用，`scheme://user:password@host` 的密碼部分則回報為 URL 內嵌憑證。私有 IPv4 需手動開啟，因為這種寫法也會符合版本號與時間戳；`settings.private_cidrs` 會取代預設網段，例如改成組織自己的網段，無法解析的項目會讓設定載入失敗。每條內建規則都有固定 id，可透過設定檔的 `settings.rule_overrides` 開關（[id 清單](docs/configuration.zh-TW.md#內建規則-id)；未知 id 會讓設定載入失敗）；URL 規則預設關閉，因為全面遮罩 URL 會影響 provider endpoint。`block`、`redact`、`transparent` 三種模式和所有宿主都套用同一組規則（內建規則加上你的設定檔）。
 
 ---
 

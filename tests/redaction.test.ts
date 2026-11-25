@@ -82,6 +82,17 @@ describe("buildRedactedContent", () => {
     expect(result).toBe("key = [REDACTED_API_KEY];");
   });
 
+  it("gives the new identifier types their own placeholders", () => {
+    const content = "abc DEF 12345678";
+    const findings = [
+      finding({ type: "PII_PASSPORT", match_start: 0, match_end: 3, match_text: "abc" }),
+      finding({ type: "PII_SSN", match_start: 4, match_end: 7, match_text: "DEF" }),
+      finding({ type: "TW_BUSINESS_NO", match_start: 8, match_end: 16, match_text: "12345678" }),
+    ];
+    const result = buildRedactedContent(content, findings);
+    expect(result).toBe("[REDACTED_PASSPORT] [REDACTED_SSN] [REDACTED_BUSINESS_NO]");
+  });
+
   it("replaces secrets/passwords with [REDACTED_PASSWORD]", () => {
     const content = "password = supersecret123";
     const findings = [

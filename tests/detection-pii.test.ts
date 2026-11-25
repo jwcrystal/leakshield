@@ -9,7 +9,7 @@ const config: GuardConfig = {
   settings: { max_chars: 200000, show_line_numbers: false, preview_length: 60 },
 };
 
-const types = (text: string) => scanText(text, config).findings.map((f) => f.type);
+const types = (text: string, cfg: GuardConfig = config) => scanText(text, cfg).findings.map((f) => f.type);
 
 // ─── PII_CREDIT_CARD（Luhn）───────────────────────────────────────────────────
 
@@ -77,5 +77,96 @@ describe("redactText 整合", () => {
     expect(r.redacted).toContain("[REDACTED_PII_CREDIT_CARD]");
     expect(r.redacted).not.toContain("4111111111111111");
     expect(r.redacted).toContain("4111111111111112");
+  });
+});
+
+// ─── PII_PASSPORT（MRZ 第 2 列檢查碼）────────────────────────────────────────
+describe("PII_PASSPORT（MRZ 第 2 列）", () => {
+  const line2 = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+
+  it("四個檢查碼都正確時命中", () => {
+    expect(types(`passport\n${line2}\nend`)).toContain("PII_PASSPORT");
+  });
+
+  it("檢查碼錯一位不命中", () => {
+    expect(types("L898902C36UTO7408122F1204159ZE184226B<<<<<11")).not.toContain("PII_PASSPORT");
+  });
+
+  it("44 個大寫字元但不是 MRZ 不命中", () => {
+    expect(types("A".repeat(44))).not.toContain("PII_PASSPORT");
+  });
+
+  it("不是整行時不命中（MRZ 一定從行首開始）", () => {
+    expect(types(`mrz ${line2}`)).not.toContain("PII_PASSPORT");
+  });
+
+  it("CRLF 行尾仍命中", () => {
+    expect(types(`x\r\n${line2}\r\ny`)).toContain("PII_PASSPORT");
+  });
+
+  it("redact 模式整行遮罩", () => {
+    const r = redactText(`x\n${line2}\ny`, config);
+    expect(r.redacted).toContain("[REDACTED_PII_PASSPORT]");
+  });
+});
+
+// ─── PII_SSN 與 TW_BUSINESS_NO（皆為 opt-in）─────────────────────────────────
+const optInConfig: GuardConfig = {
+  ...config,
+  settings: {
+    ...config.settings,
+    rule_overrides: { "ssn-us": true, "tw-business-no": true },
+  },
+};
+
+describe("PII_SSN（opt-in）", () => {
+  it("預設關閉", () => {
+    expect(types("ssn 123-45-6789 x")).not.toContain("PII_SSN");
+  });
+
+  it("開啟後命中連字號格式", () => {
+    expect(types("ssn 123-45-6789 x", optInConfig)).toContain("PII_SSN");
+  });
+
+  it("無效區段、群組或序號不命中", () => {
+    for (const ssn of ["000-12-3456", "666-12-3456", "900-12-3456", "123-00-6789", "123-45-0000"]) {
+      expect(types(`ssn ${ssn} x`, optInConfig)).not.toContain("PII_SSN");
+    }
+  });
+
+  it("沒有連字號的九位數字不命中", () => {
+    expect(types("ssn 123456789 x", optInConfig)).not.toContain("PII_SSN");
+  });
+});
+
+describe("TW_BUSINESS_NO（opt-in）", () => {
+  it("預設關閉", () => {
+    expect(types("統編 22099131")).not.toContain("TW_BUSINESS_NO");
+  });
+
+  it("開啟後命中舊制與新制檢查碼", () => {
+    for (const value of ["22099131", "04595252", "04595257"]) {
+      expect(types(`統編 ${value}`, optInConfig)).toContain("TW_BUSINESS_NO");
+    }
+  });
+
+  it("第 7 碼為 7 時接受 10 或 1 兩種算法", () => {
+    expect(types("統編 10458574", optInConfig)).toContain("TW_BUSINESS_NO");
+    expect(types("統編 10002478", optInConfig)).toContain("TW_BUSINESS_NO");
+  });
+
+  it("前導零的真實號碼可以命中（不排除 0 開頭）", () => {
+    expect(types("統編 03557311", optInConfig)).toContain("TW_BUSINESS_NO");
+  });
+
+  it("檢查碼錯誤不命中", () => {
+    expect(types("統編 22099132", optInConfig)).not.toContain("TW_BUSINESS_NO");
+    expect(types("統編 12345678", optInConfig)).not.toContain("TW_BUSINESS_NO");
+  });
+
+  it("全部同一數字或位數不符不命中", () => {
+    for (const value of ["00000000", "55555555", "2209913", "220991310"]) {
+      expect(types(`統編 ${value}`, optInConfig)).not.toContain("TW_BUSINESS_NO");
+    }
   });
 });

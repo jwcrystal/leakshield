@@ -26,13 +26,13 @@
 
 ## 內建規則 id
 
-`settings.rule_overrides` 使用這些 id。除了下面標示的四條 opt-in 規則，其餘預設都開啟。
+`settings.rule_overrides` 使用這些 id。除了下面標示的六條 opt-in 規則，其餘預設都開啟。
 
 | 類別 | id |
 |------|----|
 | API key 與 token | `openai-key`、`anthropic-key`、`google-key`、`aws-access-key`、`aws-secret`、`github-pat`、`github-fine-grained-pat`、`github-oauth-app`、`stripe-live-secret`、`stripe-live-publishable`、`slack-bot`、`slack-user-app`、`huggingface-token`、`jwt`、`generic-bearer` |
 | 密碼與憑證 | `generic-secret`、`pem-private-key`、`url-userinfo`、`db-connection`、`db-connection-ado` |
-| 個資與金融資料 | `email`、`id-tw`、`credit-card`、`iban`、`public-ipv4`、`phone-tw`（opt-in）、`phone-intl`（opt-in） |
+| 個資與金融資料 | `email`、`id-tw`、`passport-mrz`、`credit-card`、`iban`、`public-ipv4`、`phone-tw`（opt-in）、`phone-intl`（opt-in）、`ssn-us`（opt-in）、`tw-business-no`（opt-in） |
 | 網路 | `private-ipv4`（opt-in）、`url`（opt-in） |
 
 以下範例保留預設關鍵字、加入一個私有域名，並開啟 `private-ipv4` 只偵測一個網段：
@@ -102,6 +102,21 @@ settings:
 - **`path`** — 可設定也會驗證，但路徑範圍**尚未實作**：掃描器拿不到 prompt 或工具輸出的來源路徑。這些規則目前套用於所有掃描文字，設定 `path` 時 `--doctor` 會警告。
 
 Allowlist 項目屬於設定檔的一部分，所以會改變設定檔指紋（檔案的 sha256），而授權比對的正是這個指紋。
+
+### 需要標籤的 PII
+
+內建規則認得的是能自己成立的格式。姓名、地址、生日、病歷號與裸護照號碼不是：同樣的字元在程式碼與一般文字裡到處都是。`config/guard.config.example.yaml` 附了一組註解掉的樣式，每一條都要旁邊有欄位標籤才會命中；唯一的例外是台灣地址，它靠城市名清單定位。
+
+另外兩種相關的識別碼已經有規則：`ssn-us`（opt-in，不需要標籤）與 `passport-mrz`（機器可讀區那一行，不需要標籤）。範例不再重複它們，改用 `rule_overrides`；MRZ 以外的護照號碼與 MAC 位址仍需要在範例設定裡挑一條樣式。
+
+寫這些樣式時量到四件事，也是它們長成這樣的原因：
+
+- **姓名規則要保留 `flags: ""`。** 預設旗標是 `i`，所以 `Name` 標籤也會命中程式碼裡的每個 `name:` 鍵、CI 工作名稱，以及「Name this route」這種句子。以 18 行普通程式碼與文字實測，不分大小寫會有 4 筆誤報，區分大小寫則為 0。
+- **自由文字的值要和標籤一起遮。** lookbehind 從右往左比對，分隔符長度可變時會從冒號本身開始，冒號一起被遮掉；把「標籤＋分隔符＋值」當成一個單位比對就沒有這個邊界，還原時仍是原文。
+- **JSON 的鍵是帶引號的。** 像 `"mrn"` 這種鍵，名稱與冒號之間還有一個 `"`，所以分隔符類別要包含它；否則工具參數與設定檔 dump 一律不命中。
+- **英文地址分支要求冒號與數字。** 程式碼裡叫 `address` 的賦值很常見（`address = server.address()`），在這個 repo 上還沒加這道閘門前有 5 筆誤報。台灣地址則用城市名清單：泛用的「市…區…路…號」樣式會把地址前面的動詞一起吃進遮罩。
+
+這個 repo 自己的文字不是這幾種形狀的語料：掃 `src/`、`docs/`、`tests/`、`config/`（249 個檔案）完全沒有命中。零代表形狀不存在，不代表樣式安全。請用自己的流量量測，並刪掉用不到的標籤。量測紀錄見 [2026-11-25 label-gated PII](evidence/2026-11-25-label-gated-pii.md)。
 
 ## 設定檔驗證
 

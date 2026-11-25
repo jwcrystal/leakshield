@@ -4,6 +4,11 @@ All notable changes are listed here.
 
 ## Unreleased
 
+### Added
+
+- Three identifier rules the built-in set did not cover. `passport-mrz` ships enabled and matches a TD3 machine-readable line only when its four ICAO 9303 check digits validate. `ssn-us` and `tw-business-no` are opt-in (`settings.rule_overrides`), because a hyphenated SSN carries no checksum and, under the 2023 rule, an 8-digit number passes the business-number checksum about one time in five (a date such as `20261007` passes). Numbers starting with 0 are real business numbers, so the rule does not exclude them; a repeated digit and all zeros are rejected. The new finding types `PII_PASSPORT`, `PII_SSN` and `TW_BUSINESS_NO` get their own placeholder labels in redact mode.
+- `config/guard.config.example.yaml` now documents commented label-gated patterns for names, addresses, dates of birth, medical record numbers, SSNs, MAC addresses and passport numbers, all off by default. `custom_rules` stays empty; the patterns and the measurements behind them are in [the evidence record](docs/evidence/2026-11-25-label-gated-pii.md).
+
 ### Changed
 
 - An explicitly named guard config file that does not exist now fails the load instead of falling back to the built-in defaults, which silently dropped your keywords, domains, custom rules and `env_files`. This covers the OpenCode `configPath` option (every request is refused, with a reason that points to `leakshield --doctor`), pi's `LEAKSHIELD_CONFIG` (the extension fails to load) and the Claude Code proxy's `--config` (the proxy exits 1 before listening). `--doctor` reports `BROKEN` and names the missing path. When no path is given, the config search and the built-in defaults are unchanged. A setup that points at a file you have not created yet is now refused; create the file or remove the setting.

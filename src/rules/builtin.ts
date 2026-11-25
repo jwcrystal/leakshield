@@ -48,6 +48,48 @@ function ibanValid(raw: string): boolean {
   return remainder === 1;
 }
 
+/** ICAO 9303 檢查碼：字元權重 7,3,1 循環，`<` 為 0、A=10…Z=35。 */
+function mrzCheckDigit(span: string): string {
+  let sum = 0;
+  for (let i = 0; i < span.length; i++) {
+    const ch = span[i];
+    const value = ch === "<" ? 0 : ch >= "0" && ch <= "9" ? ch.charCodeAt(0) - 48 : ch.charCodeAt(0) - 55;
+    sum += value * (i % 3 === 0 ? 7 : i % 3 === 1 ? 3 : 1);
+  }
+  return String(sum % 10);
+}
+
+/**
+ * TD3（護照）第 2 列：護照號碼、出生日期、到期日與複合欄各有一個檢查碼。
+ * 只接受「44 個大寫英數／`<`」的整行再驗這四碼，所以一般大寫字串不會誤命中。
+ */
+function mrzLine2Valid(raw: string): boolean {
+  if (raw.length !== 44) return false;
+  return (
+    mrzCheckDigit(raw.slice(0, 9)) === raw[9] &&
+    mrzCheckDigit(raw.slice(13, 19)) === raw[19] &&
+    mrzCheckDigit(raw.slice(21, 27)) === raw[27] &&
+    mrzCheckDigit(raw.slice(0, 10) + raw.slice(13, 20) + raw.slice(21, 43)) === raw[43]
+  );
+}
+
+/**
+ * 台灣統一編號：乘積的各位數字和可被 5 整除（財政部 2023-04 起；被 10 整除的舊號碼必定
+ * 也通過，所以不另外判斷舊制）。第 7 碼為 7 時乘積是 28，官方允許把「2+8=10」再視為 1，
+ * 因此那一種算法也接受。全部同一個數字（含 00000000）不算：檢查碼對它沒有鑑別力。
+ */
+function twBusinessNoValid(raw: string): boolean {
+  if (!/^[0-9]{8}$/.test(raw) || /^(\d)\1{7}$/.test(raw)) return false;
+  const weights = [1, 2, 1, 2, 1, 2, 4, 1];
+  let sum = 0;
+  for (let i = 0; i < 8; i++) {
+    const product = Number(raw[i]) * weights[i];
+    sum += Math.floor(product / 10) + (product % 10);
+  }
+  if (sum % 5 === 0) return true;
+  return raw[6] === "7" && (sum - 9) % 5 === 0;
+}
+
 /** 僅公共可路由 IPv4 視為敏感；私有／回環／鏈路本地／CGNAT／保留段不命中（config 常見值）。 */
 function publicIPv4(raw: string): boolean {
   const octets = raw.split(".").map(Number);
@@ -346,6 +388,37 @@ export const BUILTIN_RULES: Rule[] = [
     description: "台灣身份證字號",
     // 加上 word boundary 避免擷取較長字串的片段
     pattern: /\b[A-Z][12]\d{8}\b/g,
+  },
+  {
+    id: "passport-mrz",
+    type: "PII_PASSPORT",
+    severity: "HIGH",
+    description: "護照號碼（MRZ 第 2 列）",
+    // 護照號碼沒有通用格式，猜「標籤＋號碼」會命中任何 6–9 位英數；只有 MRZ 那一行
+    // 自帶四個檢查碼，能用形狀以外的證據判斷，所以只收 TD3 第 2 列。
+    pattern: /^[A-Z0-9<]{44}(?=\r?$)/gm,
+    validate: mrzLine2Valid,
+  },
+  {
+    id: "ssn-us",
+    type: "PII_SSN",
+    severity: "HIGH",
+    description: "美國社會安全號碼（SSN）",
+    // Opt-in：只有形狀、沒有檢查碼。000/666/9xx 區段、00 群組、0000 序號都不是有效 SSN。
+    // 要開啟：settings.rule_overrides["ssn-us"]: true
+    optIn: true,
+    pattern: /\b(?!000|666|9\d{2})\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b/g,
+  },
+  {
+    id: "tw-business-no",
+    type: "TW_BUSINESS_NO",
+    severity: "MEDIUM",
+    description: "台灣統一編號",
+    // Opt-in：新制檢查碼只約掉八成，日期、流水號與版本號都可能通過，不算低誤報。
+    // 要開啟：settings.rule_overrides["tw-business-no"]: true
+    optIn: true,
+    pattern: /(?<!\d)[0-9]{8}(?!\d)/g,
+    validate: twBusinessNoValid,
   },
 
   // ── 資料庫連線字串 ────────────────────────────────────────────────────────

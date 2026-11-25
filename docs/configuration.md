@@ -26,13 +26,13 @@ Length and count limits are listed under [Configuration Validation](#configurati
 
 ## Built-in rule ids
 
-Use these ids in `settings.rule_overrides`. All rules are on by default except the four opt-in rules marked below.
+Use these ids in `settings.rule_overrides`. All rules are on by default except the six opt-in rules marked below.
 
 | Group | Ids |
 |-------|-----|
 | API keys and tokens | `openai-key`, `anthropic-key`, `google-key`, `aws-access-key`, `aws-secret`, `github-pat`, `github-fine-grained-pat`, `github-oauth-app`, `stripe-live-secret`, `stripe-live-publishable`, `slack-bot`, `slack-user-app`, `huggingface-token`, `jwt`, `generic-bearer` |
 | Secrets and credentials | `generic-secret`, `pem-private-key`, `url-userinfo`, `db-connection`, `db-connection-ado` |
-| Personal and financial data | `email`, `id-tw`, `credit-card`, `iban`, `public-ipv4`, `phone-tw` (opt-in), `phone-intl` (opt-in) |
+| Personal and financial data | `email`, `id-tw`, `passport-mrz`, `credit-card`, `iban`, `public-ipv4`, `phone-tw` (opt-in), `phone-intl` (opt-in), `ssn-us` (opt-in), `tw-business-no` (opt-in) |
 | Network | `private-ipv4` (opt-in), `url` (opt-in) |
 
 An example that keeps the default keywords, adds a private domain and turns on `private-ipv4` for one network:
@@ -127,6 +127,47 @@ settings:
 
 Allowlist entries are part of the config file, so they change its fingerprint
 (sha256 of the file), which is what authorizations compare against.
+
+### Label-gated PII
+
+The built-in rules recognise formats that stand on their own. Names, addresses,
+dates of birth, medical record numbers and bare passport numbers do not: the same
+characters fill ordinary code and prose. `config/guard.config.example.yaml` ships
+a commented set of patterns for them. Every one fires only after a field label,
+except the Taiwan address shape, which is anchored on a city name instead.
+
+Two related identifiers already have their own rules: `ssn-us` (opt-in, no label
+needed) and `passport-mrz` (a machine-readable line, no label needed). The
+commented patterns do not repeat them; use `rule_overrides` instead. A passport
+number outside an MRZ line, and a MAC address, still need one of the example
+patterns.
+
+Four things were measured while writing them, and they are why the patterns
+look the way they do:
+
+- **Keep `flags: ""` on the name rule.** The default flag is `i`, so a `Name`
+  label also matches every `name:` key in code, CI job names and sentences such
+  as "Name this route". Over 18 lines of ordinary code and prose the
+  case-insensitive form produced 4 false matches; the case-sensitive form
+  produced none.
+- **Mask a free-text value together with its label.** A lookbehind with a
+  variable-width separator is matched right-to-left, so it can start at the
+  colon itself and redact the colon; matching label, separator and value as one
+  unit has no such edge, and restoration returns the same text.
+- **JSON keys arrive quoted.** A key such as `"mrn"` puts a `"` between the name
+  and the colon, so the separator class includes it; without that the rule never
+  fires on tool arguments or config dumps.
+- **The English address branch needs a colon and a digit.** An assignment named
+  `address` is common in code (`address = server.address()`), and on this
+  repository it produced 5 false matches before that gate. The Taiwan shape uses
+  a city list for the same reason: a generic `…市…區…路…號` also swallows the
+  verb in front of an address.
+
+The repository's own text is not a corpus for these shapes: scanning `src/`,
+`docs/`, `tests/` and `config/` (249 files) produced no match at all. A zero
+means the shapes are absent, not that a pattern is safe. Measure against your
+own traffic, and drop the labels you never use. The measurement record is
+[2026-11-25 label-gated PII](evidence/2026-11-25-label-gated-pii.md).
 
 ## Configuration Validation
 

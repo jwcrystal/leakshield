@@ -9,7 +9,7 @@
 #   4. Run `leakshield --doctor` to check the file loads.
 #
 # Without any config file, the built-in defaults apply. Full reference:
-# https://github.com/jwcrystal/leakshield#configuration
+# https://github.com/jwcrystal/leakshield/blob/main/docs/configuration.md
 
 # ─── Confidential keywords ──────────────────────────────────────────────
 # Words that must not reach a model. Matching ignores case. English words match
@@ -45,7 +45,7 @@ custom_rules: []
 #   severity: HIGH
 #
 # More options (flags, word_boundary, per-rule allow list) are described in
-# the README's "Custom Rules" section.
+# docs/configuration.md, "Custom Rules".
 
 # ─── Scan settings ──────────────────────────────────────────────────────
 settings:
@@ -63,9 +63,9 @@ settings:
   # env_files:
   #   - .env
 
-  # Optional: turn built-in rules on or off. The README's "Detection Coverage"
-  # table names the opt-in rules; every id is in BUILTIN_RULE_IDS in
-  # src/rules/builtin.ts. An unknown id stops the config from loading.
+  # Optional: turn built-in rules on or off. docs/configuration.md lists every
+  # rule id ("Built-in rule ids") and marks the opt-in ones. An unknown id
+  # stops the config from loading.
   # rule_overrides:
   #   url: true            # opt-in rule, off by default
   #   phone-intl: false

@@ -158,43 +158,7 @@ leakshield --file ./path/to/file
 | NDA 關鍵字 | 預設值加上自訂（見[設定檔](#設定檔)） | 🔴 HIGH |
 | 私有域名 | 自訂（見[設定檔](#設定檔)） | 🟡 MEDIUM |
 
-> **偵測邊界**（依 `src/rules/builtin.ts`）：通用 secret 規則只比對關鍵字 `password`、`passwd`、`secret`、`private_key`、`client_secret`，且值須 **8 字元以上**；一般的 `api_key=`／`token=` 賦值只有在值本身符合廠商格式時才會命中。無引號的值若是程式碼表達式（如 `process.env.DB_PASSWORD`、`z.string().min(6)`）會跳過，但呼叫參數中含其他字串常值時仍會回報。信用卡與 IBAN 須通過檢查碼，信用卡規則另外跳過單一數字重複的數字串和 UUID 內的數字。URL 內嵌憑證與 DB 連線字串規則會跳過 `${…}`、`{{…}}`、`<…>` 形式的佔位密碼。IP 只涵蓋公開 IPv4，超過四段的點分數字會整段回報，避免內嵌位址漏遮（因此 `2026.10.21.14.32.59` 這類點分日期也會回報）。任何規則都不涵蓋：街道／郵遞地址、日期、IPv6，以及短於 8 字元的通用 secret 賦值。SSH 遠端位址（`user@host:path`、`ssh://user@host/…`）不會回報為 email；私有域名與路徑關鍵字仍適用，`scheme://user:password@host` 的密碼部分則回報為 URL 內嵌憑證。私有 IPv4 需手動開啟，因為這種寫法也會符合版本號與時間戳；`settings.private_cidrs` 會取代預設網段，例如改成組織自己的網段，無法解析的項目會讓設定載入失敗。每條內建規則都有固定 id，可透過設定檔的 `settings.rule_overrides` 開關（[id 清單](#內建規則-id)；未知 id 會讓設定載入失敗）；URL 規則預設關閉，因為全面遮罩 URL 會影響 provider endpoint。`block`、`redact`、`transparent` 三種模式和所有宿主都套用同一組規則（內建規則加上你的設定檔）。
-
----
-
-## 決策模型
-
-每次掃描都會產生一個**決策**，告訴呼叫端該如何處理內容。CLI 與 Web UI 會直接回報這個決策；宿主整合則依命中結果處理（transparent 模式遮罩，`redact`、`block` 模式取代或拒絕）：
-
-| 決策 | 時機 | 風險等級 | 意義 |
-|------|------|----------|------|
-| `ALLOW` | 沒有發現 | LOW | 內容乾淨，可安全送出 |
-| `WARN` | 只有 LOW 嚴重度的發現 | MEDIUM | 偵測到次要項目，顯示提醒，內容仍可送出 |
-| `CONFIRM` | 有 MEDIUM 或 HIGH 的發現 | HIGH / CRITICAL | 偵測到敏感內容，使用者必須明確確認 |
-
-### CONFIRM 的處理方式
-
-決策為 `CONFIRM` 時，CLI 是非互動式的：會印出警告卡片與下一步提示，不會請你選擇。提示會建議使用 `--format json`（讀取 `redactedContent`）或 `--redact`（輸出脫敏版本）。Exit code `1` 表示內容已被攔截。
-
-`CONFIRM` 決策包含：
-- `recommendedAction`：`REVIEW`（MEDIUM 發現）或 `BLOCK`（HIGH 發現）
-- `safePreview`：圍繞第一個發現的遮罩摘錄
-- `redactedContent`：所有敏感片段都已取代的完整內容
-
-無法精確定位敏感片段時（例如編碼片段中夾了零寬字元），不會有 `safePreview` 和 `redactedContent`。欄位不存在代表沒有可用的安全版本。
-
-### JSON 輸出欄位
-
-使用 `--format json` 時，輸出包含以下與決策相關的欄位：
-
-| 欄位 | 說明 |
-|------|------|
-| `decision` | `ALLOW`、`WARN` 或 `CONFIRM` |
-| `riskLevel` | `LOW`、`MEDIUM`、`HIGH` 或 `CRITICAL` |
-| `recommendedAction` | `REVIEW` 或 `BLOCK`（僅 CONFIRM） |
-| `findings` | 已清理的發現陣列（不含內部中繼資料） |
-| `safePreview` | 遮罩摘錄（僅 CONFIRM；可能不存在） |
-| `redactedContent` | 完整的脫敏文字（僅 CONFIRM；可能不存在） |
+> **偵測邊界**（依 `src/rules/builtin.ts`）：通用 secret 規則只比對關鍵字 `password`、`passwd`、`secret`、`private_key`、`client_secret`，且值須 **8 字元以上**；一般的 `api_key=`／`token=` 賦值只有在值本身符合廠商格式時才會命中。無引號的值若是程式碼表達式（如 `process.env.DB_PASSWORD`、`z.string().min(6)`）會跳過，但呼叫參數中含其他字串常值時仍會回報。信用卡與 IBAN 須通過檢查碼，信用卡規則另外跳過單一數字重複的數字串和 UUID 內的數字。URL 內嵌憑證與 DB 連線字串規則會跳過 `${…}`、`{{…}}`、`<…>` 形式的佔位密碼。IP 只涵蓋公開 IPv4，超過四段的點分數字會整段回報，避免內嵌位址漏遮（因此 `2026.10.21.14.32.59` 這類點分日期也會回報）。任何規則都不涵蓋：街道／郵遞地址、日期、IPv6，以及短於 8 字元的通用 secret 賦值。SSH 遠端位址（`user@host:path`、`ssh://user@host/…`）不會回報為 email；私有域名與路徑關鍵字仍適用，`scheme://user:password@host` 的密碼部分則回報為 URL 內嵌憑證。私有 IPv4 需手動開啟，因為這種寫法也會符合版本號與時間戳；`settings.private_cidrs` 會取代預設網段，例如改成組織自己的網段，無法解析的項目會讓設定載入失敗。每條內建規則都有固定 id，可透過設定檔的 `settings.rule_overrides` 開關（[id 清單](docs/configuration.zh-TW.md#內建規則-id)；未知 id 會讓設定載入失敗）；URL 規則預設關閉，因為全面遮罩 URL 會影響 provider endpoint。`block`、`redact`、`transparent` 三種模式和所有宿主都套用同一組規則（內建規則加上你的設定檔）。
 
 ---
 
@@ -220,61 +184,7 @@ npm run build
 
 本機開發時，全域安裝或 `npm link` 這份 build 後即可直接使用 `leakshield`；在此 repository 內不用安裝，直接用 `npm run scan -- ...` 即可。
 
-### npm scripts 速查
-
-| 指令 | 說明 |
-|------|------|
-| `npm run build` | 先清除再編譯 TypeScript → `dist/` |
-| `npm run clean` | 移除 `dist/` |
-| `npm start` | 執行已 build 的 CLI（`node dist/cli.js --cli`） |
-| `npm run dev` | CLI 模式（不需先 build） |
-| `npm run scan` | CLI 掃描（不需先 build） |
-| `npm run web` | 啟動本機 Web UI（不需先 build） |
-| `npm test` | 執行單元測試 |
-| `npm run test:watch` | 以 watch 模式執行測試 |
-| `npm run binary` | 建置當前平台的獨立執行檔（macOS ARM） |
-| `npm run binary:win` | 跨編譯 Windows x64 |
-| `npm run binary:linux` | 跨編譯 Linux x64 |
-| `npm run binary:mac-intel` | 跨編譯 macOS Intel |
-| `npm run binary:win-icon` | 建置帶圖示的 Windows 執行檔（`scripts/build-win.js`） |
-| `npm run binary:all` | 一次建置所有平台 |
-| `npm run bundle:mac` | 建置執行檔並打包 macOS bundle（`scripts/bundle-mac.sh`） |
-
----
-
-## 獨立執行檔
-
-無法使用 Node.js 或 npm？用 [Bun](https://bun.sh) 建置成單一執行檔，目標機器不需任何 runtime。
-
-執行檔就是把 CLI（`src/cli.ts`）編成單一檔案，不是另一種模式：
-
-| 功能 | 執行檔 |
-|------|--------|
-| CLI 掃描與脫敏、Web UI | 支援 |
-| `--claude-code-proxy`、`--doctor` | 有包含，但未在 Bun 編譯的執行檔中驗證；要保護宿主請用 npm 套件 |
-| OpenCode plugin、pi extension | 無法使用：宿主載入的是 npm 套件，不是執行檔 |
-
-```bash
-# 一鍵建置當前平台
-npm run binary
-
-# 跨平台編譯
-npm run binary:win     # Windows x64  → leakshield.exe
-npm run binary:linux   # Linux x64    → leakshield-linux
-npm run binary:all     # 全平台
-```
-
-或直接用 Bun：
-
-```bash
-bun build --compile --target=bun-windows-x64 ./src/cli.ts --outfile=leakshield.exe
-```
-
-產出單一執行檔，直接交給任何人，無任何相依套件。
-
-### 自訂設定（binary 與 npm 使用者）
-
-執行檔與 npm 套件可直接使用內建預設值，不附設定檔。要加入自己的關鍵字、域名或規則，見[設定](#設定檔)章節。
+不想裝 Node.js 時，可以用 Bun 把 CLI 建置成單一執行檔，見[自行建置](BINARY-GUIDE.zh-TW.md#自行建置)。開發用的 npm scripts 列在 [CONTRIBUTING](CONTRIBUTING.md#npm-scripts)（英文）。
 
 ---
 
@@ -349,187 +259,15 @@ Proxy 會遮罩 Claude Code 送出的每個 Anthropic Messages 請求（含 `cou
 
 ---
 
-### CLI
+### CLI 與 Web UI
 
 ```bash
-# 掃描文字
-npm run scan -- --text 'sk-proj-test1234567890abcdef my_password="super_secret"'
-
-# 掃描單一檔案
-npm run scan -- --file ./src/config.ts
-
-# 掃描整個目錄
-npm run scan -- --dir ./src
-
-# 只掃描特定副檔名
-npm run scan -- --dir ./src --ext .ts .env .json
-
-# 從 stdin 讀取
-cat .env | npm run scan -- --stdin
-
-# 全域安裝後
-leakshield --file ./config.ts
+leakshield --file ./src/config.ts          # 掃描檔案（也可用 --text、--dir、--stdin）
+leakshield --redact --file .env --out .env.redacted
+leakshield --web                           # 本機瀏覽器介面 http://localhost:3000
 ```
 
-Exit code：`0` = 安全（ALLOW），`1` = 有發現（WARN 或 CONFIRM），`2` = 檔案不存在
-
-#### 脫敏模式（Redaction）
-
-將敏感內容替換為 `[REDACTED_TYPE]` 佔位符，而非只是回報：
-
-```bash
-# 脫敏 stdin，結果輸出到 stdout
-echo 'token=sk-proj-test1234567890abcdef' | npm run scan -- --redact --stdin
-
-# 脫敏檔案，結果寫入新檔
-npm run scan -- --redact --file .env --out .env.redacted
-
-# Dry-run：只預覽哪些內容會被脫敏，不產生任何輸出
-npm run scan -- --redact --dry-run --file .env
-```
-
-脫敏後的文字輸出至 **stdout**；findings 摘要輸出至 **stderr**，方便在 pipeline 中分開處理。
-
-| Flag | 行為 |
-|------|------|
-| `--redact` | 替換命中內容為 `[REDACTED_TYPE]`，寫入 stdout；脫敏後仍有命中時不輸出 |
-| `--redact --dry-run` | 僅預覽命中位置，不輸出；有命中時 exit `1` |
-| `--redact --out <path>` | 脫敏結果寫入指定檔案，不寫到 stdout |
-| `--redact --format json` | 以 JSON 格式回傳 `redacted`、`findings`、`summary` |
-
-#### CLI 選項
-
-| 選項 | 說明 |
-|------|------|
-| `--format json` | 輸出 JSON（適合 CI/CD） |
-| `--min-severity high` | 只回報 HIGH（或 `medium` / `low`） |
-| `--allow-outside` | 允許掃描工作目錄以外的路徑（預設禁止） |
-| `--enable-encoding-detection` | 啟用 Base64/URL/Hex 解碼檢測（預設關閉） |
-
-#### 編碼檢測功能
-
-**為什麼需要編碼檢測？**
-
-攻擊者可能使用編碼技巧繞過敏感資料檢測：
-- **Base64 編碼**：將 API Key 或密碼編碼後傳送
-- **URL 編碼**：使用 `%20` 等格式隱藏關鍵字
-- **Hex 編碼**：十六進制編碼繞過模式匹配
-
-**啟用編碼檢測**
-
-```bash
-# 啟用編碼檢測掃描
-npm run scan -- --enable-encoding-detection --text "c2stcHJvai10ZXN0MTIzNDU2Nzg5MGFiY2RlZg=="
-
-# 結合其他選項使用
-npm run scan -- --enable-encoding-detection --file ./config.yaml --format json
-
-# 掃描目錄時啟用
-npm run scan -- --enable-encoding-detection --dir ./src --ext .ts .env
-```
-
-**效能考量**
-
-編碼檢測會額外嘗試解碼並重新掃描內容，可能增加 10-30% 的掃描時間。建議：
-- **預設關閉**：一般掃描使用預設值即可
-- **按需啟用**：在處理外部來源或不明內容時啟用
-- **CI/CD 環境**：建議在 CI pipeline 中啟用以攔截編碼攻擊
-
-**檢測範例**
-
-```bash
-# Base64 編碼的 API Key
-echo "c2stcHJvai10ZXN0MTIzNDU2Nzg5MGFiY2RlZg==" | npm run scan -- --enable-encoding-detection --stdin
-# → 檢測到 OpenAI API Key（合成值）
-
-# URL 編碼的敏感內容
-echo "password%3Dsecret123" | npm run scan -- --enable-encoding-detection --stdin
-# → 檢測到 password 關鍵字
-
-# 正常文字不受影響
-echo "This is safe content" | npm run scan -- --enable-encoding-detection --stdin
-# → 安全，無敏感內容
-```
-
-偵測到編碼內容時，文字與 JSON 摘要都會列出編碼類型，語言依 `LEAKSHIELD_LANG` 而定。下面是 `LEAKSHIELD_LANG=zh-TW` 的輸出；預設為英文，會顯示 `[WARNING: Encoded content: Base64, URL]`：
-
-```
-[WARNING: 編碼檢測: Base64, URL]
-```
-
-#### 工作目錄路徑限制
-
-預設情況下，`--file` 與 `--dir` 只接受**工作目錄內**的路徑。若嘗試掃描工作目錄以外的路徑（例如 `../shared.env` 或 `/etc/passwd`），會直接拋出錯誤並終止。
-
-如需掃描工作目錄以外的路徑，請明確加上 `--allow-outside`：
-
-```bash
-npm run scan -- --file ../shared.env --allow-outside
-```
-
-> ⚠️ 工作目錄外的掃描為選擇性開啟功能，僅在確實需要時使用。
-
-#### 忽略指令
-
-CLI 與 Web UI 會跳過含有 `leakshield-ignore`、`guard:skip`、`guard:ignore`、`sg-ignore`、`no-scan` 或 `skip-guard`（不分大小寫）的整行。即使該行有真實密碼，也會回報 `ALLOW`。
-
-> ⚠️ 任何能編輯受掃描檔案的人都能加上這類指令，所以 CLI 掃描擋不住不受信任的變更。宿主整合（OpenCode plugin、pi extension、Claude Code proxy）都不理會這些指令。
-
----
-
-### Web UI
-
-啟動本地 Web 伺服器，在瀏覽器中使用：
-
-```bash
-# 已安裝套件（預設 port 3000）
-leakshield --web
-
-# 在 repo 內、不需建置
-npx tsx src/cli.ts --web
-
-# 指定 port
-npx tsx src/cli.ts --web --port 3001
-
-# Build 後的版本
-node dist/cli.js --web --port 3001
-```
-
-開啟瀏覽器 `http://localhost:3001`，貼上內容後按「掃描」或 Ctrl+Enter。
-
-#### REST API
-
-也可直接呼叫 API：
-
-```bash
-# 掃描文字
-curl -s -X POST http://localhost:3001/scan \
-  -H 'Content-Type: application/json' \
-  -d '{"content": "sk-proj-test1234567890abcdef my_password=\"super_secret\""}' | jq
-
-# 回應格式
-{
-  "decision": "CONFIRM",
-  "riskLevel": "CRITICAL",
-  "summary": "...",
-  "findings": [
-    { "type": "API_KEY", "severity": "HIGH", "description": "OpenAI API Key", "preview": "****", "line": 1 },
-    { "type": "SECRET", "severity": "HIGH", "description": "...", "preview": "****", "line": 1 }
-  ],
-  "recommendedAction": "BLOCK",
-  "redactedContent": "[REDACTED_API_KEY] my_[REDACTED_SECRET]",
-  "redactionVerified": true,
-  "residualFindings": 0,
-  "wasTruncated": false
-}
-```
-
-`redactionVerified` 為 `false` 時不會回傳 `redactedContent`。
-
-| 端點 | 方法 | 說明 |
-|------|------|------|
-| `/` | GET | Web UI HTML |
-| `/scan` | POST | 掃描 `{ "content": string }`，回傳 JSON |
+Exit code：`0` = 安全，`1` = 有命中，`2` = 路徑錯誤。選項、脫敏、編碼偵測、忽略指令、REST API、決策模型與 JSON 欄位，見 [CLI 與 Web UI](docs/cli.zh-TW.md)。
 
 ---
 
@@ -546,58 +284,6 @@ curl -fsSL https://raw.githubusercontent.com/jwcrystal/leakshield/main/config/gu
 leakshield --doctor   # 確認設定檔能載入
 ```
 
-### 欄位總表
-
-每個欄位都可以省略。省略的欄位使用預設值；不認得的欄位會被忽略。
-
-| 欄位 | 預設值 | 作用 | 細節 |
-|------|--------|------|------|
-| `nda_keywords` | `CONFIDENTIAL`、`INTERNAL ONLY`、`DO NOT SHARE`、`NDA` | 命中時回報 HIGH，不分大小寫。首尾是 ASCII 英數字的關鍵字以整字比對（`NDA` 不會命中 `agenda`）；中日韓關鍵字以子字串比對。列出清單會取代預設值；`[]` 代表關閉 | — |
-| `private_domains` | 無 | 命中時回報 MEDIUM。不分大小寫的子字串比對；填完整 hostname 誤判較少 | — |
-| `custom_rules` | 無 | 自訂正規表示式，含 `description`、`pattern`、`severity`（預設 `HIGH`） | [自訂規則](#自訂規則) |
-| `settings.max_chars` | `200000` | 每筆輸入的掃描上限。CLI 掃描前 `max_chars` 個字元；transparent 模式遇到更長的內容會拒絕，不會截斷後送出 | — |
-| `settings.show_line_numbers` | `true` | 命中結果是否附上行號與欄位 | — |
-| `settings.preview_length` | `60` | 第一個命中周圍、已遮罩的 `safePreview` 摘錄長度 | [敏感資訊預覽行為](#敏感資訊預覽行為) |
-| `settings.encoding_detection` | `false` | 掃描前先解碼 Base64、URL、Hex 文字（OpenCode plugin 一律開啟） | [編碼檢測功能](#編碼檢測功能) |
-| `settings.env_files` | 無 | 要做精確值比對的檔案 | [`.env` 精確值偵測](#env-精確值偵測) |
-| `settings.rule_overrides` | `{}` | 依 id 開關內建規則，例如 `{ url: true, email: false }`。不認得的 id 會讓設定載入失敗 | [內建規則 id](#內建規則-id) |
-| `settings.private_cidrs` | RFC 1918、CGNAT、link-local | opt-in 的 `private-ipv4` 規則要偵測的 IPv4 網段。列出清單會**取代**預設網段，例如只偵測自己的 VPN。CIDR 格式錯誤會讓設定載入失敗 | — |
-| `settings.allowlist` | 無 | 任何規則都不回報的精確值。**這是真正的 bypass**：值會原樣送到模型 | [自訂規則](#自訂規則) |
-
-長度與數量上限見[設定檔驗證](#設定檔驗證)。
-
-### 內建規則 id
-
-`settings.rule_overrides` 使用這些 id。除了下面標示的四條 opt-in 規則，其餘預設都開啟。
-
-| 類別 | id |
-|------|----|
-| API key 與 token | `openai-key`、`anthropic-key`、`google-key`、`aws-access-key`、`aws-secret`、`github-pat`、`github-fine-grained-pat`、`github-oauth-app`、`stripe-live-secret`、`stripe-live-publishable`、`slack-bot`、`slack-user-app`、`huggingface-token`、`jwt`、`generic-bearer` |
-| 密碼與憑證 | `generic-secret`、`pem-private-key`、`url-userinfo`、`db-connection`、`db-connection-ado` |
-| 個資與金融資料 | `email`、`id-tw`、`credit-card`、`iban`、`public-ipv4`、`phone-tw`（opt-in）、`phone-intl`（opt-in） |
-| 網路 | `private-ipv4`（opt-in）、`url`（opt-in） |
-
-以下範例保留預設關鍵字、加入一個私有域名，並開啟 `private-ipv4` 只偵測一個網段：
-
-```yaml
-nda_keywords:
-  - "CONFIDENTIAL"
-  - "INTERNAL ONLY"
-  - "DO NOT SHARE"
-  - "NDA"
-  # - "Project Phoenix"     # 自己的詞彙
-
-private_domains:
-  - "internal.example.com"
-
-settings:
-  encoding_detection: false
-  rule_overrides:
-    private-ipv4: true
-  private_cidrs:
-    - 10.20.0.0/16          # 取代預設私有網段
-```
-
 修改後：
 - **CLI**：下次執行自動載入
 - **OpenCode Plugin**：重啟 OpenCode 以重新載入 plugin 設定
@@ -605,138 +291,23 @@ settings:
 - **Claude Code proxy**：重啟 proxy（可用 `--config` 指定其他檔案）
 - **Web UI**：重啟本機 server
 
-### `.env` 精確值偵測
-
-只有當檔案內的值絕不該進入 LLM context 時才啟用：
-
-```yaml
-settings:
-  env_files:
-    - .env
-    - .env.local
-```
-
-所有入口都會套用：OpenCode plugin、pi extension、Claude Code proxy、CLI 和 Web UI。它們都透過 `loadConfig()` 載入設定，`loadConfig()` 會依 `settings.env_files` 建立精確值偵測器，共用的掃描器再使用這個偵測器。
-
-- **路徑**相對於一個根目錄，且不能離開它。OpenCode plugin 用專案目錄；pi extension、Claude Code proxy、CLI 和 Web UI 用啟動它們時所在的目錄（`process.cwd()`）。所以請在專案根目錄啟動 pi 或 proxy，否則相對路徑會指到別的地方。
-- **值**：只讀取非空且至少 8 字元的 value，掃描準備送往模型的內容是否出現完全相同的值。不會自動讀取 `.env` 或 process 環境變數，載入的 value 不會傳給模型、寫入 log 或序列化。
-- **修改已啟用的 env 檔後**，請重啟載入它的宿主（OpenCode、pi）、Claude Code proxy 或 Web UI；CLI 下次執行就會套用。
-- **驗證**：OpenCode 有 `scripts/e2e/compare/` 的端到端測試工具搭配 `env_files` 執行。pi 和 Claude Code proxy 的涵蓋是依上述程式路徑推斷，尚未做端到端驗證。
-
-**`envQueries` 是另一回事，只有 OpenCode 有。** 選擇性開啟的 `envQueries` plugin 選項，會針對同樣這些檔案提供三個唯讀工具（`guard_env_list`、`guard_env_inspect`、`guard_env_compare`），讓 agent 不看到值也能回答設定問題；需要搭配 `mode: "block"` 或 `"redact"`。它是除錯輔助，不是保護機制：遮罩靠的是上面的 `env_files`。pi 和 Claude Code proxy 沒有這些工具，`.env` 的保護效果也不受影響。見[唯讀 env 查詢](docs/plugin/env-queries.zh-TW.md)。
-
-### 自訂規則
-
-```yaml
-custom_rules:
-  - description: "Company token"
-    pattern: "MYCO_[A-Z0-9]{32}"
-    severity: HIGH
-    flags: "i"            # gimsuy 的子集；一律隱含 g
-    word_boundary: true   # 只在字面 ASCII 單字字元的邊緣加 \b
-    allow:                # 這條規則永不回報的完整字串
-      - "MYCO_EXAMPLE0000000000000000000000000"
-    # path: ["src/**"]    # 可設定，但尚未實作（見下方）
-
-settings:
-  allowlist:              # 任何規則都不回報的完整字串（見繞過警告）
-    - "qa@example.com"
-```
-
-- **`flags`** — `gimsuy` 的任意子集；一律加上 `g`。預設為 `i`，既有規則仍維持不分大小寫。未知旗標（例如 `x`）會讓設定載入失敗；pattern 以最終旗標編譯，所以只在 `u` 下才無效的 pattern 也會載入失敗。零長度比對會被略過（沒有可回報或脫敏的值），掃描會繼續找後面的非空比對，Unicode 旗標下也一樣。
-- **`word_boundary`** — 只在 pattern 邊緣是字面 ASCII 單字字元時加上 `\b`。CJK 邊緣（「機密」）不處理：兩個非單字字元之間不會成立 `\b`，加上去反而比對不到。邊緣是群組、字元類別、量詞或跳脫序列時無法安全加上，所以不會加，`--doctor` 會警告這條規則比看起來寬鬆——請自己在 pattern 寫 `\b`，例如 `\bEMP-\d{6}\b`。最外層的 alternation（`a|b`）是設定錯誤，請寫成 `(?:a|b)`。
-- **`allow`／`settings.allowlist`** — 與命中文字完全相同才算，不是子字串也不是 regex。`allow` 只作用於該規則；`settings.allowlist` 作用於所有規則，包括內建規則與 `.env` exact value。上限：每條規則 32 筆、全域 64 筆、每筆 200 字元。
-  **把真實密鑰加入 allowlist 是真正的繞過**：該值仍會不經遮罩離開本機，LeakShield 也不會把它回報為規則或 `.env` 命中。只用於你已判定不敏感的值。
-  Unicode 規避診斷是另一回事：零寬字元或形似字母的警告，代表移除這些字元後會露出原文隱藏的命中，對原文設 allowlist 不會消除警告。單純的西里爾或希臘文字不會被標記。`--doctor` 會回報 allowlist 筆數、實測最多八筆，並回報無法實測的筆數（依賴上下文的 pattern 只能在實際位置判斷）。被抑制的次數會計數，不是靜默略過。
-- **`path`** — 可設定也會驗證，但路徑範圍**尚未實作**：掃描器拿不到 prompt 或工具輸出的來源路徑。這些規則目前套用於所有掃描文字，設定 `path` 時 `--doctor` 會警告。
-
-Allowlist 項目屬於設定檔的一部分，所以會改變設定檔指紋（檔案的 sha256），而授權比對的正是這個指紋。
-
-### 設定檔驗證
-
-動態規則的輸入長度在載入時會透過 Zod 驗證：
-
-| 欄位 | 最大長度 |
-|------|---------|
-| `nda_keywords` 每個項目 | 200 字元 |
-| `private_domains` 每個項目 | 255 字元 |
-| `custom_rules` 的 `description` / `pattern` | 200 字元 |
-
-超過長度限制的值會導致 `loadConfig()` 拋出 Zod 驗證錯誤，避免過長的 pattern 進入掃描器。
-
-清單項目數也有上限，超過上限的設定檔會載入失敗：
-
-| 欄位 | 最多項目數 |
-|------|-----------|
-| `nda_keywords` | 4096 |
-| `private_domains` | 4096 |
-| `custom_rules` | 1024 |
-
-`custom_rules` 的 pattern 若無法編譯成正規表示式，`loadConfig()` 也會拋錯，並指出規則的索引和 `description`（不會印出 pattern）：無法執行的規則不能載入。可以編譯、但在固定測試輸入上跑得太慢的 pattern 會被當成疑似 ReDoS 而略過，stderr 會印警告，`leakshield --doctor` 也會出現 `custom-rules` 警告。這個檢查只是計時啟發式，不是保證：它只執行 pattern 一次，而且無法中斷執行，所以不能證明 pattern 安全。
+所有欄位、內建規則 id、`.env` 精確值偵測、自訂規則與上限，見[設定參考](docs/configuration.zh-TW.md)。
 
 ---
 
-## 實務使用建議
+## 文件
 
-### 場景一：你要把一個設定檔交給 OpenCode 分析
-
-下面是 `mode: "block"` 的情況。在 v2 預設的 transparent 模式下，模型看到的是佔位符，工作會繼續進行。
-
-```
-你（對 OpenCode）：請幫我看看這個 config.ts 有沒有問題
-OpenCode：[讀取 config.ts]
-→ 工具輸出含有 API_KEY
-→ plugin 在下一輪模型讀取前將其替換
-→ OpenCode 收到攔截通知，而非 secret
-你：把第 12 行換成假 key 後再繼續
-```
-
-### 場景二：你在 CLI 掃描整個專案再送出
-
-```bash
-npm run scan -- --dir ./my-project
-# 如果 exit code = 1，表示有問題，先處理再貼給 AI
-```
-
-### 場景三：CI/CD 整合（防止含敏感資訊的 prompt 進入 pipeline）
-
-```bash
-# 在 CI script 加入
-node dist/cli.js --cli --dir ./prompts
-if [ $? -ne 0 ]; then
-  echo "❌ 偵測到敏感內容，停止 pipeline"
-  exit 1
-fi
-```
-
----
-
-## 敏感資訊預覽行為
-
-掃描結果中所有敏感資訊的預覽一律顯示為 `****`，不論原始值長度為何，不保留任何前後綴字元。這樣可避免在日誌、CI 輸出或 Web UI 回應中洩漏部分機密內容。
-
-## 多語系（i18n）
-
-CLI 輸出語言由 `LEAKSHIELD_LANG` 環境變數控制。
-
-| 值 | 語言 |
-|----|------|
-| `en`（預設） | 英文 |
-| `zh-TW` 或 `zh` | 繁體中文 |
-
-```bash
-# 英文輸出（預設）
-npm run scan -- --text "your content"
-
-# 繁體中文輸出
-LEAKSHIELD_LANG=zh-TW npm run scan -- --text "你的內容"
-```
-
-也可以寫進 shell profile 長期生效：
-
-```bash
-export LEAKSHIELD_LANG=zh-TW
-```
+| 主題 | 頁面 |
+|------|------|
+| OpenCode plugin | [docs/opencode.zh-TW.md](docs/opencode.zh-TW.md) |
+| pi extension | [docs/pi.zh-TW.md](docs/pi.zh-TW.md) |
+| Claude Code proxy | [docs/claude-code.zh-TW.md](docs/claude-code.zh-TW.md) |
+| CLI 與 Web UI | [docs/cli.zh-TW.md](docs/cli.zh-TW.md) |
+| 設定參考 | [docs/configuration.zh-TW.md](docs/configuration.zh-TW.md) |
+| 宿主能力矩陣 | [docs/host-capabilities.md](docs/host-capabilities.md) |
+| 獨立執行檔 | [BINARY-GUIDE.zh-TW.md](BINARY-GUIDE.zh-TW.md) |
+| 驗證紀錄 | [docs/evidence](docs/evidence/README.md) |
+| 貢獻指南 | [CONTRIBUTING.md](CONTRIBUTING.md)（英文） |
 
 ## 注意事項
 

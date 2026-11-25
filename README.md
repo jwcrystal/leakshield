@@ -158,43 +158,7 @@ Before relying on any host, read [what this protects — and what it does not](#
 | NDA Keywords | Defaults plus your own (see [Configuration](#configuration)) | 🔴 HIGH |
 | Private Domains | Your own (see [Configuration](#configuration)) | 🟡 MEDIUM |
 
-> **Detection boundaries** (per `src/rules/builtin.ts`): the generic secret rule matches only the keywords `password`, `passwd`, `secret`, `private_key`, `client_secret` with a value of **8+ characters** — generic `api_key=`/`token=` assignments are not matched unless the value itself matches a vendor pattern. It also skips an unquoted value that is a code expression, such as `process.env.DB_PASSWORD` or `z.string().min(6)`; a call whose arguments hold another string literal is still reported. Credit card and IBAN matches require a valid checksum, and the credit card rule skips a run of one repeated digit and digits inside a UUID. The URL credential and DB connection rules skip a password that is a `${…}`, `{{…}}` or `<…>` placeholder. IP matches cover only public/routable IPv4, and a dotted run longer than four groups is reported whole so an address embedded in it is masked instead of left behind (dotted dates such as `2026.10.21.14.32.59` therefore report as an IP run too). Not covered by any rule: street/postal addresses, dates, IPv6, and values below the 8-character minimum for generic secret assignments. SSH remote authorities (`user@host:path`, `ssh://user@host/…`) are not reported as email; private domains and path keywords still apply inside them, and the password half of `scheme://user:password@host` is reported as a URL credential instead. Private IPv4 is opt-in because the literal also matches version numbers and timestamps; `settings.private_cidrs` replaces its default networks, for example with your organisation's own ranges, and an entry that does not parse fails the config load. Every built-in rule has a stable id and can be toggled via `settings.rule_overrides` in your config file ([ids](#built-in-rule-ids); unknown ids fail config load); the URL rule ships disabled because always-on URL masking would flag provider endpoints. The same rule set (built-in rules plus your config) applies to every mode — `block`, `redact`, and `transparent` — and every host.
-
----
-
-## Decision Model
-
-Every scan produces a **decision** that tells the caller how to handle the content. The CLI and Web UI report it directly; the host integrations act on findings instead (mask in transparent mode, replace or refuse in `redact` and `block`).
-
-| Decision | When | Risk Level | Meaning |
-|----------|------|-----------|---------|
-| `ALLOW` | No findings | LOW | Content is clean — safe to send |
-| `WARN` | LOW-severity findings only | MEDIUM | Minor items detected — reminder shown, content can be sent |
-| `CONFIRM` | MEDIUM or HIGH findings | HIGH / CRITICAL | Sensitive content detected — user must explicitly confirm |
-
-### CONFIRM Handling
-
-When the decision is `CONFIRM`, the CLI is non-interactive: it prints a warning card and a next-step hint, and does not prompt you to choose. The hint points to `--format json` (read `redactedContent`) or `--redact` (sanitized output). Exit code `1` means the content was blocked.
-
-The `CONFIRM` decision includes:
-- `recommendedAction`: `REVIEW` (MEDIUM findings) or `BLOCK` (HIGH findings)
-- `safePreview`: a masked excerpt around the first finding
-- `redactedContent`: the full content with all sensitive spans replaced
-
-`safePreview` and `redactedContent` are left out when a sensitive span cannot be located exactly, such as an encoded run split by a zero-width character. A missing field means no safe version is available.
-
-### JSON Output Fields
-
-When using `--format json`, the output includes these decision-oriented fields:
-
-| Field | Description |
-|-------|-------------|
-| `decision` | `ALLOW`, `WARN`, or `CONFIRM` |
-| `riskLevel` | `LOW`, `MEDIUM`, `HIGH`, or `CRITICAL` |
-| `recommendedAction` | `REVIEW` or `BLOCK` (CONFIRM only) |
-| `findings` | Array of sanitized findings (no internal metadata) |
-| `safePreview` | Masked excerpt (CONFIRM only; can be absent) |
-| `redactedContent` | Full redacted text (CONFIRM only; can be absent) |
+> **Detection boundaries** (per `src/rules/builtin.ts`): the generic secret rule matches only the keywords `password`, `passwd`, `secret`, `private_key`, `client_secret` with a value of **8+ characters** — generic `api_key=`/`token=` assignments are not matched unless the value itself matches a vendor pattern. It also skips an unquoted value that is a code expression, such as `process.env.DB_PASSWORD` or `z.string().min(6)`; a call whose arguments hold another string literal is still reported. Credit card and IBAN matches require a valid checksum, and the credit card rule skips a run of one repeated digit and digits inside a UUID. The URL credential and DB connection rules skip a password that is a `${…}`, `{{…}}` or `<…>` placeholder. IP matches cover only public/routable IPv4, and a dotted run longer than four groups is reported whole so an address embedded in it is masked instead of left behind (dotted dates such as `2026.10.21.14.32.59` therefore report as an IP run too). Not covered by any rule: street/postal addresses, dates, IPv6, and values below the 8-character minimum for generic secret assignments. SSH remote authorities (`user@host:path`, `ssh://user@host/…`) are not reported as email; private domains and path keywords still apply inside them, and the password half of `scheme://user:password@host` is reported as a URL credential instead. Private IPv4 is opt-in because the literal also matches version numbers and timestamps; `settings.private_cidrs` replaces its default networks, for example with your organisation's own ranges, and an entry that does not parse fails the config load. Every built-in rule has a stable id and can be toggled via `settings.rule_overrides` in your config file ([ids](docs/configuration.md#built-in-rule-ids); unknown ids fail config load); the URL rule ships disabled because always-on URL masking would flag provider endpoints. The same rule set (built-in rules plus your config) applies to every mode — `block`, `redact`, and `transparent` — and every host.
 
 ---
 
@@ -224,61 +188,7 @@ For local development, install the build globally or `npm link` it, then use
 `leakshield` directly. `npm run scan -- ...` works from this repository without
 installing.
 
-### npm Scripts
-
-| Command | Description |
-|---------|-------------|
-| `npm run build` | Clean, then compile TypeScript → `dist/` |
-| `npm run clean` | Remove `dist/` |
-| `npm start` | Run the built CLI (`node dist/cli.js --cli`) |
-| `npm run dev` | CLI mode (no build needed) |
-| `npm run scan` | CLI scan (no build needed) |
-| `npm run web` | Start the local Web UI (no build needed) |
-| `npm test` | Run unit tests |
-| `npm run test:watch` | Run tests in watch mode |
-| `npm run binary` | Build standalone binary for current platform (macOS ARM) |
-| `npm run binary:win` | Cross-compile for Windows x64 |
-| `npm run binary:linux` | Cross-compile for Linux x64 |
-| `npm run binary:mac-intel` | Cross-compile for macOS Intel |
-| `npm run binary:win-icon` | Build the Windows binary with the app icon (`scripts/build-win.js`) |
-| `npm run binary:all` | Build all platforms at once |
-| `npm run bundle:mac` | Build the binary and package a macOS bundle (`scripts/bundle-mac.sh`) |
-
----
-
-## Standalone Binary
-
-Can't use Node.js or npm? Build a standalone binary with [Bun](https://bun.sh) — no runtime needed on the target machine.
-
-The binary is the CLI compiled into one executable (`src/cli.ts`), not a separate mode:
-
-| Feature | Binary |
-|---------|--------|
-| CLI scan and redaction, Web UI | Supported |
-| `--claude-code-proxy`, `--doctor` | Included but not verified in a Bun-compiled binary; use the npm package for host protection |
-| OpenCode plugin, pi extension | Not available: the host loads the npm package, not an executable |
-
-```bash
-# One-command build for current platform
-npm run binary
-
-# Cross-compile for other platforms
-npm run binary:win     # Windows x64  → leakshield.exe
-npm run binary:linux   # Linux x64    → leakshield-linux
-npm run binary:all     # All platforms
-```
-
-Or directly with Bun:
-
-```bash
-bun build --compile --target=bun-windows-x64 ./src/cli.ts --outfile=leakshield.exe
-```
-
-The output is a single executable — hand it to anyone, no dependencies required.
-
-### Configuration for binary and npm users
-
-The binary and the npm package work with built-in defaults and ship no config file. To add your own keywords, domains or rules, see [Configuration](#configuration).
+To run without Node.js, build a standalone binary of the CLI with Bun: see [Build it yourself](BINARY-GUIDE.md#build-it-yourself). Development scripts are listed in [CONTRIBUTING](CONTRIBUTING.md#npm-scripts).
 
 ---
 
@@ -353,187 +263,15 @@ Mapping persistence is opt-in for the OpenCode plugin ([setup](docs/plugin/persi
 
 ---
 
-### CLI
+### CLI and Web UI
 
 ```bash
-# Scan text
-npm run scan -- --text 'sk-proj-test1234567890abcdef my_password="super_secret"'
-
-# Scan a single file
-npm run scan -- --file ./src/config.ts
-
-# Scan an entire directory
-npm run scan -- --dir ./src
-
-# Scan specific file extensions only
-npm run scan -- --dir ./src --ext .ts .env .json
-
-# Read from stdin
-cat .env | npm run scan -- --stdin
-
-# Global installation
-leakshield --file ./config.ts
+leakshield --file ./src/config.ts          # scan a file (also --text, --dir, --stdin)
+leakshield --redact --file .env --out .env.redacted
+leakshield --web                           # local browser UI at http://localhost:3000
 ```
 
-Exit codes: `0` = safe (ALLOW), `1` = findings detected (WARN or CONFIRM), `2` = file not found
-
-#### Redaction Mode
-
-Replace sensitive content with `[REDACTED_TYPE]` placeholders instead of just reporting it:
-
-```bash
-# Redact stdin and print to stdout
-echo 'token=sk-proj-test1234567890abcdef' | npm run scan -- --redact --stdin
-
-# Redact a file and write result to a new file
-npm run scan -- --redact --file .env --out .env.redacted
-
-# Dry-run: preview what would be redacted without producing any output
-npm run scan -- --redact --dry-run --file .env
-```
-
-Redacted output goes to **stdout**; the findings summary goes to **stderr** so they can be separated in pipelines.
-
-| Flag | Behaviour |
-|------|-----------|
-| `--redact` | Replace findings with `[REDACTED_TYPE]`, write to stdout; output is suppressed if findings remain after redaction |
-| `--redact --dry-run` | Preview findings only, no output; exit `1` if any found |
-| `--redact --out <path>` | Write redacted text to file instead of stdout |
-| `--redact --format json` | Return JSON with `redacted`, `findings`, and `summary` fields |
-
-#### CLI Options
-
-| Option | Description |
-|--------|-------------|
-| `--format json` | JSON output (CI/CD friendly) |
-| `--min-severity high` | Only report HIGH (or `medium` / `low`) |
-| `--allow-outside` | Allow scanning paths outside the current working directory (disabled by default) |
-| `--enable-encoding-detection` | Also decode Base64, URL-encoded and hex content before scanning (disabled by default) |
-
-#### Encoding Detection
-
-**Why encoding detection?**
-
-Encoding tricks can bypass sensitive-data detection:
-- **Base64 encoding**: an API key or password is encoded before it is sent
-- **URL encoding**: formats such as `%20` hide keywords
-- **Hex encoding**: hexadecimal encoding evades pattern matching
-
-**Enabling**
-
-```bash
-# Enable encoding detection
-npm run scan -- --enable-encoding-detection --text "c2stcHJvai10ZXN0MTIzNDU2Nzg5MGFiY2RlZg=="
-
-# Combine with other options
-npm run scan -- --enable-encoding-detection --file ./config.yaml --format json
-
-# Enable when scanning a directory
-npm run scan -- --enable-encoding-detection --dir ./src --ext .ts .env
-```
-
-**Performance**
-
-Decoding and rescanning can add 10-30% to scan time. Recommendations:
-- **Off by default**: ordinary scans can use the default
-- **Enable on demand**: turn it on for external or unknown content
-- **CI/CD**: recommended in CI pipelines to catch encoding attacks
-
-**Examples**
-
-```bash
-# Base64-encoded API key
-echo "c2stcHJvai10ZXN0MTIzNDU2Nzg5MGFiY2RlZg==" | npm run scan -- --enable-encoding-detection --stdin
-# → Detects an OpenAI API Key (synthetic value)
-
-# URL-encoded sensitive content
-echo "password%3Dsecret123" | npm run scan -- --enable-encoding-detection --stdin
-# → Detects the password keyword
-
-# Normal text is unaffected
-echo "This is safe content" | npm run scan -- --enable-encoding-detection --stdin
-# → Safe, no sensitive content
-```
-
-When encoded content is found, the text and JSON summaries name the encoding types, in the language set by `LEAKSHIELD_LANG`:
-
-```
-[WARNING: Encoded content: Base64, URL]
-```
-
-#### Workspace Path Restriction
-
-By default, `--file` and `--dir` only accept paths **inside the current working directory**. Attempts to scan outside (e.g. `../shared.env` or `/etc/passwd`) will be rejected with an error.
-
-To intentionally scan a path outside the workspace, pass `--allow-outside`:
-
-```bash
-npm run scan -- --file ../shared.env --allow-outside
-```
-
-> ⚠️ Outside-workspace scanning is opt-in. Only use it when you explicitly need to scan a file that lives outside the project root.
-
-#### Ignore Directives
-
-The CLI and Web UI skip any line containing `leakshield-ignore`, `guard:skip`, `guard:ignore`, `sg-ignore`, `no-scan` or `skip-guard` (case-insensitive). A real secret on that line reports as `ALLOW`.
-
-> ⚠️ Anyone who can edit a scanned file can add a directive, so a CLI scan is not a gate against untrusted changes. The host integrations (OpenCode plugin, pi extension, Claude Code proxy) do not honor directives.
-
----
-
-### Web UI
-
-Start a local web server and use it in your browser:
-
-```bash
-# Installed package (default port 3000)
-leakshield --web
-
-# From a checkout, without building
-npx tsx src/cli.ts --web
-
-# Custom port
-npx tsx src/cli.ts --web --port 3001
-
-# Built version
-node dist/cli.js --web --port 3001
-```
-
-Open `http://localhost:3001` in your browser, paste content, and press **Scan** or `Ctrl+Enter`.
-
-#### REST API
-
-You can also call the API directly:
-
-```bash
-# Scan text
-curl -s -X POST http://localhost:3001/scan \
-  -H 'Content-Type: application/json' \
-  -d '{"content": "sk-proj-test1234567890abcdef my_password=\"super_secret\""}' | jq
-
-# Response format
-{
-  "decision": "CONFIRM",
-  "riskLevel": "CRITICAL",
-  "summary": "...",
-  "findings": [
-    { "type": "API_KEY", "severity": "HIGH", "description": "OpenAI API Key", "preview": "****", "line": 1 },
-    { "type": "SECRET", "severity": "HIGH", "description": "...", "preview": "****", "line": 1 }
-  ],
-  "recommendedAction": "BLOCK",
-  "redactedContent": "[REDACTED_API_KEY] my_[REDACTED_SECRET]",
-  "redactionVerified": true,
-  "residualFindings": 0,
-  "wasTruncated": false
-}
-```
-
-`redactedContent` is omitted when `redactionVerified` is `false`.
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Web UI HTML |
-| `/scan` | POST | Scan `{ "content": string }`, returns JSON |
+Exit codes: `0` = safe, `1` = findings, `2` = path error. Options, redaction, encoding detection, ignore directives, the REST API, the decision model and JSON fields: [CLI and Web UI](docs/cli.md).
 
 ---
 
@@ -550,58 +288,6 @@ curl -fsSL https://raw.githubusercontent.com/jwcrystal/leakshield/main/config/gu
 leakshield --doctor   # confirms the file loads
 ```
 
-### Fields
-
-Every key is optional. A key you leave out keeps its default; an unknown key is ignored.
-
-| Key | Default | What it does | Details |
-|-----|---------|--------------|---------|
-| `nda_keywords` | `CONFIDENTIAL`, `INTERNAL ONLY`, `DO NOT SHARE`, `NDA` | Words reported as HIGH. Case-insensitive. A keyword that starts and ends with an ASCII letter or digit matches whole words (`NDA` does not match `agenda`); a CJK keyword matches as a substring. A list replaces the defaults; `[]` turns keywords off | — |
-| `private_domains` | none | Hostnames reported as MEDIUM. Case-insensitive substring match; a full hostname gives fewer false matches | — |
-| `custom_rules` | none | Your own regular expressions with a `description`, `pattern` and `severity` (`HIGH` by default) | [Custom Rules](#custom-rules) |
-| `settings.max_chars` | `200000` | Scan bound per input. The CLI scans the first `max_chars` characters; transparent mode refuses longer content instead of truncating it | — |
-| `settings.show_line_numbers` | `true` | Include line and column in findings | — |
-| `settings.preview_length` | `60` | Length of the masked `safePreview` excerpt around the first finding | [Secret Preview Behavior](#secret-preview-behavior) |
-| `settings.encoding_detection` | `false` | Also decode Base64, URL and Hex text before scanning (the OpenCode plugin always enables it) | [Encoding Detection](#encoding-detection) |
-| `settings.env_files` | none | Files whose values are matched exactly | [Exact `.env` Value Detection](#exact-env-value-detection) |
-| `settings.rule_overrides` | `{}` | Turn built-in rules on or off by id, e.g. `{ url: true, email: false }`. An unknown id fails the load | [Built-in rule ids](#built-in-rule-ids) |
-| `settings.private_cidrs` | RFC 1918, CGNAT, link-local | IPv4 networks the opt-in `private-ipv4` rule reports. A list **replaces** the defaults, for example to match only your VPN. An invalid CIDR fails the load | — |
-| `settings.allowlist` | none | Exact values no rule reports. **A real bypass**: the value reaches the model unmasked | [Custom Rules](#custom-rules) |
-
-Length and count limits are listed under [Configuration Validation](#configuration-validation).
-
-### Built-in rule ids
-
-Use these ids in `settings.rule_overrides`. All rules are on by default except the four opt-in rules marked below.
-
-| Group | Ids |
-|-------|-----|
-| API keys and tokens | `openai-key`, `anthropic-key`, `google-key`, `aws-access-key`, `aws-secret`, `github-pat`, `github-fine-grained-pat`, `github-oauth-app`, `stripe-live-secret`, `stripe-live-publishable`, `slack-bot`, `slack-user-app`, `huggingface-token`, `jwt`, `generic-bearer` |
-| Secrets and credentials | `generic-secret`, `pem-private-key`, `url-userinfo`, `db-connection`, `db-connection-ado` |
-| Personal and financial data | `email`, `id-tw`, `credit-card`, `iban`, `public-ipv4`, `phone-tw` (opt-in), `phone-intl` (opt-in) |
-| Network | `private-ipv4` (opt-in), `url` (opt-in) |
-
-An example that keeps the default keywords, adds a private domain and turns on `private-ipv4` for one network:
-
-```yaml
-nda_keywords:
-  - "CONFIDENTIAL"
-  - "INTERNAL ONLY"
-  - "DO NOT SHARE"
-  - "NDA"
-  # - "Project Phoenix"     # your own terms
-
-private_domains:
-  - "internal.example.com"
-
-settings:
-  encoding_detection: false
-  rule_overrides:
-    private-ipv4: true
-  private_cidrs:
-    - 10.20.0.0/16          # replaces the default private networks
-```
-
 After editing:
 - **CLI**: Reloaded automatically on next run
 - **OpenCode Plugin**: Restart OpenCode to reload the plugin configuration
@@ -609,163 +295,23 @@ After editing:
 - **Claude Code proxy**: Restart the proxy (`--config` selects another file)
 - **Web UI**: Restart the local server
 
-### Exact `.env` Value Detection
-
-Enable this only for files whose values should never enter an LLM context:
-
-```yaml
-settings:
-  env_files:
-    - .env
-    - .env.local
-```
-
-Every entry point applies it: the OpenCode plugin, the pi extension, the Claude Code proxy, the CLI and the Web UI. Each one loads the guard config through `loadConfig()`, which builds the exact-value detector from `settings.env_files`, and the shared scanner uses that detector.
-
-- **Paths** are relative to a root and must stay inside it. The OpenCode plugin uses the project directory. The pi extension, the Claude Code proxy, the CLI and the Web UI use the directory they were started from (`process.cwd()`), so start pi or the proxy from the project root, or the relative paths point elsewhere.
-- **Values**: LeakShield reads non-empty values of at least eight characters, then detects exact occurrences in text sent to the model. It does not automatically read `.env` or process environment variables, and it never sends, logs or serializes the loaded values.
-- **After changing an enabled env file**, restart the host that loaded it (OpenCode, pi), the Claude Code proxy or the Web UI. The CLI applies it on its next run.
-- **Verification**: for OpenCode, the end-to-end harness in `scripts/e2e/compare/` runs with `env_files`. For pi and the Claude Code proxy, coverage is inferred from the code path above; no end-to-end check has been run yet.
-
-**`envQueries` is separate and OpenCode-only.** The opt-in `envQueries` plugin option adds three read-only tools over the same files (`guard_env_list`, `guard_env_inspect`, `guard_env_compare`) so an agent can answer configuration questions without seeing values; it needs `mode: "block"` or `"redact"`. It is a debugging aid, not a protection: masking comes from `env_files` above. pi and the Claude Code proxy do not offer these tools, and their `.env` protection does not depend on them. See [Readonly env queries](docs/plugin/env-queries.md).
-
-### Custom Rules
-
-```yaml
-custom_rules:
-  - description: "Company token"
-    pattern: "MYCO_[A-Z0-9]{32}"
-    severity: HIGH
-    flags: "i"            # subset of gimsuy; g is always implied
-    word_boundary: true   # \b only at literal ASCII word edges
-    allow:                # exact strings this rule never reports
-      - "MYCO_EXAMPLE0000000000000000000000000"
-    # path: ["src/**"]    # accepted, but NOT implemented (see below)
-
-settings:
-  allowlist:              # exact strings no rule reports (see the bypass warning)
-    - "qa@example.com"
-```
-
-- **`flags`** — any subset of `gimsuy`; `g` is always added. The default is `i`, so
-  existing rules keep matching case-insensitively. An unknown flag (such as `x`)
-  fails the config load, and the pattern is compiled with the final flags, so a
-  pattern that is only invalid under `u` also fails the load.
-  Zero-length matches are skipped (they contain no value to report or redact);
-  scanning continues to later nonempty matches, including under Unicode flags.
-- **`word_boundary`** — adds `\b` where the pattern's edge is a literal ASCII word
-  character. A CJK edge (「機密」) is left alone: `\b` never holds between two
-  non-word characters, and wrapping it would stop the rule matching. An edge that
-  is a group, character class, quantifier or escape cannot take a boundary safely,
-  so none is added and `--doctor` warns that the rule is looser than it looks —
-  write `\b` in the pattern yourself, e.g. `\bEMP-\d{6}\b`. A top-level alternation
-  (`a|b`) is a config error; group it as `(?:a|b)`.
-- **`allow` / `settings.allowlist`** — exact matches against the matched text, not
-  substrings and not regexes. `allow` applies to that rule; `settings.allowlist`
-  applies to every rule, including the built-in ones and exact `.env` values.
-  Caps: 32 entries per rule, 64 globally, 200 characters each.
-  **Allowlisting a live secret is a real bypass**: the value still leaves the
-  machine unmasked, and LeakShield will not report that value as a rule or
-  `.env` finding. Use it only for values you have decided are not sensitive.
-  Unicode evasion diagnostics are separate: a zero-width or look-alike-letter
-  warning means removing those characters exposes a finding the raw text hides,
-  and an allowlist on the raw text does not silence it. Cyrillic or Greek text
-  on its own is not flagged. `--doctor` reports how many entries exist, exercises up to eight
-  of them, and reports how many it could not exercise (a context-dependent
-  pattern can only be judged in place). Suppressions are counted rather than
-  silent.
-- **`path`** — accepted and validated, but path scoping is **not implemented**: the
-  scanner has no source path for prompts or tool output. These rules currently
-  apply to every scanned text, and `--doctor` warns when `path` is set.
-
-Allowlist entries are part of the config file, so they change its fingerprint
-(sha256 of the file), which is what authorizations compare against.
-
-### Configuration Validation
-
-Input lengths for dynamic rules are validated when the config is loaded:
-
-| Field | Max length |
-|-------|-----------|
-| `nda_keywords` entries | 200 characters |
-| `private_domains` entries | 255 characters |
-| `custom_rules` `description` / `pattern` | 200 characters |
-
-Values exceeding these limits will cause `loadConfig()` to throw a Zod validation error, preventing oversized patterns from entering the scanner.
-
-List sizes are capped too, and a config over a cap fails the load:
-
-| Field | Max entries |
-|-------|-------------|
-| `nda_keywords` | 4096 |
-| `private_domains` | 4096 |
-| `custom_rules` | 1024 |
-
-A `custom_rules` pattern that does not compile as a regular expression also makes `loadConfig()` throw, naming the rule's index and `description` (not the pattern): a rule that cannot be enforced must not load. A pattern that compiles but runs slowly on a fixed probe input is skipped as a ReDoS suspect, with a warning on stderr and a `custom-rules` warning in `leakshield --doctor`. That check is a timing heuristic, not a guarantee: it runs the pattern once and cannot interrupt it, so it cannot prove a pattern safe.
+Every key, the built-in rule ids, `.env` value detection, custom rules and limits: [Configuration reference](docs/configuration.md).
 
 ---
 
-## Practical Examples
+## Documentation
 
-### Scenario 1: Asking OpenCode to review a config file
-
-With `mode: "block"`, shown below. In the v2 default, transparent mode, the model sees a placeholder instead and the task continues.
-
-```
-You (to OpenCode): Please review this config.ts for issues
-OpenCode: [reads config.ts]
-→ Tool output contains an API_KEY
-→ Plugin replaces it before the next model turn
-→ OpenCode receives a block notice instead of the secret
-You: Replace line 12 with a dummy key, then continue
-```
-
-### Scenario 2: CLI scan before submitting a project
-
-```bash
-npm run scan -- --dir ./my-project
-# If exit code = 1, there are findings — fix them before sharing with AI
-```
-
-### Scenario 3: CI/CD integration (block sensitive prompts from the pipeline)
-
-```bash
-# Add to your CI script
-node dist/cli.js --cli --dir ./prompts
-if [ $? -ne 0 ]; then
-  echo "❌ Sensitive content detected — stopping pipeline"
-  exit 1
-fi
-```
-
----
-
-## Secret Preview Behavior
-
-All secret previews in scan results are **fully masked** as `****`, regardless of the secret's length. No prefix or suffix characters from the original value are preserved. This eliminates partial secret exposure in logs, CI output, and Web UI responses.
-
-## Internationalization (i18n)
-
-CLI output language is controlled by the `LEAKSHIELD_LANG` environment variable.
-
-| Value | Language |
-|-------|----------|
-| `en` (default) | English |
-| `zh-TW` or `zh` | Traditional Chinese |
-
-```bash
-# English output (default)
-npm run scan -- --text "your content"
-
-# Traditional Chinese output
-LEAKSHIELD_LANG=zh-TW npm run scan -- --text "你的內容"
-```
-
-You can also set it persistently in your shell profile:
-
-```bash
-export LEAKSHIELD_LANG=zh-TW
-```
+| Topic | Page |
+|-------|------|
+| OpenCode plugin | [docs/opencode.md](docs/opencode.md) |
+| pi extension | [docs/pi.md](docs/pi.md) |
+| Claude Code proxy | [docs/claude-code.md](docs/claude-code.md) |
+| CLI and Web UI | [docs/cli.md](docs/cli.md) |
+| Configuration reference | [docs/configuration.md](docs/configuration.md) |
+| Host capability matrix | [docs/host-capabilities.md](docs/host-capabilities.md) |
+| Standalone binary | [BINARY-GUIDE.md](BINARY-GUIDE.md) |
+| Verification records | [docs/evidence](docs/evidence/README.md) |
+| Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
 ## Notes
 

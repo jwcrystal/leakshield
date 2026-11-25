@@ -26,6 +26,26 @@ Host end-to-end checks live in `scripts/e2e/` and need the host binary installed
 
 A change to shared code (`src/core/`, the scanner or rules) can affect every host; run the checks for each host you have available and say in the pull request which ones you ran.
 
+## npm scripts
+
+| Command | Description |
+|---------|-------------|
+| `npm run build` | Clean, then compile TypeScript → `dist/` |
+| `npm run clean` | Remove `dist/` |
+| `npm start` | Run the built CLI (`node dist/cli.js --cli`) |
+| `npm run dev` | CLI mode (no build needed) |
+| `npm run scan` | CLI scan (no build needed) |
+| `npm run web` | Start the local Web UI (no build needed) |
+| `npm test` | Run unit tests |
+| `npm run test:watch` | Run tests in watch mode |
+| `npm run binary` | Build standalone binary for current platform (macOS ARM) |
+| `npm run binary:win` | Cross-compile for Windows x64 |
+| `npm run binary:linux` | Cross-compile for Linux x64 |
+| `npm run binary:mac-intel` | Cross-compile for macOS Intel |
+| `npm run binary:win-icon` | Build the Windows binary with the app icon (`scripts/build-win.js`) |
+| `npm run binary:all` | Build all platforms at once |
+| `npm run bundle:mac` | Build the binary and package a macOS bundle (`scripts/bundle-mac.sh`) |
+
 ## Guidelines
 
 - **Fix bugs test-first**: add a test that fails without the change.

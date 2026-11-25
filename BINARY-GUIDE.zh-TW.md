@@ -67,3 +67,33 @@ mkdir -p ~/.leakshield
 ```
 
 這是在終端機執行時的行為。在 pipe、CI 或腳本裡，stdin 不是終端機，它會改為讀取 stdin 直到 EOF；在這些環境請關閉或重導 stdin，以免一直等待。
+
+## 自行建置
+
+無法使用 Node.js 或 npm？用 [Bun](https://bun.sh) 建置成單一執行檔，目標機器不需任何 runtime。
+
+執行檔就是把 CLI（`src/cli.ts`）編成單一檔案，不是另一種模式：
+
+| 功能 | 執行檔 |
+|------|--------|
+| CLI 掃描與脫敏、Web UI | 支援 |
+| `--claude-code-proxy`、`--doctor` | 有包含，但未在 Bun 編譯的執行檔中驗證；要保護宿主請用 npm 套件 |
+| OpenCode plugin、pi extension | 無法使用：宿主載入的是 npm 套件，不是執行檔 |
+
+```bash
+# 一鍵建置當前平台
+npm run binary
+
+# 跨平台編譯
+npm run binary:win     # Windows x64  → leakshield.exe
+npm run binary:linux   # Linux x64    → leakshield-linux
+npm run binary:all     # 全平台
+```
+
+或直接用 Bun：
+
+```bash
+bun build --compile --target=bun-windows-x64 ./src/cli.ts --outfile=leakshield.exe
+```
+
+產出單一執行檔，直接交給任何人，無任何相依套件。

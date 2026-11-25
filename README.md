@@ -201,7 +201,7 @@ To run without Node.js, build a standalone binary of the CLI with Bun: see [Buil
 
 LeakShield protects model-conversation content: prompts, replayed history, tool outputs, and provider-bound request bodies whose shape it can parse. How much of that each host covers differs; `leakshield --doctor <host>` and the [host capability matrix](docs/host-capabilities.md) list it. It is **not** a tool-egress firewall: a permitted local tool can still transmit originals over the network via `curl`, a remote MCP server, or any other channel. Controlling tool destinations requires a separate permission layer outside LeakShield. Since 0.3.0, `curl` and `http` may also hold a placeholder inside an argument, so a tool can call an API with the protected value; the original then leaves the machine by design.
 
-Detection also has known gaps: street/postal addresses, dates, IPv6, and generic assignments outside the keyword list or below the 8-character minimum pass through undetected. Credit card and IBAN numbers are detected only when the checksum validates; IP detection covers public IPv4 only; URL detection exists but is opt-in — see [Detection Coverage](#detection-coverage).
+Detection also has known gaps: street/postal addresses, dates, IPv6, and generic assignments outside the keyword list or below the 8-character minimum pass through undetected. Credit card and IBAN numbers are detected only when the checksum validates; IP detection covers public IPv4 only; passport detection reads the MRZ line only; United States SSN, Taiwan business-number, phone and URL detection are opt-in — see [Detection Coverage](#detection-coverage).
 
 Local originals may remain in history, logs, and generated files — this protects the model boundary, not your disk.
 

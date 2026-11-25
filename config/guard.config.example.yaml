@@ -65,9 +65,10 @@ custom_rules: []
 # `flags` line: `flags: ""` turns off the case-insensitive default, and
 # without it a `Name` label also matches every `name:` key in code.
 #
-# SSNs, business numbers and MRZ lines have their own rules; turn those on
-# instead of copying a pattern. The two check-digit shapes cannot be written
-# as a custom rule at all, because a regular expression cannot compute them:
+# SSNs, business numbers and passport MRZ lines have their own rules instead.
+# `passport-mrz` is on by default; the other two are opt-in. Neither can be
+# written as a custom rule, because a regular expression cannot compute their
+# check digits:
 #
 # settings:
 #   rule_overrides:

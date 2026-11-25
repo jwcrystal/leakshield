@@ -155,8 +155,8 @@ Before relying on any host, read [what this protects — and what it does not](#
 | Taiwan Mobile Number | **Opt-in** — disabled by default (`rule_overrides["phone-tw"]: true`); digit runs are a measured false-positive source | 🟡 MEDIUM |
 | International Phone | **Opt-in** — disabled by default (`rule_overrides["phone-intl"]: true`); same trade-off as above | 🟢 LOW |
 | HTTP(S) URL | **Opt-in** — disabled by default (`rule_overrides.url: true`) | 🟢 LOW |
-| NDA Keywords | Custom (see `config/guard.config.yaml`) | 🔴 HIGH |
-| Private Domains | Custom (see `config/guard.config.yaml`) | 🟡 MEDIUM |
+| NDA Keywords | Defaults plus your own (see [Configuration](#configuration)) | 🔴 HIGH |
+| Private Domains | Your own (see [Configuration](#configuration)) | 🟡 MEDIUM |
 
 > **Detection boundaries** (per `src/rules/builtin.ts`): the generic secret rule matches only the keywords `password`, `passwd`, `secret`, `private_key`, `client_secret` with a value of **8+ characters** — generic `api_key=`/`token=` assignments are not matched unless the value itself matches a vendor pattern. It also skips an unquoted value that is a code expression, such as `process.env.DB_PASSWORD` or `z.string().min(6)`; a call whose arguments hold another string literal is still reported. Credit card and IBAN matches require a valid checksum, and the credit card rule skips a run of one repeated digit and digits inside a UUID. The URL credential and DB connection rules skip a password that is a `${…}`, `{{…}}` or `<…>` placeholder. IP matches cover only public/routable IPv4, and a dotted run longer than four groups is reported whole so an address embedded in it is masked instead of left behind (dotted dates such as `2026.10.21.14.32.59` therefore report as an IP run too). Not covered by any rule: street/postal addresses, dates, IPv6, and values below the 8-character minimum for generic secret assignments. SSH remote authorities (`user@host:path`, `ssh://user@host/…`) are not reported as email; private domains and path keywords still apply inside them, and the password half of `scheme://user:password@host` is reported as a URL credential instead. Private IPv4 is opt-in because the literal also matches version numbers and timestamps; `settings.private_cidrs` narrows it to the organisation's own ranges, and an entry that does not parse fails the config load. Every built-in rule has a stable id and can be toggled via `settings.rule_overrides` in `config/guard.config.yaml` (unknown ids fail config load); the URL rule ships disabled because always-on URL masking would flag provider endpoints. The same rule set (built-in + `config/guard.config.yaml`) applies to every mode — `block`, `redact`, and `transparent`.
 
@@ -554,7 +554,7 @@ curl -s -X POST http://localhost:3001/scan \
 
 ## Configuration
 
-LeakShield loads the first config file it finds: `./config/guard.config.yaml`, then `config/guard.config.yaml` in the LeakShield directory (source builds only), then `~/.leakshield/guard.config.yaml`. With no file, the built-in defaults apply. The OpenCode plugin also accepts a `configPath` option. To start a new file, copy [`config/guard.config.example.yaml`](config/guard.config.example.yaml) and replace its sample keywords and domains.
+LeakShield loads the first config file it finds: `./config/guard.config.yaml`, then `config/guard.config.yaml` in the LeakShield directory (source builds only), then `~/.leakshield/guard.config.yaml`. With no file, the built-in defaults apply. The OpenCode plugin also accepts a `configPath` option. The repository does not ship a `config/guard.config.yaml`, and Git ignores one you create there, so your keywords stay local. To start a new file, copy [`config/guard.config.example.yaml`](config/guard.config.example.yaml) and add your own keywords and domains. Listing `nda_keywords` replaces the four defaults (`CONFIDENTIAL`, `INTERNAL ONLY`, `DO NOT SHARE`, `NDA`); the example keeps them.
 
 ```yaml
 # NDA keywords (case-insensitive)
@@ -583,6 +583,8 @@ settings:
 After editing:
 - **CLI**: Reloaded automatically on next run
 - **OpenCode Plugin**: Restart OpenCode to reload the plugin configuration
+- **pi extension**: Restart pi (`LEAKSHIELD_CONFIG` selects another file)
+- **Claude Code proxy**: Restart the proxy (`--config` selects another file)
 - **Web UI**: Restart the local server
 
 ### Exact `.env` Value Detection

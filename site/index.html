@@ -466,7 +466,7 @@
     <div class="wrap">
       <p class="eyebrow" data-i18n="cov.eyebrow">Detection coverage</p>
       <h2 data-i18n="cov.title">What it catches</h2>
-      <p class="lede" data-i18n="cov.sub">Built-in rules run in every mode — block, redact and transparent — and are extended by <code>config/guard.config.yaml</code>.</p>
+      <p class="lede" data-i18n="cov.sub">Built-in rules run in every mode — block, redact and transparent — and are extended by your own <code>guard.config.yaml</code>.</p>
 
       <div class="table-wrap">
         <table>
@@ -713,7 +713,7 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
         </details>
         <details>
           <summary data-i18n="faq.q4">How do I add my own keywords and domains?</summary>
-          <p data-i18n="faq.a4">Edit <code>config/guard.config.yaml</code> — NDA keywords, private domains, allowlists and <code>settings.rule_overrides</code>. An unknown rule id fails the config load rather than being ignored.</p>
+          <p data-i18n="faq.a4">Copy <code>config/guard.config.example.yaml</code> to <code>~/.leakshield/guard.config.yaml</code> (or <code>./config/</code> for one project) and add NDA keywords, private domains, allowlists or <code>settings.rule_overrides</code>. An unknown rule id fails the config load rather than being ignored.</p>
         </details>
         <details>
           <summary data-i18n="faq.q5">Is it production ready?</summary>
@@ -797,7 +797,7 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
 
     "cov.eyebrow": "偵測範圍",
     "cov.title": "會抓到什麼",
-    "cov.sub": "內建規則在三種模式（block、redact、transparent）都會執行，並可由 <code>config/guard.config.yaml</code> 擴充。",
+    "cov.sub": "內建規則在三種模式（block、redact、transparent）都會執行，並可由你自己的 <code>guard.config.yaml</code> 擴充。",
     "cov.th1": "類型",
     "cov.th2": "偵測內容",
     "cov.th3": "嚴重度",
@@ -897,7 +897,7 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
     "faq.q3": "佔位符與金鑰放在哪裡？",
     "faq.a3": "佔位符是每個 session 的偽名，能換回原值的對照表留在你的機器上：預設只在記憶體；要持久化需自行開啟加密資料庫（SGP.db），金鑰由作業系統 keychain 保管，無 keychain 的環境可改用金鑰檔。",
     "faq.q4": "怎麼加入自己的關鍵字與網域？",
-    "faq.a4": "編輯 <code>config/guard.config.yaml</code>：NDA 關鍵字、私有網域、allowlist 與 <code>settings.rule_overrides</code>。未知的規則 id 會讓設定載入失敗，不會被忽略。",
+    "faq.a4": "把 <code>config/guard.config.example.yaml</code> 複製到 <code>~/.leakshield/guard.config.yaml</code>（單一專案可放 <code>./config/</code>），再加入 NDA 關鍵字、私有網域、allowlist 或 <code>settings.rule_overrides</code>。未知的規則 id 會讓設定載入失敗，不會被忽略。",
     "faq.q5": "可以上生產環境了嗎？",
     "faq.a5": "目前是 0.x，預設值仍可能調整。已驗證的宿主與版本列在上面與 repo 中；未驗證的組合請視為未證實。",
     "faq.q6": "漏洞要怎麼回報？",

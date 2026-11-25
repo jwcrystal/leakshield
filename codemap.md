@@ -11,7 +11,7 @@ Scans for secrets, PII, database credentials, internal domains, and NDA keywords
 - `src/core/` is the host-independent wire and session layer, and `src/adapters/{opencode,claude-code,pi}/` hold every host-specific module, so whether a file touches a host is answered by its directory. `src/doctor-report.ts` is the report shape and rendering shared by the three doctors.
 - The pi adapter is an in-process extension: it wraps `globalThis.fetch` (`src/adapters/pi/guard.ts`), so pi's provider SDKs get masked requests and restored assistant text without a proxy. Transports that bypass fetch are refused; pi's own traffic is guarded at any load position, and first position is recommended so an earlier extension cannot hold the raw fetch.
 - MCP server mode was removed: it relied on the model voluntarily calling a scan tool after it had already received the content.
-- Detection is rule-based: built-in rules, dynamic rules from `config/guard.config.yaml`, and opt-in exact `.env` value matching.
+- Detection is rule-based: built-in rules, dynamic rules from a local `guard.config.yaml` (template: `config/guard.config.example.yaml`), and opt-in exact `.env` value matching.
 - Output is normalized through `ScanResult` / `Finding`, then mapped to a decision (`ALLOW` / `WARN` / `CONFIRM`).
 
 ## Flow
@@ -26,7 +26,7 @@ Scans for secrets, PII, database credentials, internal domains, and NDA keywords
 - `src/index.ts` — OpenCode plugin entry.
 - `src/cli.ts` — CLI / Web UI entry.
 - `package.json` — npm metadata, scripts, dependency manifest.
-- `config/guard.config.yaml` — operator-tunable detection inputs.
+- `config/guard.config.example.yaml` — template for the operator-tunable `guard.config.yaml` (not tracked; Git ignores `config/guard.config.yaml`).
 
 ### Directory Map
 | Directory | Responsibility Summary | Detailed Map |

@@ -14,7 +14,7 @@ vi.mock("fs", async (importOriginal) => {
   return { ...actual };
 });
 
-// ─── 使用真實設定檔（config/guard.config.yaml）────────────────────────────────
+// ─── 使用預設搜尋路徑（repo 不附 config/guard.config.yaml）──────────────────────
 
 describe("loadConfig() — 讀取真實設定檔", () => {
   it("應回傳含三個頂層 key 的物件", () => {

@@ -155,8 +155,8 @@ leakshield --file ./path/to/file
 | 台灣手機號碼 | **Opt-in** —— 預設關閉（`rule_overrides: { "phone-tw": true }` 開啟）；數字段是實測的誤報來源，關閉的代價是漏偵真電話 | 🟡 MEDIUM |
 | 國際電話 | **Opt-in** —— 預設關閉（`rule_overrides: { "phone-intl": true }` 開啟）；取捨同上 | 🟢 LOW |
 | HTTP(S) URL | **Opt-in** —— 預設關閉（`rule_overrides: { "url": true }` 開啟） | 🟢 LOW |
-| NDA 關鍵字 | 自訂（見 config/guard.config.yaml） | 🔴 HIGH |
-| 私有域名 | 自訂（見 config/guard.config.yaml） | 🟡 MEDIUM |
+| NDA 關鍵字 | 預設值加上自訂（見[設定檔](#設定檔)） | 🔴 HIGH |
+| 私有域名 | 自訂（見[設定檔](#設定檔)） | 🟡 MEDIUM |
 
 > **偵測邊界**（依 `src/rules/builtin.ts`）：通用 secret 規則只比對關鍵字 `password`、`passwd`、`secret`、`private_key`、`client_secret`，且值須 **8 字元以上**；一般的 `api_key=`／`token=` 賦值只有在值本身符合廠商格式時才會命中。無引號的值若是程式碼表達式（如 `process.env.DB_PASSWORD`、`z.string().min(6)`）會跳過，但呼叫參數中含其他字串常值時仍會回報。信用卡與 IBAN 須通過檢查碼，信用卡規則另外跳過單一數字重複的數字串和 UUID 內的數字。URL 內嵌憑證與 DB 連線字串規則會跳過 `${…}`、`{{…}}`、`<…>` 形式的佔位密碼。IP 只涵蓋公開 IPv4，超過四段的點分數字會整段回報，避免內嵌位址漏遮（因此 `2026.10.21.14.32.59` 這類點分日期也會回報）。任何規則都不涵蓋：街道／郵遞地址、日期、IPv6，以及短於 8 字元的通用 secret 賦值。SSH 遠端位址（`user@host:path`、`ssh://user@host/…`）不會回報為 email；私有域名與路徑關鍵字仍適用，`scheme://user:password@host` 的密碼部分則回報為 URL 內嵌憑證。私有 IPv4 需手動開啟，因為這種寫法也會符合版本號與時間戳；`settings.private_cidrs` 可縮小到組織自己的網段，無法解析的項目會讓設定載入失敗。每條內建規則都有固定 id，可透過 `config/guard.config.yaml` 的 `settings.rule_overrides` 開關（未知 id 會讓設定載入失敗）；URL 規則預設關閉，因為全面遮罩 URL 會影響 provider endpoint。`block`、`redact`、`transparent` 三種模式都套用同一組規則（內建加 `config/guard.config.yaml`）。
 
@@ -550,7 +550,7 @@ curl -s -X POST http://localhost:3001/scan \
 
 ## 設定檔
 
-LeakShield 會載入找到的第一個設定檔：`./config/guard.config.yaml`，接著是 LeakShield 目錄內的 `config/guard.config.yaml`（僅限原始碼建置），最後是 `~/.leakshield/guard.config.yaml`。都沒有時使用內建預設值。OpenCode plugin 另外接受 `configPath` 選項。要新建設定檔，請複製 [`config/guard.config.example.yaml`](config/guard.config.example.yaml)，再替換其中的範例關鍵字與域名。
+LeakShield 會載入找到的第一個設定檔：`./config/guard.config.yaml`，接著是 LeakShield 目錄內的 `config/guard.config.yaml`（僅限原始碼建置），最後是 `~/.leakshield/guard.config.yaml`。都沒有時使用內建預設值。OpenCode plugin 另外接受 `configPath` 選項。Repo 不附 `config/guard.config.yaml`，你在那裡建立的檔案也會被 Git 忽略，關鍵字只留在本機。要新建設定檔，請複製 [`config/guard.config.example.yaml`](config/guard.config.example.yaml)，再加入自己的關鍵字與域名。列出 `nda_keywords` 會取代四個預設值（`CONFIDENTIAL`、`INTERNAL ONLY`、`DO NOT SHARE`、`NDA`）；範例檔已保留它們。
 
 ```yaml
 # NDA 關鍵字（大小寫不敏感）
@@ -579,6 +579,8 @@ settings:
 修改後：
 - **CLI**：下次執行自動載入
 - **OpenCode Plugin**：重啟 OpenCode 以重新載入 plugin 設定
+- **pi extension**：重啟 pi（可用 `LEAKSHIELD_CONFIG` 指定其他檔案）
+- **Claude Code proxy**：重啟 proxy（可用 `--config` 指定其他檔案）
 - **Web UI**：重啟本機 server
 
 ### `.env` 精確值偵測

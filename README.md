@@ -152,8 +152,8 @@ Before relying on any host, read [what this protects — and what it does not](#
 | Private IPv4 / VPN CIDR | **Opt-in** — disabled by default (`rule_overrides["private-ipv4"]: true`); networks from `settings.private_cidrs`, default RFC 1918 + CGNAT + link-local | 🟡 MEDIUM |
 | Email Address | All email formats | 🟡 MEDIUM |
 | URL Embedded Credential | `scheme://user:password@host` — only the userinfo span is masked | 🔴 HIGH |
-| Taiwan Mobile Number | **Opt-in** — disabled by default (`rule_overrides["phone-tw"]: true`); digit runs are a measured false-positive source | 🟡 MEDIUM |
-| International Phone | **Opt-in** — disabled by default (`rule_overrides["phone-intl"]: true`); same trade-off as above | 🟢 LOW |
+| Taiwan Mobile Number | **Opt-in** — disabled by default (`rule_overrides["phone-tw"]: true`); `09xx` or `+886 9xx`, with optional spaces or hyphens; digit runs are a measured false-positive source | 🟡 MEDIUM |
+| International Phone | **Opt-in** — disabled by default (`rule_overrides["phone-intl"]: true`); `+` and 7–15 digits, one space or hyphen allowed between digits; same trade-off as above | 🟢 LOW |
 | HTTP(S) URL | **Opt-in** — disabled by default (`rule_overrides.url: true`) | 🟢 LOW |
 | NDA Keywords | Defaults plus your own (see [Configuration](#configuration)) | 🔴 HIGH |
 | Private Domains | Your own (see [Configuration](#configuration)) | 🟡 MEDIUM |

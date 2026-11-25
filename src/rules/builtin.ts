@@ -326,7 +326,7 @@ export const BUILTIN_RULES: Rule[] = [
     // token 類字串的誤報是量測到的主要 FP 源（0.294%）。要開啟：
     // settings.rule_overrides["phone-tw"]: true。漏真電話風險見 README。
     optIn: true,
-    pattern: /(?:(?:\+886)|0)9\d{2}[-\s]?\d{3}[-\s]?\d{3}/g,
+    pattern: /(?:\+886[-\s]?|0)9\d{2}[-\s]?\d{3}[-\s]?\d{3}/g,
   },
   {
     id: "phone-intl",
@@ -335,7 +335,9 @@ export const BUILTIN_RULES: Rule[] = [
     description: "國際電話號碼",
     // Opt-in，同 phone-tw（P2）。要開啟：settings.rule_overrides["phone-intl"]: true
     optIn: true,
-    pattern: /\+[1-9]\d{6,14}\b/g,
+    // 數字之間可有一個空格或連字號（+44 20 7946 0958、+1-202-555-0143），總位數 7–15（E.164）。
+    // + 前緊接英數字、底線或點時不算（版本號建置編號 1.2.3+20261125、算式 2+2）。
+    pattern: /(?<![\w.])\+[1-9](?:[ -]?\d){6,14}\b/g,
   },
   {
     id: "id-tw",

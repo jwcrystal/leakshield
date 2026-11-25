@@ -6,6 +6,7 @@ All notable changes are listed here.
 
 ### Changed
 
+- Phone rules (both opt-in) match common separators. `phone-intl` accepts one space or hyphen between digits (`+44 20 7946 0958`, `+1-202-555-0143`), still 7–15 digits in total, and no longer matches a `+` that directly follows a letter, digit, underscore or dot, so build metadata such as `1.2.3+20261125` is not reported. `phone-tw` accepts a space or hyphen after `+886` (`+886 912 345 678`). A number with spaces is masked whole; in transparent mode, restoring it into a shell command is refused, as for any original that contains spaces.
 - The repository no longer tracks `config/guard.config.yaml`, and Git now ignores it so local keywords and domains are not committed by accident. That file set `nda_keywords: []`, which turned NDA keyword detection off when the CLI or Web UI ran from a checkout, or when a host loaded a source build. Those setups now use the built-in defaults (`CONFIDENTIAL`, `INTERNAL ONLY`, `DO NOT SHARE`, `NDA`) unless you create your own config. npm installs are unchanged: the package never included the file. `config/guard.config.example.yaml` is rewritten in English, keeps the four defaults, and no longer enables the placeholder keyword `Project Phoenix`.
 
 ## 0.4.0 — 2026-11-24

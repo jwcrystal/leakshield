@@ -1,92 +1,77 @@
-# LeakShield example configuration.
-# Copy it to ~/.leakshield/guard.config.yaml or ./config/guard.config.yaml,
-# then replace the sample keywords and domains and delete rules that do not apply.
+# LeakShield example configuration
+#
+# How to use:
+#   1. Copy this file to ~/.leakshield/guard.config.yaml (all projects)
+#      or ./config/guard.config.yaml (one project).
+#   2. Add your own keywords and domains below.
+#   3. Restart OpenCode, pi, the Claude Code proxy or the Web UI. The CLI picks
+#      up changes on its next run.
+#   4. Run `leakshield --doctor` to check the file loads.
+#
+# Without any config file, the built-in defaults apply. Full reference:
+# https://github.com/jwcrystal/leakshield#configuration
 
-# ─── NDA / confidential keywords (case-insensitive) ─────────────────────
-# A keyword that starts and ends with an ASCII letter or digit matches whole
-# words only ("NDA" does not match "Foundation" or "agenda"); CJK keywords such
-# as "機密" match as substrings.
-# This list replaces the built-in defaults, so the four defaults are listed
-# here to keep them; an empty list disables NDA keywords.
+# ─── Confidential keywords ──────────────────────────────────────────────
+# Words that must not reach a model. Matching ignores case. English words match
+# as whole words ("NDA" does not match "agenda"); Chinese or Japanese words
+# match anywhere in the text.
+#
+# This list replaces the built-in defaults, so the four defaults are kept
+# below. Delete one only if you do not want it detected.
 nda_keywords:
   - "CONFIDENTIAL"
   - "INTERNAL ONLY"
   - "DO NOT SHARE"
   - "NDA"
-  # Your internal project names:
+  # Add your own, for example project code names:
   # - "Project Phoenix"
-  # - "Operation XYZ"
 
 # ─── Private domains ────────────────────────────────────────────────────
+# Internal hostnames that must not reach a model. Empty by default. A full
+# hostname gives fewer false matches than a short fragment.
 private_domains: []
-  # Replace with your organization's or project's private hostnames; do not
-  # keep these placeholders.
   # - "internal.example.com"
   # - "gitlab.internal.example.com"
 
-# ─── Custom regex rules (case-insensitive) ──────────────────────────────
-# severity: HIGH / MEDIUM / LOW (default HIGH); every severity reports a match.
-# A pattern may be up to 200 characters. A pattern that does not compile makes
-# the config fail to load; a pattern that looks like ReDoS is skipped (timing
-# heuristic, not a guarantee), and --doctor lists it.
-# Check the format and false-positive rate before uncommenting; generic number
-# patterns produce many false positives.
+# ─── Custom rules ───────────────────────────────────────────────────────
+# Regular expressions for formats the built-in rules do not know, such as
+# employee IDs or internal tokens. severity is HIGH (default), MEDIUM or LOW;
+# every severity is reported. Test a pattern against real data before you
+# enable it: broad number patterns cause many false positives.
+# Credit cards, API keys, tokens and emails are already built in.
 custom_rules: []
-# - description: "Employee ID (adjust to your format)"
+# - description: "Employee ID"
 #   pattern: "\\bEMP-\\d{6}\\b"
 #   severity: HIGH
 #
-# - description: "Internal service token"
-#   pattern: "MYCO_[A-Z0-9]{32}"
-#   severity: HIGH
-#   flags: "i"            # subset of gimsuy; g is always added, default i
-#   word_boundary: true   # adds \b only at literal ASCII word edges, not CJK
-#   allow:                # exact strings, not regex, not substrings
-#     - "MYCO_EXAMPLE0000000000000000000000000"
-#   # path: ["src/**"]    # accepted but not implemented yet; the rule still
-#   #                     # applies to all text, and --doctor warns
-#
-# Note: allow and settings.allowlist are real bypasses — the value still
-# leaves the machine unchanged, it is just no longer reported. Only list
-# content you have confirmed is not sensitive. --doctor reports the entry
-# count and exercises up to 8 entries, flagging those it cannot exercise (it
-# does not assert each one).
-#
-# Credit card numbers are already covered by a built-in rule (id: credit-card,
-# with a Luhn check); no custom rule is needed.
-#
-# Jira issue keys are usually not confidential; LOW still produces a finding,
-# so enable this only when you need it:
-# - description: "Jira issue key"
-#   pattern: "\\b[A-Z]{2,10}-\\d{1,6}\\b"
-#   severity: LOW
+# More options (flags, word_boundary, per-rule allow list) are described in
+# the README's "Custom Rules" section.
 
 # ─── Scan settings ──────────────────────────────────────────────────────
 settings:
-  # Maximum characters to scan (longer input is truncated).
+  # Maximum characters scanned per input.
   max_chars: 200000
-  # Show line numbers for findings.
+  # Show line numbers in findings.
   show_line_numbers: true
-  # Length of the masked finding preview.
+  # Length of the masked preview shown for a finding.
   preview_length: 60
-  # Base64 / URL / Hex decoding detection; off by default, enable explicitly.
+  # Also decode Base64, URL and Hex text before scanning. Off by default.
   encoding_detection: false
-  # Optional: files holding known secret values (paths relative to the
-  # workspace root). Only non-empty values of at least 8 characters are used
-  # for exact matching; values are never returned.
+
+  # Optional: .env files whose values must never reach a model. Paths are
+  # relative to the project root. Values are only compared, never sent or logged.
   # env_files:
   #   - .env
-  #   - .env.local
-  # Optional: private networks, used only when rule_overrides["private-ipv4"]
-  # is true. Empty means RFC 1918 (10/8, 172.16/12, 192.168/16), CGNAT
-  # (100.64/10) and link-local (169.254/16). A malformed entry fails the load.
-  # private_cidrs:
-  #   - 10.0.0.0/8
-  #   - 172.16.0.0/12
-  #   - 192.168.0.0/16
-  # Optional: global allowlist (exact strings, not regex, not substrings) for
-  # every rule. This is a real bypass: the value still leaves the machine
-  # unchanged. Up to 64 entries of 200 characters each; --doctor reports the
-  # count and exercises up to 8 entries, flagging those it cannot exercise.
+
+  # Optional: turn built-in rules on or off. The README's "Detection Coverage"
+  # table names the opt-in rules; every id is in BUILTIN_RULE_IDS in
+  # src/rules/builtin.ts. An unknown id stops the config from loading.
+  # rule_overrides:
+  #   url: true            # opt-in rule, off by default
+  #   phone-intl: false
+
+  # Optional: exact values never reported, even when a rule matches.
+  # Warning: these values reach the model unmasked. Use only for values you
+  # have confirmed are not sensitive.
   # allowlist:
   #   - qa@example.com

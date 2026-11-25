@@ -6,7 +6,7 @@ Verified against pi **1.6.0**. The doctor accepts `>= 1.6.0 < 2.0.0`; only 1.6.0
 
 ## How it works
 
-pi builds its provider clients per request and resolves `fetch` at that point (`options.fetch ?? globalThis.fetch`), including compaction and branch summaries. Wrapping the global fetch therefore covers the same traffic the [OpenCode plugin](README.md#opencode-plugin-recommended) covers through its wire hook, with no proxy and no launcher.
+pi builds its provider clients per request and resolves `fetch` at that point (`options.fetch ?? globalThis.fetch`), including compaction and branch summaries. Wrapping the global fetch therefore covers the same traffic the [OpenCode plugin](opencode.md) covers through its wire hook, with no proxy and no launcher.
 
 | Layer | Responsibility |
 |---|---|

@@ -2,6 +2,8 @@
 
 You have a single `leakshield` (or `leakshield.exe`) executable. No Node.js, no npm, nothing else needed.
 
+It is the LeakShield CLI in executable form: use it for explicit scans, redaction and the Web UI. It does not protect an AI agent by itself. The OpenCode plugin and the pi extension are loaded by their host from the npm package, and the Claude Code proxy has not been verified in this binary; for those, install the npm package (`npm install -g leakshield`) and see the [README](https://github.com/jwcrystal/leakshield#quickstart).
+
 ## Run
 
 ```bash
@@ -65,3 +67,5 @@ See full options: [Configuration Reference](https://github.com/jwcrystal/leakshi
 ```bash
 ./leakshield    # shows usage and all options
 ```
+
+This applies when you run it in a terminal. In a pipe, CI or a script, where stdin is not a terminal, it reads stdin until EOF instead; close or redirect stdin there so it does not wait.

@@ -2,7 +2,7 @@
 
 > 🌐 English | [繁體中文](./websocket.zh-TW.md)
 
-[← README](../../README.md#opencode-plugin-recommended)
+[← OpenCode plugin](../opencode.md)
 
 Responses-family only.
 

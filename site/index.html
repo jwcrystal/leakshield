@@ -260,6 +260,18 @@
   .step-block h3 { margin-bottom: .15rem; }
   .step-block p { margin: 0 0 .6rem; font-size: .88rem; color: var(--muted); }
   @media (max-width: 860px) { .install-grid { grid-template-columns: 1fr; } }
+  .host-tabs { display: flex; flex-wrap: wrap; gap: .4rem; padding: 1.1rem 0 .2rem; border-top: 1px solid var(--border); }
+  .host-tabs button {
+    font: inherit; font-size: .82rem; padding: .32rem .85rem; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--border); background: transparent; color: var(--muted);
+  }
+  .host-tabs button:hover { color: var(--fg); }
+  .host-tabs button[aria-selected="true"] {
+    background: var(--accent-soft); color: var(--fg); font-weight: 600;
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  }
+  .host-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .host-panel .step-block:first-of-type { border-top: 0; padding-top: .9rem; }
   .callout {
     display: flex; gap: .75rem; padding: .95rem 1rem; border-radius: 11px;
     border: 1px solid color-mix(in srgb, var(--warn) 32%, var(--border));
@@ -454,7 +466,7 @@
     <div class="wrap">
       <p class="eyebrow" data-i18n="cov.eyebrow">Detection coverage</p>
       <h2 data-i18n="cov.title">What it catches</h2>
-      <p class="lede" data-i18n="cov.sub">Built-in rules run in every mode — block, redact and transparent — and are extended by <code>config/guard.config.yaml</code>.</p>
+      <p class="lede" data-i18n="cov.sub">Built-in rules run in every mode — block, redact and transparent — and are extended by your own <code>guard.config.yaml</code>.</p>
 
       <div class="table-wrap">
         <table>
@@ -475,11 +487,11 @@
             <tr><td data-i18n="cov.r7n">Taiwan national ID</td><td data-i18n="cov.r7d">Format validation</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
             <tr><td data-i18n="cov.r8n">Credit cards</td><td data-i18n="cov.r8d">13–19 digits, Luhn checksum required</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
             <tr><td data-i18n="cov.r9n">IBAN</td><td data-i18n="cov.r9d">Compact or 4-char groups, mod-97 checksum</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
-            <tr><td data-i18n="cov.r10n">NDA keywords</td><td data-i18n="cov.r10d">Your own list from the config file</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
+            <tr><td data-i18n="cov.r10n">NDA keywords</td><td data-i18n="cov.r10d">Built-in defaults plus your own list</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
             <tr><td data-i18n="cov.r11n">Public IPv4</td><td data-i18n="cov.r11d">Private, loopback, CGNAT and reserved ranges excluded</td><td><span class="sev med"><i></i>MEDIUM</span></td></tr>
             <tr><td data-i18n="cov.r12n">Email addresses</td><td data-i18n="cov.r12d">All email formats</td><td><span class="sev med"><i></i>MEDIUM</span></td></tr>
             <tr><td data-i18n="cov.r13n">Private domains</td><td data-i18n="cov.r13d">Your own domain list from the config file</td><td><span class="sev med"><i></i>MEDIUM</span></td></tr>
-            <tr><td data-i18n="cov.r14n">Private IPv4 / VPN</td><td><span data-i18n="cov.r14d">RFC 1918, CGNAT and link-local, narrowed by <code>private_cidrs</code></span><span class="optin" data-i18n="cov.optin">opt-in</span></td><td><span class="sev med"><i></i>MEDIUM</span></td></tr>
+            <tr><td data-i18n="cov.r14n">Private IPv4 / VPN</td><td><span data-i18n="cov.r14d">RFC 1918, CGNAT and link-local, or your own <code>private_cidrs</code></span><span class="optin" data-i18n="cov.optin">opt-in</span></td><td><span class="sev med"><i></i>MEDIUM</span></td></tr>
             <tr><td data-i18n="cov.r15n">Taiwan mobile numbers</td><td><span data-i18n="cov.r15d">Digit runs are a measured false-positive source</span><span class="optin" data-i18n="cov.optin">opt-in</span></td><td><span class="sev med"><i></i>MEDIUM</span></td></tr>
             <tr><td data-i18n="cov.r16n">International phones</td><td><span data-i18n="cov.r16d">Same trade-off as Taiwan numbers</span><span class="optin" data-i18n="cov.optin">opt-in</span></td><td><span class="sev low"><i></i>LOW</span></td></tr>
             <tr><td data-i18n="cov.r17n">HTTP(S) URLs</td><td><span data-i18n="cov.r17d">Off by default: always-on masking would flag provider endpoints</span><span class="optin" data-i18n="cov.optin">opt-in</span></td><td><span class="sev low"><i></i>LOW</span></td></tr>
@@ -500,7 +512,7 @@
     <div class="wrap">
       <p class="eyebrow" data-i18n="ins.eyebrow">Quickstart</p>
       <h2 data-i18n="ins.title">Protect a project in three steps</h2>
-      <p class="lede" data-i18n="ins.sub">Needs Node.js 20 or later and OpenCode v2. Mapping persistence needs Node 22.13+.</p>
+      <p class="lede" data-i18n="ins.sub">Needs Node.js 20 or later. Pick your host: OpenCode v2, pi or Claude Code. Mapping persistence needs Node 22.13+.</p>
 
       <div class="install-grid" style="margin-top:1.8rem">
         <div>
@@ -508,7 +520,7 @@
             <span class="n">1</span>
             <div>
               <h3 data-i18n="ins.t1">Install the package</h3>
-              <p data-i18n="ins.d1">The CLI and the plugin ship in one npm package.</p>
+              <p data-i18n="ins.d1">The CLI, the OpenCode plugin, the pi extension and the Claude Code proxy ship in one npm package.</p>
               <div class="code-card">
                 <pre><code>npm install -g leakshield</code></pre>
                 <button class="copy" type="button" data-i18n="ins.copy">Copy</button>
@@ -516,29 +528,87 @@
             </div>
           </div>
 
-          <div class="step-block">
-            <span class="n">2</span>
-            <div>
-              <h3 data-i18n="ins.t2">Register the plugin</h3>
-              <p data-i18n="ins.d2">Add it to your project's <code>opencode.json</code>. With no options, <code>mode</code> defaults to <code>transparent</code>.</p>
-              <div class="code-card">
-                <pre><code>{
+          <div class="host-tabs" role="tablist" aria-label="Host" data-i18n-aria="ins.tabsLabel">
+            <button type="button" role="tab" id="tab-opencode" aria-controls="panel-opencode" aria-selected="true" data-host="opencode">OpenCode v2</button>
+            <button type="button" role="tab" id="tab-pi" aria-controls="panel-pi" aria-selected="false" tabindex="-1" data-host="pi">pi</button>
+            <button type="button" role="tab" id="tab-claude" aria-controls="panel-claude" aria-selected="false" tabindex="-1" data-host="claude">Claude Code</button>
+          </div>
+
+          <div class="host-panel" id="panel-opencode" role="tabpanel" aria-labelledby="tab-opencode">
+            <div class="step-block">
+              <span class="n">2</span>
+              <div>
+                <h3 data-i18n="ins.t2">Register the plugin</h3>
+                <p data-i18n="ins.d2">Add it to your project's <code>opencode.json</code>. With no options, <code>mode</code> defaults to <code>transparent</code>.</p>
+                <div class="code-card">
+                  <pre><code>{
   "$schema": "https://opencode.ai/config.json",
   "plugins": [{ "package": "leakshield" }]
 }</code></pre>
-                <button class="copy" type="button" data-i18n="ins.copy">Copy</button>
+                  <button class="copy" type="button" data-i18n="ins.copy">Copy</button>
+                </div>
+              </div>
+            </div>
+            <div class="step-block">
+              <span class="n">3</span>
+              <div>
+                <h3 data-i18n="ins.t3">Check the install</h3>
+                <p data-i18n="ins.d3">Exit code 0 means <code>PROTECTED</code> or <code>PARTIAL</code>. A missing <code>dist</code> entry point makes OpenCode skip the plugin silently; the doctor catches that. Then run the synthetic-token smoke test from the README.</p>
+                <div class="code-card">
+                  <pre><code>leakshield --doctor opencode</code></pre>
+                  <button class="copy" type="button" data-i18n="ins.copy">Copy</button>
+                </div>
               </div>
             </div>
           </div>
 
-          <div class="step-block">
-            <span class="n">3</span>
-            <div>
-              <h3 data-i18n="ins.t3">Check the install</h3>
-              <p data-i18n="ins.d3">Exit code 0 means <code>PROTECTED</code> or <code>PARTIAL</code>. Then run the synthetic-token smoke test from the README to prove the live path.</p>
-              <div class="code-card">
-                <pre><code>leakshield --doctor</code></pre>
-                <button class="copy" type="button" data-i18n="ins.copy">Copy</button>
+          <div class="host-panel" id="panel-pi" role="tabpanel" aria-labelledby="tab-pi" hidden>
+            <div class="step-block">
+              <span class="n">2</span>
+              <div>
+                <h3 data-i18n="ins.piT2">Install the pi package</h3>
+                <p data-i18n="ins.piD2">Registers the extension in pi's <code>settings.packages</code>. Needs pi 1.6 and Node.js 22.19 or later.</p>
+                <div class="code-card">
+                  <pre><code>pi install npm:leakshield</code></pre>
+                  <button class="copy" type="button" data-i18n="ins.copy">Copy</button>
+                </div>
+              </div>
+            </div>
+            <div class="step-block">
+              <span class="n">3</span>
+              <div>
+                <h3 data-i18n="ins.t3">Check the install</h3>
+                <p data-i18n="ins.piD3">A package install reports <code>PARTIAL</code> because pi's load order is not verified. List the extension first in <code>settings.extensions</code> to get <code>PROTECTED</code>.</p>
+                <div class="code-card">
+                  <pre><code>leakshield --doctor pi</code></pre>
+                  <button class="copy" type="button" data-i18n="ins.copy">Copy</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="host-panel" id="panel-claude" role="tabpanel" aria-labelledby="tab-claude" hidden>
+            <div class="step-block">
+              <span class="n">2</span>
+              <div>
+                <h3 data-i18n="ins.ccT2">Start the proxy</h3>
+                <p data-i18n="ins.ccD2">Leave it running; it listens on <code>127.0.0.1:8787</code>. Experimental: tool-call arguments are not restored yet.</p>
+                <div class="code-card">
+                  <pre><code>leakshield --claude-code-proxy</code></pre>
+                  <button class="copy" type="button" data-i18n="ins.copy">Copy</button>
+                </div>
+              </div>
+            </div>
+            <div class="step-block">
+              <span class="n">3</span>
+              <div>
+                <h3 data-i18n="ins.ccT3">Point Claude Code at it</h3>
+                <p data-i18n="ins.ccD3">Or set it in the <code>env</code> block of <code>~/.claude/settings.json</code>. The doctor checks where the base URL comes from and that the proxy answers.</p>
+                <div class="code-card">
+                  <pre><code>export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+leakshield --doctor claude-code</code></pre>
+                  <button class="copy" type="button" data-i18n="ins.copy">Copy</button>
+                </div>
               </div>
             </div>
           </div>
@@ -561,7 +631,7 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
           <div class="callout" style="margin-top:1.1rem">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3.5 21 19H3l9-15.5Z" stroke-linejoin="round"/><path d="M12 9.5v4.2" stroke-linecap="round"/><circle cx="12" cy="16.6" r=".9" fill="currentColor" stroke="none"/></svg>
             <div>
-              <p data-i18n="ins.warn">A missing <code>dist</code> entry point makes OpenCode log-and-skip the plugin — sessions look normal but are unprotected. <code>--doctor</code> catches that.</p>
+              <p data-i18n="ins.warn"><code>--doctor</code> checks the install from outside the host, not a live session. Before real data, send a synthetic value and confirm the provider sees a placeholder.</p>
             </div>
           </div>
         </div>
@@ -639,11 +709,11 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
         </details>
         <details>
           <summary data-i18n="faq.q3">Where do the placeholders and keys live?</summary>
-          <p data-i18n="faq.a3">Placeholders are per-session pseudonyms. Their reverse mapping stays on your machine: in memory by default, or in an opt-in encrypted database (SGP.db) whose key the OS keychain holds, with a keyfile fallback for headless machines.</p>
+          <p data-i18n="faq.a3">Placeholders are per-session pseudonyms. Their reverse mapping stays on your machine: in memory by default, or, for OpenCode and pi, in an opt-in encrypted database (SGP.db) whose key the OS keychain holds, with a keyfile fallback for headless machines.</p>
         </details>
         <details>
           <summary data-i18n="faq.q4">How do I add my own keywords and domains?</summary>
-          <p data-i18n="faq.a4">Edit <code>config/guard.config.yaml</code> — NDA keywords, private domains, allowlists and <code>settings.rule_overrides</code>. An unknown rule id fails the config load rather than being ignored.</p>
+          <p data-i18n="faq.a4">Copy <code>config/guard.config.example.yaml</code> to <code>~/.leakshield/guard.config.yaml</code> (or <code>./config/</code> for one project) and add NDA keywords, private domains, allowlists or <code>settings.rule_overrides</code>. An unknown rule id fails the config load rather than being ignored.</p>
         </details>
         <details>
           <summary data-i18n="faq.q5">Is it production ready?</summary>
@@ -727,7 +797,7 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
 
     "cov.eyebrow": "偵測範圍",
     "cov.title": "會抓到什麼",
-    "cov.sub": "內建規則在三種模式（block、redact、transparent）都會執行，並可由 <code>config/guard.config.yaml</code> 擴充。",
+    "cov.sub": "內建規則在三種模式（block、redact、transparent）都會執行，並可由你自己的 <code>guard.config.yaml</code> 擴充。",
     "cov.th1": "類型",
     "cov.th2": "偵測內容",
     "cov.th3": "嚴重度",
@@ -750,7 +820,7 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
     "cov.r9n": "IBAN",
     "cov.r9d": "緊密或每 4 字元分組，須通過 mod-97",
     "cov.r10n": "NDA 關鍵字",
-    "cov.r10d": "來自設定檔的自訂清單",
+    "cov.r10d": "內建預設值加上你的自訂清單",
     "cov.r11n": "公開 IPv4",
     "cov.r11d": "排除私有、loopback、CGNAT 與保留網段",
     "cov.r12n": "電子郵件",
@@ -758,7 +828,7 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
     "cov.r13n": "私有網域",
     "cov.r13d": "來自設定檔的自訂網域清單",
     "cov.r14n": "私有 IPv4／VPN",
-    "cov.r14d": "RFC 1918、CGNAT 與 link-local，可用 <code>private_cidrs</code> 縮小範圍",
+    "cov.r14d": "RFC 1918、CGNAT 與 link-local，或你自己的 <code>private_cidrs</code>",
     "cov.r15n": "台灣手機號碼",
     "cov.r15d": "數字串是實測的誤判來源",
     "cov.r16n": "國際電話",
@@ -774,16 +844,24 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
 
     "ins.eyebrow": "快速開始",
     "ins.title": "三個步驟保護一個專案",
-    "ins.sub": "需要 Node.js 20 以上與 OpenCode v2。對照表持久化需要 Node 22.13+。",
+    "ins.sub": "需要 Node.js 20 以上。選擇你的宿主：OpenCode v2、pi 或 Claude Code。對照表持久化需要 Node 22.13+。",
     "ins.t1": "安裝套件",
-    "ins.d1": "CLI 與 plugin 在同一個 npm 套件裡。",
+    "ins.d1": "CLI、OpenCode plugin、pi extension 與 Claude Code proxy 都在同一個 npm 套件裡。",
     "ins.t2": "註冊 plugin",
     "ins.d2": "加進專案的 <code>opencode.json</code>。不給選項時，<code>mode</code> 預設為 <code>transparent</code>。",
     "ins.t3": "檢查安裝",
-    "ins.d3": "Exit code 0 代表 <code>PROTECTED</code> 或 <code>PARTIAL</code>。再跑 README 的合成權杖 smoke test，確認實際路徑。",
+    "ins.d3": "Exit code 0 代表 <code>PROTECTED</code> 或 <code>PARTIAL</code>。<code>dist</code> 入口不存在時，OpenCode 會靜默跳過 plugin，doctor 會抓到這件事。之後再跑 README 的合成權杖 smoke test。",
+    "ins.piT2": "安裝 pi 套件",
+    "ins.piD2": "會把 extension 註冊到 pi 的 <code>settings.packages</code>。需要 pi 1.6 與 Node.js 22.19 以上。",
+    "ins.piD3": "以套件安裝時，pi 的載入順序無法驗證，所以會顯示 <code>PARTIAL</code>。把 extension 放在 <code>settings.extensions</code> 第一位即可得到 <code>PROTECTED</code>。",
+    "ins.ccT2": "啟動 proxy",
+    "ins.ccD2": "保持執行；它監聽 <code>127.0.0.1:8787</code>。實驗性：工具呼叫參數尚未還原。",
+    "ins.ccT3": "讓 Claude Code 指向它",
+    "ins.ccD3": "也可以寫進 <code>~/.claude/settings.json</code> 的 <code>env</code>。doctor 會檢查 base URL 的來源，以及 proxy 是否有回應。",
+    "ins.tabsLabel": "宿主",
     "ins.cliT": "或直接在終端掃描",
     "ins.cliN": "CLI 不會把內容送到模型。Exit code 1 代表有命中而被攔下，適合放進 CI。",
-    "ins.warn": "<code>dist</code> 入口不存在時，OpenCode 只會記一筆 log 就跳過 plugin —— session 看起來正常，實際上毫無保護。<code>--doctor</code> 會抓到這件事。",
+    "ins.warn": "<code>--doctor</code> 是在宿主之外檢查安裝，看不到執行中的 session。處理真實資料前，請送一個合成值，確認 provider 收到的是 placeholder。",
     "ins.copy": "複製",
 
     "hosts.eyebrow": "支援宿主",
@@ -817,9 +895,9 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
     "faq.q2": "無法遮罩時會怎樣？",
     "faq.a2": "請求會被拒絕。LeakShield 是 fail-closed：無法辨識的格式、無效的設定或缺少對照，都會中止呼叫，而不是送出原文。",
     "faq.q3": "佔位符與金鑰放在哪裡？",
-    "faq.a3": "佔位符是每個 session 的偽名，能換回原值的對照表留在你的機器上：預設只在記憶體；要持久化需自行開啟加密資料庫（SGP.db），金鑰由作業系統 keychain 保管，無 keychain 的環境可改用金鑰檔。",
+    "faq.a3": "佔位符是每個 session 的偽名，能換回原值的對照表留在你的機器上：預設只在記憶體；OpenCode 與 pi 可自行開啟加密資料庫（SGP.db）持久化，金鑰由作業系統 keychain 保管，無 keychain 的環境可改用金鑰檔。",
     "faq.q4": "怎麼加入自己的關鍵字與網域？",
-    "faq.a4": "編輯 <code>config/guard.config.yaml</code>：NDA 關鍵字、私有網域、allowlist 與 <code>settings.rule_overrides</code>。未知的規則 id 會讓設定載入失敗，不會被忽略。",
+    "faq.a4": "把 <code>config/guard.config.example.yaml</code> 複製到 <code>~/.leakshield/guard.config.yaml</code>（單一專案可放 <code>./config/</code>），再加入 NDA 關鍵字、私有網域、allowlist 或 <code>settings.rule_overrides</code>。未知的規則 id 會讓設定載入失敗，不會被忽略。",
     "faq.q5": "可以上生產環境了嗎？",
     "faq.a5": "目前是 0.x，預設值仍可能調整。已驗證的宿主與版本列在上面與 repo 中；未驗證的組合請視為未證實。",
     "faq.q6": "漏洞要怎麼回報？",
@@ -851,6 +929,11 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
       var text = lang === 'zh' ? ZH[key] : original.get(el);
       if (text != null) el.innerHTML = text;
     });
+    document.querySelectorAll('[data-i18n-aria]').forEach(function (el) {
+      if (!el.dataset.ariaEn) el.dataset.ariaEn = el.getAttribute('aria-label') || '';
+      var label = lang === 'zh' ? ZH[el.getAttribute('data-i18n-aria')] : el.dataset.ariaEn;
+      if (label != null) el.setAttribute('aria-label', label);
+    });
     document.title = TITLE[lang] || TITLE.en;
     document.querySelectorAll('.lang-switch button').forEach(function (b) {
       b.setAttribute('aria-pressed', String(b.dataset.lang === lang));
@@ -873,6 +956,33 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
     document.documentElement.dataset.theme = next;
     try { localStorage.setItem('leakshield-theme', next); } catch (e) {}
   });
+
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.host-tabs [role="tab"]'));
+  function selectTab(tab, focus) {
+    tabs.forEach(function (t) {
+      var on = t === tab;
+      t.setAttribute('aria-selected', String(on));
+      t.tabIndex = on ? 0 : -1;
+      var panel = document.getElementById(t.getAttribute('aria-controls'));
+      if (panel) panel.hidden = !on;
+    });
+    if (focus) tab.focus();
+    try { localStorage.setItem('leakshield-host', tab.dataset.host); } catch (e) {}
+  }
+  tabs.forEach(function (t, i) {
+    t.addEventListener('click', function () { selectTab(t, false); });
+    t.addEventListener('keydown', function (e) {
+      var next = null;
+      if (e.key === 'ArrowRight') next = tabs[(i + 1) % tabs.length];
+      else if (e.key === 'ArrowLeft') next = tabs[(i - 1 + tabs.length) % tabs.length];
+      else if (e.key === 'Home') next = tabs[0];
+      else if (e.key === 'End') next = tabs[tabs.length - 1];
+      if (next) { e.preventDefault(); selectTab(next, true); }
+    });
+  });
+  var savedHost = null;
+  try { savedHost = localStorage.getItem('leakshield-host'); } catch (e) {}
+  tabs.forEach(function (t) { if (t.dataset.host === savedHost) selectTab(t, false); });
 
   document.querySelectorAll('.code-card .copy').forEach(function (btn) {
     btn.addEventListener('click', function () {

@@ -29,5 +29,5 @@ Application layer for the scanner: configuration, rule engine, decision model, p
 
 ## Integration
 - Depends on `zod`, `js-yaml`, and `chalk`; transparent persistence uses Node's built-in `node:sqlite` (Node 22.13+).
-- Consumes `config/guard.config.yaml`.
+- Consumes `guard.config.yaml` from the search path in `src/config/loader.ts` (template: `config/guard.config.example.yaml`).
 - Exposes the plugin entry, the `leakshield` CLI, and the local Web UI / REST endpoint.

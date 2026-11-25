@@ -6,7 +6,7 @@ LeakShield 用一個行程內 extension 保護 [pi coding agent](https://github.
 
 ## 運作方式
 
-pi 每次請求才建立 provider client，並在當下解析 `fetch`（`options.fetch ?? globalThis.fetch`），compaction 與 branch summary 也一樣。因此包住全域 fetch，就涵蓋了 [OpenCode plugin](README.md#opencode-plugin-recommended) 用 wire hook 涵蓋的同一批流量，不需要 proxy，也不需要啟動器。
+pi 每次請求才建立 provider client，並在當下解析 `fetch`（`options.fetch ?? globalThis.fetch`），compaction 與 branch summary 也一樣。因此包住全域 fetch，就涵蓋了 [OpenCode plugin](opencode.zh-TW.md) 用 wire hook 涵蓋的同一批流量，不需要 proxy，也不需要啟動器。
 
 | 層 | 責任 |
 |---|---|

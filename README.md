@@ -12,28 +12,32 @@
 > **Design principles:** Invisible by default. Observable on demand. Fail-closed at the model boundary.
 > New adapter work is built and accepted against these ([ADR 0008](docs/adr/0008-transparent-protection-and-native-ux.md)). They are a contract for adapter work, not a claim that every host meets them today; see [host capabilities](docs/host-capabilities.md) for current status.
 
-Four supported modes:
-- **OpenCode Plugin**: The enforced ingress gate for OpenCode. Use this when OpenCode sends content to a model.
-- **pi adapter**: An in-process pi extension that guards the agent's provider requests through the shared wire core.
+Five entry points share one scanner and decision model:
+- **OpenCode plugin**: The enforced ingress gate for OpenCode v2, at its content hooks and, in transparent mode, the final provider body.
+- **pi extension**: An in-process pi extension that guards the agent's provider requests through the shared wire core and restores local tool arguments.
+- **Claude Code proxy** (experimental): A local proxy behind `ANTHROPIC_BASE_URL` that masks Anthropic Messages requests and restores assistant text.
 - **CLI**: Manual or CI scanning of text, files, and directories; supports redaction.
 - **Web UI**: Local browser interface and REST endpoint for manual scanning.
 
-MCP server mode has been removed. It depended on the model voluntarily calling a scan tool after it had already received the relevant context, so it cannot provide the plugin's security boundary.
+MCP server mode has been removed. It depended on the model voluntarily calling a scan tool after it had already received the relevant context, so it cannot provide a model-boundary guarantee.
 
-| Mode | Start it with | Use it for |
+| Entry point | Start it with | Use it for |
 |------|---------------|------------|
-| OpenCode Plugin | Add the `leakshield` package or the `dist` directory to `opencode.json` (OpenCode v2) | Automatic, fail-closed protection for OpenCode model inputs and tool outputs |
-| pi adapter | `pi install npm:leakshield` (0.4.0+, or `pi install /absolute/path/to/built/leakshield` for a local build; [setup](docs/pi.md)) | Masked pi provider requests and restored read/write/edit/bash arguments |
+| OpenCode plugin | Add the `leakshield` package or the `dist` directory to `opencode.json` (OpenCode v2; [guide](docs/opencode.md)) | Automatic, fail-closed protection for OpenCode model inputs and tool outputs |
+| pi extension | `pi install npm:leakshield` (0.4.0+, or `pi install /absolute/path/to/built/leakshield` for a local build; [guide](docs/pi.md)) | Masked pi provider requests and restored read/write/edit/bash arguments |
+| Claude Code proxy | `leakshield --claude-code-proxy`, then `ANTHROPIC_BASE_URL=http://127.0.0.1:8787` ([guide](docs/claude-code.md)) | Masked Claude Code model requests and restored assistant text; tool arguments are not restored yet |
 | CLI | `npm run scan -- --file ./path` (or `leakshield --file ./path` after a global install / `npm link`) | Explicit local or CI scans; it never sends content to a model |
 | Web UI | `npm run web` | Manual browser scans at `http://localhost:3000` |
 
 ## Project status
 
-**Experimental, `0.x`.** Published to npm as `leakshield`: run `npx leakshield --help` to see the commands, or build locally (`npm ci && npm run build`) and point OpenCode at the `dist` directory. Without arguments or input, the CLI waits on stdin.
+**Experimental, `0.x`.** Published to npm as `leakshield`: run `npx leakshield --help` to see the commands, or build locally (`npm ci && npm run build`) and point a host at the build. Run without arguments in a terminal, the CLI prints usage. When stdin is not a terminal (a pipe, CI or a script), it reads stdin until EOF, so close or redirect stdin there.
 
-- Transparent mode has been verified on OpenCode v2.0.28 with local loopback providers, and once against a real OpenAI model. The 0.3.0 tool restoration was rechecked on OpenCode v2.2.5 with a loopback provider, the OpenChamber render tool and `rtk` ([record](docs/evidence/2026-11-06-opencode-2.2.5-tool-restoration.md)). It is **not** a guarantee that nothing sensitive reaches a model: the recommended hook-first setup is reported as `PARTIAL` by `--doctor`, and content added after the plugin's hooks or sent by permitted tools (curl, remote MCP) is outside its coverage.
-- Claude Code is supported through a local proxy (`leakshield --claude-code-proxy`, then `ANTHROPIC_BASE_URL`), verified with Claude Code 2.1.321 against a loopback stub upstream ([record](docs/evidence/2026-11-21-claude-code-proxy.md)). It masks model requests and restores assistant text, but does not restore placeholders at tool execution yet: see [Claude Code](docs/claude-code.md).
-- pi is supported through an in-process extension that wraps the agent's `fetch`, masks the three wire APIs it supports, and restores read/write/edit/bash arguments locally. Verified against pi 1.6.0 with a recording stub upstream ([record](docs/evidence/2026-11-23-pi-extension.md)); providers whose transport bypasses fetch (Codex WebSocket, Bedrock) are refused, and OAuth-only accounts are not supported. See [pi adapter](docs/pi.md).
+None of the hosts is a guarantee that nothing sensitive reaches a model. `leakshield --doctor <host>` prints each host's declared coverage and residuals; the [host capability matrix](docs/host-capabilities.md) summarizes them.
+
+- **OpenCode**: transparent mode verified on OpenCode v2.0.28 with local loopback providers, and once against a real OpenAI model. The 0.3.0 tool restoration was rechecked on OpenCode v2.2.5 with a loopback provider, the OpenChamber render tool and `rtk` ([record](docs/evidence/2026-11-06-opencode-2.2.5-tool-restoration.md)). The hook-first setup is reported as `PARTIAL` by `--doctor`, and content added after the plugin's hooks or sent by permitted tools (curl, remote MCP) is outside its coverage. See [OpenCode plugin](docs/opencode.md).
+- **pi**: an in-process extension wraps the agent's `fetch`, masks the three wire APIs it supports, and restores read/write/edit/bash arguments locally. Verified against pi 1.6.0 with a recording stub upstream ([record](docs/evidence/2026-11-23-pi-extension.md)); providers whose transport bypasses fetch (Codex WebSocket, Bedrock) are refused, and OAuth-only accounts are not supported. See [pi adapter](docs/pi.md).
+- **Claude Code** (experimental): a local proxy (`leakshield --claude-code-proxy`, then `ANTHROPIC_BASE_URL`), verified with Claude Code 2.1.321 against a loopback stub upstream ([record](docs/evidence/2026-11-21-claude-code-proxy.md)). It masks model requests and restores assistant text, but does not restore placeholders at tool execution yet. See [Claude Code](docs/claude-code.md).
 - Not yet verified: OS-keychain custody on Windows and Linux (macOS verified 2026-10-20), a real Anthropic provider, long histories on other providers, long-running use ([#26](https://github.com/jwcrystal/leakshield/issues/26)).
 - Defaults may still change during `0.x`; see the [changelog](CHANGELOG.md).
 - Verification records: [docs/evidence](docs/evidence/README.md). Report vulnerabilities privately: [SECURITY.md](SECURITY.md). License: [Apache-2.0](LICENSE).
@@ -42,15 +46,17 @@ MCP server mode has been removed. It depended on the model voluntarily calling a
 
 ## Quickstart
 
-Needs OpenCode v2 and Node.js 20 or later.
+Install once (Node.js 20 or later; the pi extension needs Node.js 22.19 or later):
 
-1. Install:
+```bash
+npm install -g leakshield
+```
 
-   ```bash
-   npm install -g leakshield
-   ```
+Then connect the host you use and check it with `leakshield --doctor <host>`. Exit code 0 means `PROTECTED` or `PARTIAL`. The doctor checks the install outside the host and cannot see inside a live session, so finish with a synthetic-value test before using real data. Never use a real credential for that test.
 
-2. Register the plugin in your project's `opencode.json`. With no options, `mode` defaults to `transparent`:
+### OpenCode v2
+
+1. Register the plugin in your project's `opencode.json`. With no options, `mode` defaults to `transparent`:
 
    ```jsonc
    {
@@ -59,30 +65,74 @@ Needs OpenCode v2 and Node.js 20 or later.
    }
    ```
 
-3. Check the install. Exit code 0 means `PROTECTED` or `PARTIAL`; see [what `PARTIAL` means](#what-partial-means). This check cannot see inside a live session, so run step 4 as well.
+2. Check the install; see [what `PARTIAL` means](docs/opencode.md#what-partial-means):
 
    ```bash
-   leakshield --doctor
+   leakshield --doctor opencode
    ```
 
-4. Run the smoke test. It uses a temporary directory and a synthetic value, not a real credential:
+3. Run the smoke test. It uses a temporary directory and a synthetic value:
 
    ```bash
    SMOKE_DIR="$(mktemp -d)"
-   cat > "$SMOKE_DIR/opencode.json" <<'EOF'
+   cat > "$SMOKE_DIR/opencode.json" <<'JSON'
    {
      "$schema": "https://opencode.ai/config.json",
      "plugins": [{ "package": "leakshield", "options": { "mode": "block" } }]
    }
-   EOF
+   JSON
    (cd "$SMOKE_DIR" && opencode run --standalone \
      "Smoke test only. Do not reveal or use this token: sk-AAAAAAAAAAAAAAAAAAAA")
    rm -rf "$SMOKE_DIR"
    ```
 
-   The model-facing message must contain the LeakShield block notice and must not contain the synthetic token. Do not use a real credential for this test.
+   The model-facing message must contain the LeakShield block notice and must not contain the synthetic token.
 
-Before relying on it, read [what this protects — and what it does not](#what-this-protects--and-what-it-does-not). For source builds and other options, see [Installation](#installation) and [OpenCode Plugin](#opencode-plugin-recommended). New contributors: [3-minute onboarding](docs/ONBOARDING.zh-TW.md) (Traditional Chinese only).
+### pi
+
+1. Install the pi package (it registers the extension in `settings.packages`):
+
+   ```bash
+   pi install npm:leakshield
+   ```
+
+2. Check the install. A package install reports `PARTIAL` because pi's load order cannot be verified; for `PROTECTED`, register the extension first in `settings.extensions` instead ([explicit path](docs/pi.md#explicit-extension-path)):
+
+   ```bash
+   leakshield --doctor pi
+   ```
+
+3. Send pi a synthetic value such as `sk-AAAAAAAAAAAAAAAAAAAA` and confirm the provider receives a placeholder. See [pi adapter](docs/pi.md) for the provider APIs it supports.
+
+### Claude Code (experimental)
+
+1. Start the proxy and leave it running:
+
+   ```bash
+   leakshield --claude-code-proxy        # listens on 127.0.0.1:8787
+   ```
+
+2. Point Claude Code at it, in the shell or in the `env` block of `~/.claude/settings.json`:
+
+   ```bash
+   export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+   ```
+
+3. Check the wiring:
+
+   ```bash
+   leakshield --doctor claude-code
+   ```
+
+Tool-call arguments are not restored yet, and traffic that bypasses the base URL is not covered; see [Claude Code](docs/claude-code.md).
+
+### CLI only
+
+```bash
+leakshield --file ./path/to/file
+```
+
+Before relying on any host, read [what this protects — and what it does not](#what-this-protects--and-what-it-does-not). For source builds and other options, see [Installation](#installation). New contributors: [3-minute onboarding](docs/ONBOARDING.zh-TW.md) (Traditional Chinese only).
 
 ---
 
@@ -105,16 +155,16 @@ Before relying on it, read [what this protects — and what it does not](#what-t
 | Taiwan Mobile Number | **Opt-in** — disabled by default (`rule_overrides["phone-tw"]: true`); digit runs are a measured false-positive source | 🟡 MEDIUM |
 | International Phone | **Opt-in** — disabled by default (`rule_overrides["phone-intl"]: true`); same trade-off as above | 🟢 LOW |
 | HTTP(S) URL | **Opt-in** — disabled by default (`rule_overrides.url: true`) | 🟢 LOW |
-| NDA Keywords | Custom (see `config/guard.config.yaml`) | 🔴 HIGH |
-| Private Domains | Custom (see `config/guard.config.yaml`) | 🟡 MEDIUM |
+| NDA Keywords | Defaults plus your own (see [Configuration](#configuration)) | 🔴 HIGH |
+| Private Domains | Your own (see [Configuration](#configuration)) | 🟡 MEDIUM |
 
-> **Detection boundaries** (per `src/rules/builtin.ts`): the generic secret rule matches only the keywords `password`, `passwd`, `secret`, `private_key`, `client_secret` with a value of **8+ characters** — generic `api_key=`/`token=` assignments are not matched unless the value itself matches a vendor pattern. It also skips an unquoted value that is a code expression, such as `process.env.DB_PASSWORD` or `z.string().min(6)`; a call whose arguments hold another string literal is still reported. Credit card and IBAN matches require a valid checksum, and the credit card rule skips a run of one repeated digit and digits inside a UUID. The URL credential and DB connection rules skip a password that is a `${…}`, `{{…}}` or `<…>` placeholder. IP matches cover only public/routable IPv4, and a dotted run longer than four groups is reported whole so an address embedded in it is masked instead of left behind (dotted dates such as `2026.10.21.14.32.59` therefore report as an IP run too). Not covered by any rule: street/postal addresses, dates, IPv6, and values below the 8-character minimum for generic secret assignments. SSH remote authorities (`user@host:path`, `ssh://user@host/…`) are not reported as email; private domains and path keywords still apply inside them, and the password half of `scheme://user:password@host` is reported as a URL credential instead. Private IPv4 is opt-in because the literal also matches version numbers and timestamps; `settings.private_cidrs` narrows it to the organisation's own ranges, and an entry that does not parse fails the config load. Every built-in rule has a stable id and can be toggled via `settings.rule_overrides` in `config/guard.config.yaml` (unknown ids fail config load); the URL rule ships disabled because always-on URL masking would flag provider endpoints. The same rule set (built-in + `config/guard.config.yaml`) applies to every mode — `block`, `redact`, and `transparent`.
+> **Detection boundaries** (per `src/rules/builtin.ts`): the generic secret rule matches only the keywords `password`, `passwd`, `secret`, `private_key`, `client_secret` with a value of **8+ characters** — generic `api_key=`/`token=` assignments are not matched unless the value itself matches a vendor pattern. It also skips an unquoted value that is a code expression, such as `process.env.DB_PASSWORD` or `z.string().min(6)`; a call whose arguments hold another string literal is still reported. Credit card and IBAN matches require a valid checksum, and the credit card rule skips a run of one repeated digit and digits inside a UUID. The URL credential and DB connection rules skip a password that is a `${…}`, `{{…}}` or `<…>` placeholder. IP matches cover only public/routable IPv4, and a dotted run longer than four groups is reported whole so an address embedded in it is masked instead of left behind (dotted dates such as `2026.10.21.14.32.59` therefore report as an IP run too). Not covered by any rule: street/postal addresses, dates, IPv6, and values below the 8-character minimum for generic secret assignments. SSH remote authorities (`user@host:path`, `ssh://user@host/…`) are not reported as email; private domains and path keywords still apply inside them, and the password half of `scheme://user:password@host` is reported as a URL credential instead. Private IPv4 is opt-in because the literal also matches version numbers and timestamps; `settings.private_cidrs` replaces its default networks, for example with your organisation's own ranges, and an entry that does not parse fails the config load. Every built-in rule has a stable id and can be toggled via `settings.rule_overrides` in your config file ([ids](#built-in-rule-ids); unknown ids fail config load); the URL rule ships disabled because always-on URL masking would flag provider endpoints. The same rule set (built-in rules plus your config) applies to every mode — `block`, `redact`, and `transparent` — and every host.
 
 ---
 
 ## Decision Model
 
-Every scan produces a **decision** that tells the caller how to handle the content:
+Every scan produces a **decision** that tells the caller how to handle the content. The CLI and Web UI report it directly; the host integrations act on findings instead (mask in transparent mode, replace or refuse in `redact` and `block`).
 
 | Decision | When | Risk Level | Meaning |
 |----------|------|-----------|---------|
@@ -150,7 +200,7 @@ When using `--format json`, the output includes these decision-oriented fields:
 
 ## Installation
 
-Requires Node.js 20 or later. Mapping persistence needs 22.13 or later.
+Requires Node.js 20 or later. Mapping persistence needs 22.13 or later, and the pi extension needs 22.19 or later.
 
 ```bash
 npm install -g leakshield
@@ -200,6 +250,14 @@ installing.
 
 Can't use Node.js or npm? Build a standalone binary with [Bun](https://bun.sh) — no runtime needed on the target machine.
 
+The binary is the CLI compiled into one executable (`src/cli.ts`), not a separate mode:
+
+| Feature | Binary |
+|---------|--------|
+| CLI scan and redaction, Web UI | Supported |
+| `--claude-code-proxy`, `--doctor` | Included but not verified in a Bun-compiled binary; use the npm package for host protection |
+| OpenCode plugin, pi extension | Not available: the host loads the npm package, not an executable |
+
 ```bash
 # One-command build for current platform
 npm run binary
@@ -220,143 +278,15 @@ The output is a single executable — hand it to anyone, no dependencies require
 
 ### Configuration for binary and npm users
 
-The binary and the npm package work out of the box with built-in defaults. To customize rules (NDA keywords, private domains, custom regex patterns), place a config file in one of these locations:
-
-| Location | Scope |
-|----------|-------|
-| `./config/guard.config.yaml` | Current working directory |
-| `~/.leakshield/guard.config.yaml` | All sessions (user home) |
-
-```bash
-# Quick start: copy config/guard.config.example.yaml from this repository,
-# then replace its sample keywords and domains
-mkdir -p ~/.leakshield
-cp config/guard.config.example.yaml ~/.leakshield/guard.config.yaml
-
-# Or per-project
-mkdir -p ./config
-# Create/edit ./config/guard.config.yaml as needed
-```
-
-See [Configuration](#configuration) section for available options.
+The binary and the npm package work with built-in defaults and ship no config file. To add your own keywords, domains or rules, see [Configuration](#configuration).
 
 ---
 
 ## Usage
 
-### OpenCode Plugin (recommended)
-
-When loaded successfully, the OpenCode plugin is the enforced integration. It scans and blocks user text before OpenCode persists or sends it to a model, sanitizes system prompts and tool definitions, protects tool output before the next model turn, and re-scans history before replay. It always enables encoded-content detection. Invalid plugin options or scanner configuration make every protected hook fail closed and abort the model request. A bounded SHA-256 decision cache avoids repeatedly scanning unchanged history without retaining original or redacted content.
-
-Transparent mode details: [Encoded content and tool schemas](docs/plugin/transparent-mode.md#encoded-content-and-tool-schemas).
-
-LeakShield supports OpenCode v2 only. v2 hosts load the package `id` + `setup(ctx)` definition. OpenCode v1 is no longer supported: a v1 host that loads the package gets hooks that fail closed and abort every model request, and `leakshield --doctor` reports `BROKEN`. Upgrade to OpenCode v2.
-
-**OpenCode v2** — point `plugins` at the published package, or at the `dist` directory of a local build:
-
-```jsonc
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": [
-    {
-      "package": "leakshield" // or "/absolute/path/to/leakshield/dist"
-      // No options: mode defaults to "transparent" on v2.
-      // Add "options": { "mode": "block" } to refuse instead of pseudonymize.
-    }
-  ]
-}
-```
-
-Note that v2 only accepts plugin *directories* (it resolves `dist/index.js`) or package names; a `file://` URL to a single `.js` file is rejected with `configured plugin path must be a directory`.
-
-The default `mode` is **`transparent`** (see [Transparent mode](docs/plugin/transparent-mode.md)). `block` replaces unsafe content with a disclosure-free notice; set `"mode": "block"` to use it. Set `mode` to `redact` only when you explicitly want recognized direct matches replaced with `[REDACTED_TYPE]` placeholders. `--doctor` shows the mode in effect and marks it `(default)` when the options omit it.
-
-#### What `PARTIAL` means
-
-`leakshield --doctor` exits 0 for two statuses. They are install-level results, not a guarantee that nothing sensitive reaches a model. Pass `--doctor opencode`, `--doctor claude-code` or `--doctor pi` (also `--doctor=<host>`) to check one host with its own exit code.
-
-| Status | Setup | Meaning |
-|--------|-------|---------|
-| `PROTECTED` | `block` or `redact`, or transparent with `wireProtection` omitted or `true` (the v2 default), and every declared capability row covered | Install-level checks pass. In transparent mode, the final HTTP body or supported WS frame is validated too |
-| `PARTIAL` | Transparent with `wireProtection: false` ([hook-first example](config/opencode.hook-first.example.json)), or a host whose [declared capability rows](docs/host-capabilities.md) include `unknown` or `outside` | Final outbound HTTP bodies are not inspected, or a declared egress is not covered; the doctor names the row and the issue that closes it |
-
-Doctor prints `Configuration status` and `Wire protection` separately from host-wide `Coverage`. `Wire protection: enabled` describes the validated configuration, not proof of interception in a live session; block mode reports `not-applicable`, and an unknown configuration reports `unknown`. A `PARTIAL` verdict lists configuration and host-coverage reasons separately, including both when both apply. Host coverage is not filtered to your selected provider/model. Each host section also prints its declared credential handling, mapping-persistence policy and complete residual list; `opt-in` describes persistence support, not whether it is enabled in your install.
-
-With `PARTIAL`:
-
-- Later-added content or attachments may leave unmasked, even with `attachments: "block"`.
-- **Content-hook masking failures still refuse the affected call**; hook-only does not silently forward unprotectable raw content.
-
-See [Wire protection](docs/plugin/wire-protection.md) for both levels.
-
-#### Detailed guides
-
-- [Transparent mode](docs/plugin/transparent-mode.md): placeholders, supported protocols, tool argument restoration (per field, `code`/`script` fields, Code Mode, `curl`, `rtk`), restart limitation
-- [Wire protection](docs/plugin/wire-protection.md): hook-only and final wire levels, AI SDK providers, refusals, reply-side recovery
-- [Native WebSocket](docs/plugin/websocket.md): experimental Responses-family support and its limits
-- [Mapping persistence](docs/plugin/persistence.md): opt-in encrypted storage, key custody, erasure
-- [Capacity and lifecycle](docs/plugin/capacity.md): budgets, session limits, retention
-- [Readonly env queries](docs/plugin/env-queries.md): opt-in tools that answer configuration questions without returning values
-- [Host capability matrix](docs/host-capabilities.md): per-host declaration of which model egress and surfaces are protected, refused, absent, or outside interception, and the invariants a new adapter must satisfy
-- [Agent hook coverage](docs/hooks.md): how OpenCode, pi and Claude Code expose hooks, and which hook points can mask a request or restore a placeholder
-
-#### Persistence risk notes (read before enabling)
-
-Mapping persistence is opt-in; see [Mapping persistence](docs/plugin/persistence.md).
-
-- The design is dual-secret — the DB file alone or the key alone exposes nothing; both together do.
-- Backups (Time Machine, cloud sync) copy `SGP.db`: `forget` cannot reclaim what a backup already captured, and a restored backup plus a surviving key can re-identify old sessions — treat backup retention accordingly.
-- The keychain defends offline file theft (stolen disk, stolen backups, a copied `SGP.db`); it does not defend malware already running inside your login session.
-- The keyfile option lowers the bar to "both files from the same directory tree" and is intended for headless/server environments without a keychain service.
-
-**OpenCode v2 only — email de-identification trial:** the opt-in `deidentify` option (valid only together with `mode: "redact"`) additionally replaces repeated MEDIUM email findings with stable, opaque `[SG-EMAIL-…]` placeholders so an agent can correlate records without seeing the addresses. The mapping key is generated once per plugin setup (one OpenCode session), held in memory only, and never persisted — placeholders are stable within a live session but change after a restart, and no reverse mapping exists. Everything else keeps its existing disposition: HIGH credentials are still redacted/blocked, and truncated, encoded, or unverifiable content blocks the whole unit.
-
-```jsonc
-{ "package": "/absolute/path/to/leakshield/dist", "options": { "mode": "redact", "deidentify": true } }
-```
-
-Attachments: transparent mode supports an `attachments` policy (plural; `attachment` is not recognized). **`"block"` (default)** omits media/file parts at content hooks and replaces them with a notice; the model cannot read those omitted images. Final wire protection also refuses residual wire attachment parts; hook-first does not inspect late-added attachments. **`"allow"`** sends attachments through unscanned and appends a visible notice part — an explicit decision that you vouch for their content (`"allow"` requires `mode: "transparent"`). In block/redact modes attachments are blocked as before. Existing conversations can replay originals, subject to the [restart limitations](docs/plugin/transparent-mode.md#restart-limitation); starting a new conversation is not a substitute for verifying recovery. The plugin protects OpenCode model requests only, not other AI clients or local tools.
-
-OpenCode currently logs and skips modules that fail before their plugin factory can run, such as a missing package or JavaScript syntax error. After installation or upgrade, run a smoke test with a synthetic key matching `sk-` followed by at least 20 letters or digits and verify that LeakShield replaces the message before using real sensitive data.
-
-#### Isolated smoke test (OpenCode v2)
-
-Run this from the project root. It uses a temporary working directory and a synthetic value, not a real credential:
-
-```bash
-npm run build
-SMOKE_DIR="$(mktemp -d)"
-PROJECT_DIR="$(pwd)"
-cat > "$SMOKE_DIR/opencode.json" <<EOF
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": [
-    { "package": "$PROJECT_DIR/dist", "options": { "mode": "block" } }
-  ]
-}
-EOF
-(cd "$SMOKE_DIR" && opencode run --standalone \
-  "Smoke test only. Do not reveal or use this token: sk-AAAAAAAAAAAAAAAAAAAA")
-rm -rf "$SMOKE_DIR"
-```
-
-The model-facing message must contain the LeakShield block notice and must not contain the synthetic token. Do not use a real credential for this test.
-
-To test the published package, use `"leakshield"` instead of the local `dist` path.
-
-#### Automated install check: `--doctor`
-
-```bash
-npm run scan -- --doctor     # or: leakshield --doctor after global install
-```
-
-The doctor verifies the install without sending anything anywhere: it checks the OpenCode host version, reads the `opencode.json` or `opencode.jsonc` files OpenCode applies (`.opencode/`, the project root and one global directory), combines their `plugins` arrays the way the host does, confirms LeakShield is registered with options that the plugin itself would accept, verifies a local `dist` entry point actually exists (a missing one makes OpenCode silently log-and-skip the plugin — sessions look normal but are unprotected), loads the guard config, and runs the synthetic-canary smoke scan locally. Each host section is followed by the capability rows that host declares ([matrix](docs/host-capabilities.md)): an `unknown` or `outside` row keeps that host at `PARTIAL` and names the issue that closes it. Exit code 0 means `PROTECTED` or `PARTIAL` (`wireProtection: false`: final outbound HTTP bodies are not inspected); a v1 host is reported `BROKEN` with a fix that says to upgrade to OpenCode v2; any other status prints the failing check with a concrete fix, including a copy-paste registration snippet when the plugin is missing. A separate `Claude Code:` section checks the [Claude Code proxy](docs/claude-code.md) wiring; the exit code is also 0 when Claude Code is behind a running LeakShield proxy, even without OpenCode.
-
-Doctor is an install-level check that runs outside the host — it cannot see inside a live session. Runtime proof comes from the smoke test above or `scripts/e2e/run-boundary.mjs`.
-
 ### What this protects — and what it does not
 
-LeakShield protects model-conversation content: prompts, replayed history, tool outputs, and (in transparent mode) provider-bound request bodies whose shape it can parse. It is **not** a tool-egress firewall: a permitted local tool can still transmit originals over the network via `curl`, a remote MCP server, or any other channel. Controlling tool destinations requires a separate permission layer outside this plugin. Since 0.3.0, `curl` and `http` may also hold a placeholder inside an argument, so a tool can call an API with the protected value; the original then leaves the machine by design.
+LeakShield protects model-conversation content: prompts, replayed history, tool outputs, and provider-bound request bodies whose shape it can parse. How much of that each host covers differs; `leakshield --doctor <host>` and the [host capability matrix](docs/host-capabilities.md) list it. It is **not** a tool-egress firewall: a permitted local tool can still transmit originals over the network via `curl`, a remote MCP server, or any other channel. Controlling tool destinations requires a separate permission layer outside LeakShield. Since 0.3.0, `curl` and `http` may also hold a placeholder inside an argument, so a tool can call an API with the protected value; the original then leaves the machine by design.
 
 Detection also has known gaps: street/postal addresses, dates, IPv6, and generic assignments outside the keyword list or below the 8-character minimum pass through undetected. Credit card and IBAN numbers are detected only when the checksum validates; IP detection covers public IPv4 only; URL detection exists but is opt-in — see [Detection Coverage](#detection-coverage).
 
@@ -364,26 +294,62 @@ Local originals may remain in history, logs, and generated files — this protec
 
 ---
 
-### Claude Code (local proxy)
+### OpenCode plugin
 
-```bash
-leakshield --claude-code-proxy                     # listens on 127.0.0.1:8787
-export ANTHROPIC_BASE_URL=http://127.0.0.1:8787    # or the "env" block of ~/.claude/settings.json
-leakshield --doctor                                # the "Claude Code:" section checks the wiring
+When loaded successfully, the OpenCode plugin is the enforced integration. It scans and blocks user text before OpenCode persists or sends it to a model, sanitizes system prompts and tool definitions, protects tool output before the next model turn, and re-scans history before replay. In transparent mode (the default) it also validates the final provider body. Invalid plugin options or scanner configuration make every protected hook fail closed and abort the model request. OpenCode v2 only.
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    {
+      "package": "leakshield" // or "/absolute/path/to/leakshield/dist"
+      // Add "options": { "mode": "block" } to refuse instead of pseudonymize.
+    }
+  ]
+}
 ```
 
-The proxy masks every Anthropic Messages request Claude Code sends (and `count_tokens`), restores placeholders in the assistant's JSON or streamed text, and blocks anything it cannot mask instead of forwarding it. It is verified with an API key; Claude Code documents that the base URL also applies to a claude.ai login, which has not been tested here. It does not restore placeholders inside tool calls, and it cannot see traffic that bypasses the base URL, such as WebFetch's domain check, which sends the hostname to Anthropic. Setup and the full list of gaps: [docs/claude-code.md](docs/claude-code.md).
+Modes, `PARTIAL`, attachments, email de-identification, the isolated smoke test and what `--doctor` checks: [OpenCode plugin](docs/opencode.md). Feature guides: [transparent mode](docs/plugin/transparent-mode.md), [wire protection](docs/plugin/wire-protection.md), [native WebSocket](docs/plugin/websocket.md), [mapping persistence](docs/plugin/persistence.md), [capacity](docs/plugin/capacity.md), [readonly env queries](docs/plugin/env-queries.md).
 
 ---
 
 ### pi (in-process extension)
 
 ```bash
-pi -e /path/to/node_modules/leakshield/dist/adapters/pi/extension.js   # load it first
-leakshield --doctor pi                                        # checks registration, order and wire API
+pi install npm:leakshield      # or: pi -e /path/to/leakshield/dist/adapters/pi/extension.js
+leakshield --doctor pi         # checks registration, order and wire API
 ```
 
-pi resolves `fetch` when it builds a provider client, including compaction and branch summaries, so an extension that wraps `globalThis.fetch` covers the same traffic the OpenCode plugin covers through its wire hook. Every provider request is masked in-process; assistant text is restored in the reply, and `read`, `write`, `edit`, `bash` and `powershell` arguments are restored at the local execution boundary. Session files stay with pi, so `--continue`, `--resume` and `--session` keep working. Verified against pi 1.6.0 with a recording stub; providers that bypass fetch (Codex WebSocket, Bedrock, Google auth) are refused, OAuth-only accounts are not supported, and the extension has to load first. See [pi adapter](docs/pi.md).
+pi resolves `fetch` when it builds a provider client, including compaction and branch summaries, so an extension that wraps `globalThis.fetch` covers the same traffic the OpenCode plugin covers through its wire hook. Every provider request is masked in-process; assistant text is restored in the reply, and `read`, `write`, `edit`, `bash` and `powershell` arguments are restored at the local execution boundary. Session files stay with pi, so `--continue`, `--resume` and `--session` keep working. Verified against pi 1.6.0 with a recording stub; providers that bypass fetch (Codex WebSocket, Bedrock, Google auth) are refused, OAuth-only accounts are not supported, and loading the extension first keeps other extensions from holding the raw fetch. See [pi adapter](docs/pi.md).
+
+---
+
+### Claude Code (local proxy, experimental)
+
+```bash
+leakshield --claude-code-proxy                     # listens on 127.0.0.1:8787
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8787    # or the "env" block of ~/.claude/settings.json
+leakshield --doctor claude-code                    # checks the wiring
+```
+
+The proxy masks every Anthropic Messages request Claude Code sends (and `count_tokens`), restores placeholders in the assistant's JSON or streamed text, and blocks anything it cannot mask instead of forwarding it. It is verified with an API key; Claude Code documents that the base URL also applies to a claude.ai login, which has not been tested here. It does not restore placeholders inside tool calls, and it cannot see traffic that bypasses the base URL, such as WebFetch's domain check, which sends the hostname to Anthropic. Setup and the full list of gaps: [docs/claude-code.md](docs/claude-code.md).
+
+---
+
+### Across hosts
+
+- [Host capability matrix](docs/host-capabilities.md): per-host declaration of which model egress and surfaces are protected, refused, absent, or outside interception, and the invariants a new adapter must satisfy
+- [Agent hook coverage](docs/hooks.md): how OpenCode, pi and Claude Code expose hooks, and which hook points can mask a request or restore a placeholder
+
+#### Persistence risk notes (read before enabling)
+
+Mapping persistence is opt-in for the OpenCode plugin ([setup](docs/plugin/persistence.md)) and pi (`LEAKSHIELD_PI_PERSIST`, [setup](docs/pi.md#sessions-and-persistence)). The Claude Code proxy keeps mappings in memory only.
+
+- The design is dual-secret — the DB file alone or the key alone exposes nothing; both together do.
+- Backups (Time Machine, cloud sync) copy `SGP.db`: `forget` cannot reclaim what a backup already captured, and a restored backup plus a surviving key can re-identify old sessions — treat backup retention accordingly.
+- The keychain defends offline file theft (stolen disk, stolen backups, a copied `SGP.db`); it does not defend malware already running inside your login session.
+- The keyfile option lowers the bar to "both files from the same directory tree" and is intended for headless/server environments without a keychain service.
 
 ---
 
@@ -511,7 +477,7 @@ npm run scan -- --file ../shared.env --allow-outside
 
 The CLI and Web UI skip any line containing `leakshield-ignore`, `guard:skip`, `guard:ignore`, `sg-ignore`, `no-scan` or `skip-guard` (case-insensitive). A real secret on that line reports as `ALLOW`.
 
-> ⚠️ Anyone who can edit a scanned file can add a directive, so a CLI scan is not a gate against untrusted changes. The OpenCode plugin does not honor directives.
+> ⚠️ Anyone who can edit a scanned file can add a directive, so a CLI scan is not a gate against untrusted changes. The host integrations (OpenCode plugin, pi extension, Claude Code proxy) do not honor directives.
 
 ---
 
@@ -520,7 +486,10 @@ The CLI and Web UI skip any line containing `leakshield-ignore`, `guard:skip`, `
 Start a local web server and use it in your browser:
 
 ```bash
-# Default port 3000
+# Installed package (default port 3000)
+leakshield --web
+
+# From a checkout, without building
 npx tsx src/cli.ts --web
 
 # Custom port
@@ -570,35 +539,74 @@ curl -s -X POST http://localhost:3001/scan \
 
 ## Configuration
 
-LeakShield loads the first config file it finds: `./config/guard.config.yaml`, then `config/guard.config.yaml` in the LeakShield directory (source builds only), then `~/.leakshield/guard.config.yaml`. With no file, the built-in defaults apply. The OpenCode plugin also accepts a `configPath` option. To start a new file, copy [`config/guard.config.example.yaml`](config/guard.config.example.yaml) and replace its sample keywords and domains.
+LeakShield loads the first config file it finds: `./config/guard.config.yaml`, then `config/guard.config.yaml` in the LeakShield directory (source builds only), then `~/.leakshield/guard.config.yaml`. With no file, the built-in defaults apply. The OpenCode plugin also accepts a `configPath` option. The repository does not ship a `config/guard.config.yaml`, and Git ignores one you create there, so your keywords stay local. To start a new file, copy [`config/guard.config.example.yaml`](config/guard.config.example.yaml) and add your own keywords and domains. Listing `nda_keywords` replaces the four defaults (`CONFIDENTIAL`, `INTERNAL ONLY`, `DO NOT SHARE`, `NDA`); the example keeps them.
+
+Without a checkout (npm or binary install), download the example into your home directory:
+
+```bash
+mkdir -p ~/.leakshield
+curl -fsSL https://raw.githubusercontent.com/jwcrystal/leakshield/main/config/guard.config.example.yaml \
+  -o ~/.leakshield/guard.config.yaml
+leakshield --doctor   # confirms the file loads
+```
+
+### Fields
+
+Every key is optional. A key you leave out keeps its default; an unknown key is ignored.
+
+| Key | Default | What it does | Details |
+|-----|---------|--------------|---------|
+| `nda_keywords` | `CONFIDENTIAL`, `INTERNAL ONLY`, `DO NOT SHARE`, `NDA` | Words reported as HIGH. Case-insensitive. A keyword that starts and ends with an ASCII letter or digit matches whole words (`NDA` does not match `agenda`); a CJK keyword matches as a substring. A list replaces the defaults; `[]` turns keywords off | — |
+| `private_domains` | none | Hostnames reported as MEDIUM. Case-insensitive substring match; a full hostname gives fewer false matches | — |
+| `custom_rules` | none | Your own regular expressions with a `description`, `pattern` and `severity` (`HIGH` by default) | [Custom Rules](#custom-rules) |
+| `settings.max_chars` | `200000` | Scan bound per input. The CLI scans the first `max_chars` characters; transparent mode refuses longer content instead of truncating it | — |
+| `settings.show_line_numbers` | `true` | Include line and column in findings | — |
+| `settings.preview_length` | `60` | Length of the masked `safePreview` excerpt around the first finding | [Secret Preview Behavior](#secret-preview-behavior) |
+| `settings.encoding_detection` | `false` | Also decode Base64, URL and Hex text before scanning (the OpenCode plugin always enables it) | [Encoding Detection](#encoding-detection) |
+| `settings.env_files` | none | Files whose values are matched exactly | [Exact `.env` Value Detection](#exact-env-value-detection) |
+| `settings.rule_overrides` | `{}` | Turn built-in rules on or off by id, e.g. `{ url: true, email: false }`. An unknown id fails the load | [Built-in rule ids](#built-in-rule-ids) |
+| `settings.private_cidrs` | RFC 1918, CGNAT, link-local | IPv4 networks the opt-in `private-ipv4` rule reports. A list **replaces** the defaults, for example to match only your VPN. An invalid CIDR fails the load | — |
+| `settings.allowlist` | none | Exact values no rule reports. **A real bypass**: the value reaches the model unmasked | [Custom Rules](#custom-rules) |
+
+Length and count limits are listed under [Configuration Validation](#configuration-validation).
+
+### Built-in rule ids
+
+Use these ids in `settings.rule_overrides`. All rules are on by default except the four opt-in rules marked below.
+
+| Group | Ids |
+|-------|-----|
+| API keys and tokens | `openai-key`, `anthropic-key`, `google-key`, `aws-access-key`, `aws-secret`, `github-pat`, `github-fine-grained-pat`, `github-oauth-app`, `stripe-live-secret`, `stripe-live-publishable`, `slack-bot`, `slack-user-app`, `huggingface-token`, `jwt`, `generic-bearer` |
+| Secrets and credentials | `generic-secret`, `pem-private-key`, `url-userinfo`, `db-connection`, `db-connection-ado` |
+| Personal and financial data | `email`, `id-tw`, `credit-card`, `iban`, `public-ipv4`, `phone-tw` (opt-in), `phone-intl` (opt-in) |
+| Network | `private-ipv4` (opt-in), `url` (opt-in) |
+
+An example that keeps the default keywords, adds a private domain and turns on `private-ipv4` for one network:
 
 ```yaml
-# NDA keywords (case-insensitive)
 nda_keywords:
   - "CONFIDENTIAL"
   - "INTERNAL ONLY"
   - "DO NOT SHARE"
   - "NDA"
-  - "PROPRIETARY"
-  # Add your own internal keywords:
-  # - "Project Phoenix"
-  # - "MyCompany Internal"
+  # - "Project Phoenix"     # your own terms
 
-# Private domains
 private_domains:
-  - "internal.mycompany.com"
-  # - "dev.yourcompany.io"
+  - "internal.example.com"
 
 settings:
-  max_chars: 200000      # scan bound; transparent mode refuses past it instead of truncating
-  show_line_numbers: true
-  preview_length: 60
-  encoding_detection: false  # Base64/URL/Hex decoding; off by default
+  encoding_detection: false
+  rule_overrides:
+    private-ipv4: true
+  private_cidrs:
+    - 10.20.0.0/16          # replaces the default private networks
 ```
 
 After editing:
 - **CLI**: Reloaded automatically on next run
 - **OpenCode Plugin**: Restart OpenCode to reload the plugin configuration
+- **pi extension**: Restart pi (`LEAKSHIELD_CONFIG` selects another file)
+- **Claude Code proxy**: Restart the proxy (`--config` selects another file)
 - **Web UI**: Restart the local server
 
 ### Exact `.env` Value Detection
@@ -612,7 +620,14 @@ settings:
     - .env.local
 ```
 
-Paths are relative to the workspace root and must remain inside it. LeakShield reads non-empty values of at least eight characters, then detects exact occurrences in text sent to the model. It does not automatically read `.env`, process environment variables, or send, log, or serialize the loaded values. Restart OpenCode after changing an enabled env file. The opt-in `envQueries` plugin tools (see [Readonly env queries](docs/plugin/env-queries.md)) query these same files and never return their values.
+Every entry point applies it: the OpenCode plugin, the pi extension, the Claude Code proxy, the CLI and the Web UI. Each one loads the guard config through `loadConfig()`, which builds the exact-value detector from `settings.env_files`, and the shared scanner uses that detector.
+
+- **Paths** are relative to a root and must stay inside it. The OpenCode plugin uses the project directory. The pi extension, the Claude Code proxy, the CLI and the Web UI use the directory they were started from (`process.cwd()`), so start pi or the proxy from the project root, or the relative paths point elsewhere.
+- **Values**: LeakShield reads non-empty values of at least eight characters, then detects exact occurrences in text sent to the model. It does not automatically read `.env` or process environment variables, and it never sends, logs or serializes the loaded values.
+- **After changing an enabled env file**, restart the host that loaded it (OpenCode, pi), the Claude Code proxy or the Web UI. The CLI applies it on its next run.
+- **Verification**: for OpenCode, the end-to-end harness in `scripts/e2e/compare/` runs with `env_files`. For pi and the Claude Code proxy, coverage is inferred from the code path above; no end-to-end check has been run yet.
+
+**`envQueries` is separate and OpenCode-only.** The opt-in `envQueries` plugin option adds three read-only tools over the same files (`guard_env_list`, `guard_env_inspect`, `guard_env_compare`) so an agent can answer configuration questions without seeing values; it needs `mode: "block"` or `"redact"`. It is a debugging aid, not a protection: masking comes from `env_files` above. pi and the Claude Code proxy do not offer these tools, and their `.env` protection does not depend on them. See [Readonly env queries](docs/plugin/env-queries.md).
 
 ### Custom Rules
 
@@ -666,6 +681,28 @@ settings:
 Allowlist entries are part of the config file, so they change its fingerprint
 (sha256 of the file), which is what authorizations compare against.
 
+### Configuration Validation
+
+Input lengths for dynamic rules are validated when the config is loaded:
+
+| Field | Max length |
+|-------|-----------|
+| `nda_keywords` entries | 200 characters |
+| `private_domains` entries | 255 characters |
+| `custom_rules` `description` / `pattern` | 200 characters |
+
+Values exceeding these limits will cause `loadConfig()` to throw a Zod validation error, preventing oversized patterns from entering the scanner.
+
+List sizes are capped too, and a config over a cap fails the load:
+
+| Field | Max entries |
+|-------|-------------|
+| `nda_keywords` | 4096 |
+| `private_domains` | 4096 |
+| `custom_rules` | 1024 |
+
+A `custom_rules` pattern that does not compile as a regular expression also makes `loadConfig()` throw, naming the rule's index and `description` (not the pattern): a rule that cannot be enforced must not load. A pattern that compiles but runs slowly on a fixed probe input is skipped as a ReDoS suspect, with a warning on stderr and a `custom-rules` warning in `leakshield --doctor`. That check is a timing heuristic, not a guarantee: it runs the pattern once and cannot interrupt it, so it cannot prove a pattern safe.
+
 ---
 
 ## Practical Examples
@@ -702,28 +739,6 @@ fi
 ```
 
 ---
-
-## Configuration Validation
-
-Input lengths for dynamic rules are validated when the config is loaded:
-
-| Field | Max length |
-|-------|-----------|
-| `nda_keywords` entries | 200 characters |
-| `private_domains` entries | 255 characters |
-| `custom_rules` `description` / `pattern` | 200 characters |
-
-Values exceeding these limits will cause `loadConfig()` to throw a Zod validation error, preventing oversized patterns from entering the scanner.
-
-List sizes are capped too, and a config over a cap fails the load:
-
-| Field | Max entries |
-|-------|-------------|
-| `nda_keywords` | 4096 |
-| `private_domains` | 4096 |
-| `custom_rules` | 1024 |
-
-A `custom_rules` pattern that does not compile as a regular expression also makes `loadConfig()` throw, naming the rule's index and `description` (not the pattern): a rule that cannot be enforced must not load. A pattern that compiles but runs slowly on a fixed probe input is skipped as a ReDoS suspect, with a warning on stderr and a `custom-rules` warning in `leakshield --doctor`. That check is a timing heuristic, not a guarantee: it runs the pattern once and cannot interrupt it, so it cannot prove a pattern safe.
 
 ## Secret Preview Behavior
 

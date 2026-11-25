@@ -2,7 +2,7 @@
 
 > 🌐 English | [繁體中文](./capacity.zh-TW.md)
 
-[← README](../../README.md#opencode-plugin-recommended)
+[← OpenCode plugin](../opencode.md)
 
 The guard uses an 8 Mi UTF-16-unit combined input/output budget and 100,000 value nodes per protect/restore operation, rather than applying the standalone core's 1 Mi-unit budget to an entire history. HTTP bodies and WS frames retain their 4 MiB limits; scanner `max_chars`, depth 32, mapping-entry and aggregate mapping-memory caps remain enforced. Up to 4,096 sessions can be retained per guard instance; live mappings are never LRU-evicted to admit another session.
 

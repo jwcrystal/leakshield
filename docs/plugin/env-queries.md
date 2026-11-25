@@ -2,7 +2,7 @@
 
 > 🌐 English | [繁體中文](./env-queries.zh-TW.md)
 
-[← README](../../README.md#opencode-plugin-recommended)
+[← OpenCode plugin](../opencode.md)
 
 The `envQueries` option (default `false`) exposes three read-only tools over the files listed in `settings.env_files`, so an agent can answer configuration questions without ever seeing values. It does not work with transparent mode, so on v2 set `mode` to `block` or `redact` explicitly:
 

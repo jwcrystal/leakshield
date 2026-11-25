@@ -1,76 +1,85 @@
-# leakshield 設定範例
-# 複製後請先替換示例關鍵字與域名；不適用的規則請刪除。
+# LeakShield example configuration
+#
+# How to use:
+#   1. Copy this file to ~/.leakshield/guard.config.yaml (all projects)
+#      or ./config/guard.config.yaml (one project).
+#   2. Add your own keywords and domains below.
+#   3. Restart OpenCode, pi, the Claude Code proxy or the Web UI. The CLI picks
+#      up changes on its next run.
+#   4. Run `leakshield --doctor` to check the file loads.
+#
+# Without any config file, the built-in defaults apply. Full reference:
+# https://github.com/jwcrystal/leakshield#configuration
 
-# ─── NDA / 機密關鍵字（大小寫不敏感）────────────────────────
-# 首尾為 ASCII 英數字的關鍵字以「整字」比對（NDA 不會誤中 Foundation、agenda）；
-# CJK 關鍵字（如「機密」）維持子字串比對。
+# ─── Confidential keywords ──────────────────────────────────────────────
+# Words that must not reach a model. Matching ignores case. English words match
+# as whole words ("NDA" does not match "agenda"); Chinese or Japanese words
+# match anywhere in the text.
+#
+# This list replaces the built-in defaults, so the four defaults are kept
+# below. Delete one only if you do not want it detected.
 nda_keywords:
-  # ─── 公司內部專案名稱 ───
-  - "Project Phoenix"
-  # - "Operation XYZ"
-  # - "MyCompany Internal"
+  - "CONFIDENTIAL"
+  - "INTERNAL ONLY"
+  - "DO NOT SHARE"
+  - "NDA"
+  # Add your own, for example project code names:
+  # - "Project Phoenix"
 
-# ─── 私有域名 ────────────────────────────────────────────
+# ─── Private domains ────────────────────────────────────────────────────
+# Internal hostnames that must not reach a model. Empty by default. A full
+# hostname gives fewer false matches than a short fragment.
 private_domains: []
-  # 請換成你公司的私有域名；勿保留以下佔位範例。
   # - "internal.example.com"
   # - "gitlab.internal.example.com"
 
-# ─── 自訂正則規則（大小寫不敏感）─────────────────────────────
-# severity: HIGH / MEDIUM / LOW（預設 HIGH）；任何 severity 都會回報命中。
-# pattern 上限 200 字元；無法編譯的 pattern 會讓設定載入失敗；疑似 ReDoS 的 pattern 會被略過（計時啟發式，非保證），--doctor 會列出。
-# 先驗證格式並評估誤報，再取消註解啟用；通用數字 pattern 容易大量誤報。
+# ─── Custom rules ───────────────────────────────────────────────────────
+# Regular expressions for formats the built-in rules do not know, such as
+# employee IDs or internal tokens. severity is HIGH (default), MEDIUM or LOW;
+# every severity is reported. Test a pattern against real data before you
+# enable it: broad number patterns cause many false positives.
+# Credit cards, API keys, tokens and emails are already built in.
 custom_rules: []
-# - description: "員工編號（依公司格式調整）"
+# - description: "Employee ID"
 #   pattern: "\\bEMP-\\d{6}\\b"
 #   severity: HIGH
 #
-# - description: "公司 token"
-#   pattern: "MYCO_[A-Z0-9]{32}"
-#   severity: HIGH
-#   flags: "i"            # gimsuy 的子集；g 一律自動加上，預設 i
-#   word_boundary: true   # 只在字面 ASCII 單字邊界加 \b；CJK 邊界不加
-#   allow:                # 精確字串，不是 regex、不是子字串
-#     - "MYCO_EXAMPLE0000000000000000000000000"
-#   # path: ["src/**"]    # 已接受但尚未實作；rule 仍會套用到所有文字，--doctor 會警告
-#
-# 注意：allow 與 settings.allowlist 是真正的 bypass —— 值仍會原樣離開機器，
-# 只是不再回報。只放你確認不敏感的內容；--doctor 會回報條目數，並實際演練
-# 最多 8 條，無法演練的條目會提示（不是逐條斷言）。
-#
-# 信用卡號（Visa／Mastercard 常見格式；未做 Luhn 驗證）
-#   pattern: "\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14})\\b"
-#   severity: HIGH
-#
-# Jira 工單通常不是機密；LOW 仍會產生 finding，僅在確有需要時啟用：
-# - description: "Jira 工單"
-#   pattern: "\\b[A-Z]{2,10}-\\d{1,6}\\b"
-#   severity: LOW
+# More options (flags, word_boundary, per-rule allow list) are described in
+# the README's "Custom Rules" section.
 
-# ─── 掃描設定 ──────────────────────────────────────────
+# ─── Scan settings ──────────────────────────────────────────────────────
 settings:
-  # 最大掃描字元數（超過截斷）
+  # Maximum characters scanned per input.
   max_chars: 200000
-  # 顯示命中行號
+  # Show line numbers in findings.
   show_line_numbers: true
-  # 命中預覽長度
+  # Length of the masked preview shown for a finding.
   preview_length: 60
-  # Base64／URL／Hex 解碼檢測；預設關閉，需明確啟用。
+  # Also decode Base64, URL and Hex text before scanning. Off by default.
   encoding_detection: false
-  # 選用：已知 secret value 的來源檔案（路徑相對 workspace 根目錄）。
-  # 僅非空且至少 8 字元的 value 會用於精確比對；不會回傳 value。
+
+  # Optional: .env files whose values must never reach a model. Paths are
+  # relative to the project root. Values are only compared, never sent or logged.
   # env_files:
   #   - .env
-  #   - .env.local
-  # 選用：私有網段，只在 rule_overrides["private-ipv4"]: true 時生效。
-  # 留空則使用 RFC 1918（10/8、172.16/12、192.168/16）、CGNAT（100.64/10）
-  # 與 link-local（169.254/16）。格式錯誤會讓設定載入失敗。
+
+  # Optional: turn built-in rules on or off. The README's "Detection Coverage"
+  # table names the opt-in rules; every id is in BUILTIN_RULE_IDS in
+  # src/rules/builtin.ts. An unknown id stops the config from loading.
+  # rule_overrides:
+  #   url: true            # opt-in rule, off by default
+  #   phone-intl: false
+  #   private-ipv4: true   # opt-in: detect private IPv4 addresses
+
+  # Optional: networks the private-ipv4 rule detects, once it is turned on.
+  # This list replaces the default (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16,
+  # 100.64.0.0/10 and 169.254.0.0/16), for example to match only your VPN.
+  # An entry that is not a valid IPv4 CIDR stops the config from loading.
   # private_cidrs:
-  #   - 10.0.0.0/8
-  #   - 172.16.0.0/12
-  #   - 192.168.0.0/16
-  # 選用：全域 allowlist（精確字串，不是 regex、不是子字串），對所有規則生效。
-  # 這是真正的 bypass：值仍會原樣離開機器。最多 64 條、每條 200 字元；
-  # --doctor 回報條目數並演練最多 8 條；無法演練的條目會提示。
+  #   - 10.20.0.0/16
+
+  # Optional: exact values never reported, even when a rule matches.
+  # Warning: these values reach the model unmasked. Use only for values you
+  # have confirmed are not sensitive.
   # allowlist:
   #   - qa@example.com

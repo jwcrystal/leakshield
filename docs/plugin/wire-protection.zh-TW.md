@@ -2,7 +2,7 @@
 
 > 🌐 [English](./wire-protection.md) | 繁體中文
 
-[← README](../../README.zh-TW.md#opencode-plugin建議使用)
+[← OpenCode plugin](../opencode.zh-TW.md)
 
 ## Hook-only
 

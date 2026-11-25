@@ -7,7 +7,7 @@ All notable changes are listed here.
 ### Changed
 
 - The OpenCode plugin ignores `envQueries` in transparent mode, including the default when `mode` is omitted, instead of failing every request closed. The plugin starts normally without the `guard_env_*` tools, logs a warning, and `--doctor` shows an `env-queries` warn check without changing the verdict. This supersedes the 0.4.0 note that `envQueries` is rejected with the default mode. Set `mode` to `block` or `redact` to use envQueries.
-- The initialization-failure refusal now ends with "Run `leakshield --doctor` for details."
+- When the OpenCode plugin cannot start because of invalid options or a guard config that fails to load, the refusal shown for every blocked request now says why and how to fix it, instead of only "LeakShield initialization failed". Option errors name the option and the rule (never the rejected value); a config load failure is described without its details, which can contain file paths or rule descriptions, and points to `leakshield --doctor`.
 
 ## 0.4.0 — 2026-11-24
 

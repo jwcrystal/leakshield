@@ -47,7 +47,7 @@ export type RecordLike = { [key: string]: unknown };
 // ─── Static failure messages (no content ever included) ─────────────────────
 
 export const INITIALIZATION_ERROR =
-  "LeakShield initialization failed, so the request was blocked before anything was sent. Run `leakshield --doctor` for details.";
+  "LeakShield initialization failed, so the request was blocked before anything was sent.";
 export const PROTECT_FAILED_ERROR =
   "LeakShield blocked a model request because it could not be masked safely.";
 export const ATTRIBUTION_ERROR =

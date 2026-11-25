@@ -699,7 +699,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
         id: "options",
         state: "fail",
         detail: `Plugin options are invalid for "${entry.ref}" (${entry.source}) — every protected request would fail closed at runtime: ${validation.error}`,
-        fix: "Correct the options in opencode.json (see README for valid combinations).",
+        fix: 'Correct the options in opencode.json (valid combinations: the "OpenCode Plugin" section of README.md and docs/plugin/env-queries.md).',
       });
       return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
     }

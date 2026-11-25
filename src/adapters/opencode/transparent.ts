@@ -87,10 +87,16 @@ async function runDisposals(disposals: Array<() => Promise<void>>): Promise<void
  * transport routes (http/ws/aisdk) in wire mode. Hook-only failures refuse
  * content/tool dispatch without introducing new transport registrations.
  */
-export function createFailClosedTransparentGuard(wireProtection = true): TransparentSessionGuard {
+export function createFailClosedTransparentGuard(
+  wireProtection = true,
+  /** Why setup failed, appended to the refusal so the user sees how to fix it.
+   * Must not carry user content: option validation messages only. */
+  reason?: string,
+): TransparentSessionGuard {
   const disposals: Array<() => Promise<void>> = [];
+  const message = reason ? `${INITIALIZATION_ERROR} ${reason}` : INITIALIZATION_ERROR;
   const refuse = (): never => {
-    throw new Error(INITIALIZATION_ERROR);
+    throw new Error(message);
   };
   return {
     setup: async (ctx: PluginContext) => {

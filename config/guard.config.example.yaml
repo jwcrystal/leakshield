@@ -47,10 +47,12 @@ custom_rules: []
 # More options (flags, word_boundary, per-rule allow list) are described in
 # docs/configuration.md, "Custom Rules".
 # ─── PII the built-in rules do not cover ────────────────────────────────
-# Built-ins cover email, credit cards, IBAN, Taiwan national ID and public
+# Built-ins cover email, credit cards, IBAN, Taiwan national ID, Taiwan
+# business numbers (opt-in), US SSNs (opt-in), passport MRZ lines and public
 # IPv4. The patterns below add PII that is only recognisable next to a field
-# label: medical record numbers, dates of birth, names, addresses, US SSNs,
-# MAC addresses and passport numbers. They stay commented out on purpose.
+# label: medical record numbers, dates of birth, names, addresses, MAC
+# addresses and a passport number outside an MRZ line. They stay commented out
+# on purpose.
 #
 # Why a label instead of a bare shape: in ordinary code and prose the same
 # characters are everywhere. `name:` is a key in almost every config, CI job
@@ -63,10 +65,14 @@ custom_rules: []
 # `flags` line: `flags: ""` turns off the case-insensitive default, and
 # without it a `Name` label also matches every `name:` key in code.
 #
-# Not here on purpose — these need a check digit that a regular expression
-# cannot compute, so they can only be built-in rules:
-#   - passport MRZ line (ICAO 9303 check digits)
-#   - Taiwan 8-digit business number (統一編號)
+# SSNs, business numbers and MRZ lines have their own rules; turn those on
+# instead of copying a pattern. The two check-digit shapes cannot be written
+# as a custom rule at all, because a regular expression cannot compute them:
+#
+# settings:
+#   rule_overrides:
+#     ssn-us: true
+#     tw-business-no: true
 #
 # Two details these patterns depend on, learned the hard way:
 #   - JSON keys arrive quoted, so the separator class includes `"`. A single
@@ -93,9 +99,6 @@ custom_rules: []
 #   - description: "Address after a label"
 #     pattern: '(?:(?:地址|住址|通訊地址)[ \t]{0,2}[:：=][ \t]{0,2}|Address"?[ \t]{0,2}:[ \t]{0,2}(?=[^\n]{0,60}\d))[^\n]{4,60}'
 #     severity: MEDIUM
-#   - description: "US SSN"
-#     pattern: '\b(?!000|666|9\d{2})\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b'
-#     severity: HIGH
 #   - description: "MAC address"
 #     pattern: '\b(?:[0-9A-F]{2}[:-]){5}[0-9A-F]{2}\b'
 #     severity: LOW

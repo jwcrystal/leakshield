@@ -73,16 +73,21 @@ function mrzLine2Valid(raw: string): boolean {
   );
 }
 
-/** 台灣統一編號：乘積各位數字和可被 10 整除；第 7 碼乘積為 10 時官方允許以 0 或 1 計入。 */
+/**
+ * 台灣統一編號：乘積的各位數字和可被 5 整除（財政部 2023-04 起；被 10 整除的舊號碼必定
+ * 也通過，所以不另外判斷舊制）。第 7 碼為 7 時乘積是 28，官方允許把「2+8=10」再視為 1，
+ * 因此那一種算法也接受。全部同一個數字（含 00000000）不算：檢查碼對它沒有鑑別力。
+ */
 function twBusinessNoValid(raw: string): boolean {
-  if (!/^[1-9][0-9]{7}$/.test(raw)) return false;
+  if (!/^[0-9]{8}$/.test(raw) || /^(\d)\1{7}$/.test(raw)) return false;
   const weights = [1, 2, 1, 2, 1, 2, 4, 1];
   let sum = 0;
   for (let i = 0; i < 8; i++) {
     const product = Number(raw[i]) * weights[i];
     sum += Math.floor(product / 10) + (product % 10);
   }
-  return sum % 10 === 0 || (Number(raw[6]) * 4 === 10 && (sum + 9) % 10 === 0);
+  if (sum % 5 === 0) return true;
+  return raw[6] === "7" && (sum - 9) % 5 === 0;
 }
 
 /** 僅公共可路由 IPv4 視為敏感；私有／回環／鏈路本地／CGNAT／保留段不命中（config 常見值）。 */
@@ -389,8 +394,8 @@ export const BUILTIN_RULES: Rule[] = [
     type: "PII_PASSPORT",
     severity: "HIGH",
     description: "護照號碼（MRZ 第 2 列）",
-    // 只認 TD3 第 2 列：44 個大寫英數或 `<` 的整行，再由 validate 驗四個檢查碼。
-    // 護照號碼本身沒有通用格式，所以不猜「標籤＋號碼」；機器可讀區才有可驗的結構。
+    // 護照號碼沒有通用格式，猜「標籤＋號碼」會命中任何 6–9 位英數；只有 MRZ 那一行
+    // 自帶四個檢查碼，能用形狀以外的證據判斷，所以只收 TD3 第 2 列。
     pattern: /^[A-Z0-9<]{44}(?=\r?$)/gm,
     validate: mrzLine2Valid,
   },
@@ -409,10 +414,10 @@ export const BUILTIN_RULES: Rule[] = [
     type: "TW_BUSINESS_NO",
     severity: "MEDIUM",
     description: "台灣統一編號",
-    // Opt-in：8 位數字有 1/10 會剛好通過檢查碼，日期與序號都可能命中，不算低誤報。
+    // Opt-in：新制檢查碼只約掉八成，日期、流水號與版本號都可能通過，不算低誤報。
     // 要開啟：settings.rule_overrides["tw-business-no"]: true
     optIn: true,
-    pattern: /(?<!\d)[1-9][0-9]{7}(?!\d)/g,
+    pattern: /(?<!\d)[0-9]{8}(?!\d)/g,
     validate: twBusinessNoValid,
   },
 

@@ -148,7 +148,7 @@ Before relying on any host, read [what this protects — and what it does not](#
 | Taiwan National ID | Format validation | 🔴 HIGH |
 | Passport (MRZ) | TD3 line 2 only: 44 uppercase characters plus four ICAO 9303 check digits | 🔴 HIGH |
 | US SSN | **Opt-in** — `rule_overrides["ssn-us"]: true`; hyphenated form only, invalid areas, groups and serials excluded | 🔴 HIGH |
-| Taiwan Business No | **Opt-in** — `rule_overrides["tw-business-no"]: true`; 8 digits with a checksum | 🟡 MEDIUM |
+| Taiwan Business No | **Opt-in** — `rule_overrides["tw-business-no"]: true`; 8 digits, divisible-by-5 checksum (2023 rule); about one in five random numbers passes, so dates can match | 🟡 MEDIUM |
 | Credit Card Number | 13–19 digits, Luhn checksum required | 🔴 HIGH |
 | IBAN | Compact or 4-char groups, mod-97 checksum required | 🔴 HIGH |
 | Public IPv4 Address | Private/loopback/CGNAT/reserved ranges excluded; runs longer than four groups are reported whole | 🟡 MEDIUM |

@@ -6,7 +6,7 @@ All notable changes are listed here.
 
 ### Added
 
-- Three identifier rules the built-in set did not cover. `passport-mrz` ships enabled and matches a TD3 machine-readable line only when its four ICAO 9303 check digits validate. `ssn-us` and `tw-business-no` are opt-in (`settings.rule_overrides`), because a hyphenated SSN carries no checksum and an 8-digit number passes the business-number checksum one time in ten. The new finding types `PII_PASSPORT`, `PII_SSN` and `TW_BUSINESS_NO` get their own placeholder labels in redact mode.
+- Three identifier rules the built-in set did not cover. `passport-mrz` ships enabled and matches a TD3 machine-readable line only when its four ICAO 9303 check digits validate. `ssn-us` and `tw-business-no` are opt-in (`settings.rule_overrides`), because a hyphenated SSN carries no checksum and, under the 2023 rule, an 8-digit number passes the business-number checksum about one time in five (a date such as `20261007` passes). Numbers starting with 0 are real business numbers, so the rule does not exclude them; a repeated digit and all zeros are rejected. The new finding types `PII_PASSPORT`, `PII_SSN` and `TW_BUSINESS_NO` get their own placeholder labels in redact mode.
 - `config/guard.config.example.yaml` now documents commented label-gated patterns for names, addresses, dates of birth, medical record numbers, SSNs, MAC addresses and passport numbers, all off by default. `custom_rules` stays empty; the patterns and the measurements behind them are in [the evidence record](docs/evidence/2026-11-25-label-gated-pii.md).
 
 ### Changed

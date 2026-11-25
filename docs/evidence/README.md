@@ -21,6 +21,7 @@
 | pi 套件入口、打包安裝與移除是否可用 | [pi 套件安裝驗證 2026-11-24](2026-11-24-pi-package-install.md) |
 | pi extension 接上真實 provider 時是否真的遮罩與還原 | [pi 真實 provider 驗證 2026-11-24](2026-11-24-pi-real-provider.md) |
 | pi hook-only 是否可行、例外與取消是否能阻擋 | [pi hook-only 雲端驗證 2026-11-23](2026-11-23-pi-hook-only-feasibility.md) |
+| 內建規則未涵蓋的 PII：候選樣式、誤報量測與新增 builtin | [label-gated PII 2026-11-25](2026-11-25-label-gated-pii.md) |
 
 ## 比較
 

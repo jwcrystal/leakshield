@@ -131,11 +131,15 @@ Allowlist entries are part of the config file, so they change its fingerprint
 ### Label-gated PII
 
 The built-in rules recognise formats that stand on their own. Names, addresses,
-dates of birth, medical record numbers, passport numbers, US SSNs and MAC
-addresses do not: the same characters fill ordinary code and prose.
-`config/guard.config.example.yaml` ships a commented set of patterns for them.
-Every one fires only after a field label, except the Taiwan address shape, which
-is anchored on a city name instead.
+dates of birth, medical record numbers and bare passport numbers do not: the same
+characters fill ordinary code and prose. `config/guard.config.example.yaml` ships
+a commented set of patterns for them. Every one fires only after a field label,
+except the Taiwan address shape, which is anchored on a city name instead.
+
+Two of the identifiers below already exist as rules: `ssn-us` (opt-in, no label
+needed) and `passport-mrz` (a machine-readable line, no label needed). The
+commented patterns do not repeat them; use `rule_overrides` instead. A passport
+number outside an MRZ line, and a MAC address, still need one of these patterns.
 
 Four things were measured while writing them, and they are why the patterns
 look the way they do:
@@ -159,10 +163,10 @@ look the way they do:
   verb in front of an address.
 
 The repository's own text is not a corpus for these shapes: scanning `src/`,
-`docs/`, `tests/` and `config/` (248 files) produced no match at all. A zero
+`docs/`, `tests/` and `config/` (249 files) produced no match at all. A zero
 means the shapes are absent, not that a pattern is safe. Measure against your
 own traffic, and drop the labels you never use. The measurement record is
-[2026-11-25 label-gated PII](../evidence/2026-11-25-label-gated-pii.md).
+[2026-11-25 label-gated PII](evidence/2026-11-25-label-gated-pii.md).
 
 ## Configuration Validation
 

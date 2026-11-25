@@ -144,16 +144,28 @@ describe("TW_BUSINESS_NO（opt-in）", () => {
     expect(types("統編 22099131")).not.toContain("TW_BUSINESS_NO");
   });
 
-  it("開啟後命中檢查碼正確的統編", () => {
-    expect(types("統編 22099131", optInConfig)).toContain("TW_BUSINESS_NO");
+  it("開啟後命中舊制與新制檢查碼", () => {
+    for (const value of ["22099131", "04595252", "04595257"]) {
+      expect(types(`統編 ${value}`, optInConfig)).toContain("TW_BUSINESS_NO");
+    }
+  });
+
+  it("第 7 碼為 7 時接受 10 或 1 兩種算法", () => {
+    expect(types("統編 10458574", optInConfig)).toContain("TW_BUSINESS_NO");
+    expect(types("統編 10002478", optInConfig)).toContain("TW_BUSINESS_NO");
+  });
+
+  it("前導零的真實號碼可以命中（不排除 0 開頭）", () => {
+    expect(types("統編 03557311", optInConfig)).toContain("TW_BUSINESS_NO");
   });
 
   it("檢查碼錯誤不命中", () => {
     expect(types("統編 22099132", optInConfig)).not.toContain("TW_BUSINESS_NO");
+    expect(types("統編 12345678", optInConfig)).not.toContain("TW_BUSINESS_NO");
   });
 
-  it("開頭為 0 或位數不符不命中", () => {
-    for (const value of ["01234567", "2209913", "220991310"]) {
+  it("全部同一數字或位數不符不命中", () => {
+    for (const value of ["00000000", "55555555", "2209913", "220991310"]) {
       expect(types(`統編 ${value}`, optInConfig)).not.toContain("TW_BUSINESS_NO");
     }
   });

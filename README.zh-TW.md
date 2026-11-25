@@ -148,7 +148,7 @@ leakshield --file ./path/to/file
 | 台灣身份證字號 | 格式驗證 | 🔴 HIGH |
 | 護照（MRZ） | 僅限 TD3 第 2 列：44 個大寫字元，需通過四個 ICAO 9303 檢查碼 | 🔴 HIGH |
 | 美國 SSN | **Opt-in** —— 預設關閉（`rule_overrides: { "ssn-us": true }` 開啟）；只認連字號格式，並排除無效區段、群組與序號 | 🔴 HIGH |
-| 台灣統一編號 | **Opt-in** —— 預設關閉（`rule_overrides: { "tw-business-no": true }` 開啟）；8 位數字，需通過檢查碼 | 🟡 MEDIUM |
+| 台灣統一編號 | **Opt-in** —— 預設關閉（`rule_overrides: { "tw-business-no": true }` 開啟）；8 位數字，需通過除以 5 的檢查碼（2023 新制）；隨機數字約 1/5 會通過，日期也可能命中 | 🟡 MEDIUM |
 | 信用卡號 | 13–19 位數字，需通過 Luhn 檢查碼 | 🔴 HIGH |
 | IBAN | 緊湊或四字一組格式，需通過 mod-97 檢查碼 | 🔴 HIGH |
 | 公共 IPv4 位址 | 排除私有／回環／CGNAT／保留段；超過四段的點分數字整段回報 | 🟡 MEDIUM |

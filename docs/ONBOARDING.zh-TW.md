@@ -159,11 +159,11 @@ npm run scan -- --file ../shared.env --allow-outside
 
 ### Q3. 公司內部詞彙沒被抓到？
 
-改 `config/guard.config.yaml` 的 `nda_keywords`、`private_domains`、`custom_rules`。CLI 下次執行自動讀新設定；OpenCode plugin 要重啟 OpenCode、pi extension 要重啟 pi、Claude Code proxy 要重啟 proxy 才會套用。
+在設定檔加 `nda_keywords`（預設只有 `CONFIDENTIAL`、`INTERNAL ONLY`、`DO NOT SHARE`、`NDA`）、`private_domains`（預設是空的）或 `custom_rules`。設定檔依序找 `./config/guard.config.yaml`、`~/.leakshield/guard.config.yaml`；pi 可以用 `LEAKSHIELD_CONFIG`、Claude Code proxy 可以用 `--config` 指定。CLI 下次執行就會讀到新設定；OpenCode、pi、Claude Code proxy 和 Web UI 要重啟才會套用。
 
 ### Q4. 想讓 `.env` 裡的值完全不進模型？
 
-在 `config/guard.config.yaml` 設 `settings.env_files`，Guard 會偵測這些檔案中的值是否原樣出現在要送出的內容。改完要重啟對應的宿主（OpenCode、pi）或 Claude Code proxy。
+在設定檔（位置同 Q3）設 `settings.env_files`，Guard 會偵測這些檔案中的值是否原樣出現在要送出的內容。CLI 下次執行就會套用；OpenCode、pi、Claude Code proxy 和 Web UI 要重啟。
 
 ---
 

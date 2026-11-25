@@ -69,6 +69,14 @@ settings:
   # rule_overrides:
   #   url: true            # opt-in rule, off by default
   #   phone-intl: false
+  #   private-ipv4: true   # opt-in: detect private IPv4 addresses
+
+  # Optional: networks the private-ipv4 rule detects, once it is turned on.
+  # This list replaces the default (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16,
+  # 100.64.0.0/10 and 169.254.0.0/16), for example to match only your VPN.
+  # An entry that is not a valid IPv4 CIDR stops the config from loading.
+  # private_cidrs:
+  #   - 10.20.0.0/16
 
   # Optional: exact values never reported, even when a rule matches.
   # Warning: these values reach the model unmasked. Use only for values you

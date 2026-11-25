@@ -10,6 +10,13 @@ function matches(pattern: RegExp, text: string): boolean {
   return re.test(text);
 }
 
+/** The first match of `pattern` in `text`, or null: checks the matched span, not just a hit. */
+function firstMatch(pattern: RegExp, text: string): string | null {
+  const re = new RegExp(pattern.source, pattern.flags);
+  re.lastIndex = 0;
+  return re.exec(text)?.[0] ?? null;
+}
+
 function ruleFor(description: string) {
   const rule = BUILTIN_RULES.find((r) => r.description === description);
   if (!rule) throw new Error(`找不到規則：${description}`);
@@ -163,6 +170,11 @@ describe("台灣手機號碼", () => {
 
   it("應命中 +886 格式", () => {
     expect(matches(pat, "+886912345678")).toBe(true);
+  });
+
+  it("+886 後可接一個空格或連字號，整串都被命中", () => {
+    expect(firstMatch(pat, "電話 +886 912 345 678")).toBe("+886 912 345 678");
+    expect(firstMatch(pat, "電話 +886-912-345-678")).toBe("+886-912-345-678");
   });
 
   it("一般市話不命中", () => {
@@ -409,6 +421,36 @@ describe("國際電話號碼", () => {
 
   it("不含 + 號不命中", () => {
     expect(matches(pat, "14155552671")).toBe(false);
+  });
+
+  it("數字之間可有一個空格或連字號，整串都被命中", () => {
+    expect(firstMatch(pat, "tel +44 20 7946 0958")).toBe("+44 20 7946 0958");
+    expect(firstMatch(pat, "tel +1-202-555-0143")).toBe("+1-202-555-0143");
+    expect(firstMatch(pat, "tel +886 912 345 678")).toBe("+886 912 345 678");
+  });
+
+  it("命中範圍不含結尾的空格或後面的文字", () => {
+    expect(firstMatch(pat, "+44 20 7946 0958 ext 12")).toBe("+44 20 7946 0958");
+  });
+
+  it("連續兩個分隔字元、算式、位數不足或緊接字母都不命中", () => {
+    expect(matches(pat, "+44  20 7946 0958")).toBe(false);
+    expect(matches(pat, "1 + 2 = 3")).toBe(false);
+    expect(matches(pat, "UTC+08 00")).toBe(false);
+    expect(matches(pat, "+1 23 4")).toBe(false);
+    expect(matches(pat, "+442079460958abc")).toBe(false);
+  });
+
+  it("版本號的建置編號（+ 前緊接英數字或點）不命中", () => {
+    expect(matches(pat, "v1.2.3+20261125")).toBe(false);
+    expect(matches(pat, "1.0.0+202611250930")).toBe(false);
+    expect(matches(pat, "build_7+14155552671")).toBe(false);
+  });
+
+  it("+ 前是空白、冒號或括號時照常命中", () => {
+    expect(firstMatch(pat, "tel:+14155552671")).toBe("+14155552671");
+    expect(firstMatch(pat, "(+44 20 7946 0958)")).toBe("+44 20 7946 0958");
+    expect(firstMatch(pat, "+14155552671")).toBe("+14155552671");
   });
 });
 

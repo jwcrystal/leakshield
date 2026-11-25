@@ -699,7 +699,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
         id: "options",
         state: "fail",
         detail: `Plugin options are invalid for "${entry.ref}" (${entry.source}) — every protected request would fail closed at runtime: ${validation.error}`,
-        fix: "Correct the options in opencode.json (see README for valid combinations).",
+        fix: 'Correct the options in opencode.json (valid combinations: the "OpenCode Plugin" section of README.md and docs/plugin/env-queries.md).',
       });
       return { status: "BROKEN", hostVersion: host.version, hostGeneration: host.generation, configPath, checks };
     }
@@ -727,9 +727,17 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   checks.push({
     id: "options",
     state: "ok",
-    detail: `mode=${options.mode}${(weakest.entry.options as { mode?: unknown } | undefined)?.mode === undefined ? " (default)" : ""}${options.mode === "transparent" ? ` wireProtection=${options.wireProtection ?? true}` : ""}${options.attachments === "allow" ? " attachments=allow" : ""}${options.deidentify ? " +deidentify" : ""}${options.envQueries ? " +envQueries" : ""}${options.configPath ? ` configPath=${options.configPath}` : ""}${across}`,
+    detail: `mode=${options.mode}${(weakest.entry.options as { mode?: unknown } | undefined)?.mode === undefined ? " (default)" : ""}${options.mode === "transparent" ? ` wireProtection=${options.wireProtection ?? true}` : ""}${options.attachments === "allow" ? " attachments=allow" : ""}${options.deidentify ? " +deidentify" : ""}${options.envQueries ? (options.mode === "transparent" ? " +envQueries(ignored)" : " +envQueries") : ""}${options.configPath ? ` configPath=${options.configPath}` : ""}${across}`,
   });
   checks.push(persistenceCheck(options, deps));
+  if (validated.some((candidate) => candidate.options.mode === "transparent" && candidate.options.envQueries)) {
+    checks.push({
+      id: "env-queries",
+      state: "warn",
+      detail: "envQueries is ignored in transparent mode; the guard_env_* tools are not registered.",
+      fix: 'Remove envQueries, or set mode to "block" or "redact" to use the env query tools.',
+    });
+  }
 
   // Guard config load. Every configured entry's guard config must load: the
   // weakest entry supplies the summary, but a broken configPath in another

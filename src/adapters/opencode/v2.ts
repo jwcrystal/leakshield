@@ -10,6 +10,7 @@ import { deidentifyText } from "../../decision/deidentify.js";
 import type { EnvQueryService } from "./env-queries.js";
 import { registerV2EnvTools } from "./env-tools.js";
 import type { GuardConfig } from "../../types.js";
+import { NO_REASON_HINT } from "../../core/session-guard.js";
 
 type V2Plugin = PluginNamespace.Plugin;
 type PluginContext = PluginNamespace.Context;
@@ -196,9 +197,10 @@ async function registerProtectionHooks(
   });
 }
 
-async function registerFailClosedHooks(ctx: PluginContext): Promise<void> {
+async function registerFailClosedHooks(ctx: PluginContext, reason?: string): Promise<void> {
+  const message = reason ? `${INITIALIZATION_ERROR} ${reason}` : `${INITIALIZATION_ERROR} ${NO_REASON_HINT}`;
   const blockRequest = async (): Promise<never> => {
-    throw new Error(INITIALIZATION_ERROR);
+    throw new Error(message);
   };
   await ctx.session.hook("prompt", blockRequest);
   await ctx.session.hook("context", blockRequest);
@@ -307,7 +309,10 @@ export function createV2Setup(
   };
 }
 
-/** Creates a fail-closed OpenCode v2 `setup(ctx)` that blocks every protected operation. */
-export function createFailClosedV2Setup(): V2Plugin["setup"] {
-  return registerFailClosedHooks;
+/** Creates a fail-closed OpenCode v2 `setup(ctx)` that blocks every protected
+ * operation. `reason`, when given, is appended to the refusal; it must not carry
+ * user content (option validation messages or the fixed config-load notice
+ * only). */
+export function createFailClosedV2Setup(reason?: string): V2Plugin["setup"] {
+  return (ctx) => registerFailClosedHooks(ctx, reason);
 }

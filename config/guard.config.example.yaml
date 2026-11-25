@@ -1,76 +1,92 @@
-# leakshield 設定範例
-# 複製後請先替換示例關鍵字與域名；不適用的規則請刪除。
+# LeakShield example configuration.
+# Copy it to ~/.leakshield/guard.config.yaml or ./config/guard.config.yaml,
+# then replace the sample keywords and domains and delete rules that do not apply.
 
-# ─── NDA / 機密關鍵字（大小寫不敏感）────────────────────────
-# 首尾為 ASCII 英數字的關鍵字以「整字」比對（NDA 不會誤中 Foundation、agenda）；
-# CJK 關鍵字（如「機密」）維持子字串比對。
+# ─── NDA / confidential keywords (case-insensitive) ─────────────────────
+# A keyword that starts and ends with an ASCII letter or digit matches whole
+# words only ("NDA" does not match "Foundation" or "agenda"); CJK keywords such
+# as "機密" match as substrings.
+# This list replaces the built-in defaults, so the four defaults are listed
+# here to keep them; an empty list disables NDA keywords.
 nda_keywords:
-  # ─── 公司內部專案名稱 ───
-  - "Project Phoenix"
+  - "CONFIDENTIAL"
+  - "INTERNAL ONLY"
+  - "DO NOT SHARE"
+  - "NDA"
+  # Your internal project names:
+  # - "Project Phoenix"
   # - "Operation XYZ"
-  # - "MyCompany Internal"
 
-# ─── 私有域名 ────────────────────────────────────────────
+# ─── Private domains ────────────────────────────────────────────────────
 private_domains: []
-  # 請換成你公司的私有域名；勿保留以下佔位範例。
+  # Replace with your organization's or project's private hostnames; do not
+  # keep these placeholders.
   # - "internal.example.com"
   # - "gitlab.internal.example.com"
 
-# ─── 自訂正則規則（大小寫不敏感）─────────────────────────────
-# severity: HIGH / MEDIUM / LOW（預設 HIGH）；任何 severity 都會回報命中。
-# pattern 上限 200 字元；無法編譯的 pattern 會讓設定載入失敗；疑似 ReDoS 的 pattern 會被略過（計時啟發式，非保證），--doctor 會列出。
-# 先驗證格式並評估誤報，再取消註解啟用；通用數字 pattern 容易大量誤報。
+# ─── Custom regex rules (case-insensitive) ──────────────────────────────
+# severity: HIGH / MEDIUM / LOW (default HIGH); every severity reports a match.
+# A pattern may be up to 200 characters. A pattern that does not compile makes
+# the config fail to load; a pattern that looks like ReDoS is skipped (timing
+# heuristic, not a guarantee), and --doctor lists it.
+# Check the format and false-positive rate before uncommenting; generic number
+# patterns produce many false positives.
 custom_rules: []
-# - description: "員工編號（依公司格式調整）"
+# - description: "Employee ID (adjust to your format)"
 #   pattern: "\\bEMP-\\d{6}\\b"
 #   severity: HIGH
 #
-# - description: "公司 token"
+# - description: "Internal service token"
 #   pattern: "MYCO_[A-Z0-9]{32}"
 #   severity: HIGH
-#   flags: "i"            # gimsuy 的子集；g 一律自動加上，預設 i
-#   word_boundary: true   # 只在字面 ASCII 單字邊界加 \b；CJK 邊界不加
-#   allow:                # 精確字串，不是 regex、不是子字串
+#   flags: "i"            # subset of gimsuy; g is always added, default i
+#   word_boundary: true   # adds \b only at literal ASCII word edges, not CJK
+#   allow:                # exact strings, not regex, not substrings
 #     - "MYCO_EXAMPLE0000000000000000000000000"
-#   # path: ["src/**"]    # 已接受但尚未實作；rule 仍會套用到所有文字，--doctor 會警告
+#   # path: ["src/**"]    # accepted but not implemented yet; the rule still
+#   #                     # applies to all text, and --doctor warns
 #
-# 注意：allow 與 settings.allowlist 是真正的 bypass —— 值仍會原樣離開機器，
-# 只是不再回報。只放你確認不敏感的內容；--doctor 會回報條目數，並實際演練
-# 最多 8 條，無法演練的條目會提示（不是逐條斷言）。
+# Note: allow and settings.allowlist are real bypasses — the value still
+# leaves the machine unchanged, it is just no longer reported. Only list
+# content you have confirmed is not sensitive. --doctor reports the entry
+# count and exercises up to 8 entries, flagging those it cannot exercise (it
+# does not assert each one).
 #
-# 信用卡號（Visa／Mastercard 常見格式；未做 Luhn 驗證）
-#   pattern: "\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14})\\b"
-#   severity: HIGH
+# Credit card numbers are already covered by a built-in rule (id: credit-card,
+# with a Luhn check); no custom rule is needed.
 #
-# Jira 工單通常不是機密；LOW 仍會產生 finding，僅在確有需要時啟用：
-# - description: "Jira 工單"
+# Jira issue keys are usually not confidential; LOW still produces a finding,
+# so enable this only when you need it:
+# - description: "Jira issue key"
 #   pattern: "\\b[A-Z]{2,10}-\\d{1,6}\\b"
 #   severity: LOW
 
-# ─── 掃描設定 ──────────────────────────────────────────
+# ─── Scan settings ──────────────────────────────────────────────────────
 settings:
-  # 最大掃描字元數（超過截斷）
+  # Maximum characters to scan (longer input is truncated).
   max_chars: 200000
-  # 顯示命中行號
+  # Show line numbers for findings.
   show_line_numbers: true
-  # 命中預覽長度
+  # Length of the masked finding preview.
   preview_length: 60
-  # Base64／URL／Hex 解碼檢測；預設關閉，需明確啟用。
+  # Base64 / URL / Hex decoding detection; off by default, enable explicitly.
   encoding_detection: false
-  # 選用：已知 secret value 的來源檔案（路徑相對 workspace 根目錄）。
-  # 僅非空且至少 8 字元的 value 會用於精確比對；不會回傳 value。
+  # Optional: files holding known secret values (paths relative to the
+  # workspace root). Only non-empty values of at least 8 characters are used
+  # for exact matching; values are never returned.
   # env_files:
   #   - .env
   #   - .env.local
-  # 選用：私有網段，只在 rule_overrides["private-ipv4"]: true 時生效。
-  # 留空則使用 RFC 1918（10/8、172.16/12、192.168/16）、CGNAT（100.64/10）
-  # 與 link-local（169.254/16）。格式錯誤會讓設定載入失敗。
+  # Optional: private networks, used only when rule_overrides["private-ipv4"]
+  # is true. Empty means RFC 1918 (10/8, 172.16/12, 192.168/16), CGNAT
+  # (100.64/10) and link-local (169.254/16). A malformed entry fails the load.
   # private_cidrs:
   #   - 10.0.0.0/8
   #   - 172.16.0.0/12
   #   - 192.168.0.0/16
-  # 選用：全域 allowlist（精確字串，不是 regex、不是子字串），對所有規則生效。
-  # 這是真正的 bypass：值仍會原樣離開機器。最多 64 條、每條 200 字元；
-  # --doctor 回報條目數並演練最多 8 條；無法演練的條目會提示。
+  # Optional: global allowlist (exact strings, not regex, not substrings) for
+  # every rule. This is a real bypass: the value still leaves the machine
+  # unchanged. Up to 64 entries of 200 characters each; --doctor reports the
+  # count and exercises up to 8 entries, flagging those it cannot exercise.
   # allowlist:
   #   - qa@example.com

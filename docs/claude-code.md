@@ -12,7 +12,7 @@ Status: experimental. Verified with Claude Code 2.1.321 against a loopback stub 
    leakshield --claude-code-proxy
    ```
 
-   It listens on `127.0.0.1:8787` and forwards to `https://api.anthropic.com`. Options: `--port <n>`, `--upstream <url>` (another Anthropic-compatible gateway; plain `http` only on loopback), `--config <path>` (the same LeakShield config file the CLI uses), `--attachments allow`.
+   It listens on `127.0.0.1:8787` and forwards to `https://api.anthropic.com`. Options: `--port <n>`, `--upstream <url>` (another Anthropic-compatible gateway; plain `http` only on loopback), `--config <path>` (the same LeakShield config file the CLI uses; the proxy does not start if the file does not exist), `--attachments allow`.
 
 2. Point Claude Code at it, either in the shell that starts Claude Code:
 

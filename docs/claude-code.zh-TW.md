@@ -12,7 +12,7 @@ LeakShield 透過本機 proxy 保護 Claude Code。Claude Code 把模型請求�
    leakshield --claude-code-proxy
    ```
 
-   預設監聽 `127.0.0.1:8787`，轉送到 `https://api.anthropic.com`。選項：`--port <n>`、`--upstream <url>`（其他 Anthropic 相容 gateway；純 `http` 只允許 loopback）、`--config <path>`（與 CLI 相同的 LeakShield 設定檔）、`--attachments allow`。
+   預設監聽 `127.0.0.1:8787`，轉送到 `https://api.anthropic.com`。選項：`--port <n>`、`--upstream <url>`（其他 Anthropic 相容 gateway；純 `http` 只允許 loopback）、`--config <path>`（與 CLI 相同的 LeakShield 設定檔；檔案不存在時 proxy 不會啟動）、`--attachments allow`。
 
 2. 讓 Claude Code 指向它，可以寫在啟動 Claude Code 的 shell：
 

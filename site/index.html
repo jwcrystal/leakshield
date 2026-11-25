@@ -487,11 +487,11 @@
             <tr><td data-i18n="cov.r7n">Taiwan national ID</td><td data-i18n="cov.r7d">Format validation</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
             <tr><td data-i18n="cov.r8n">Credit cards</td><td data-i18n="cov.r8d">13–19 digits, Luhn checksum required</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
             <tr><td data-i18n="cov.r9n">IBAN</td><td data-i18n="cov.r9d">Compact or 4-char groups, mod-97 checksum</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
-            <tr><td data-i18n="cov.r10n">NDA keywords</td><td data-i18n="cov.r10d">Your own list from the config file</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
+            <tr><td data-i18n="cov.r10n">NDA keywords</td><td data-i18n="cov.r10d">Built-in defaults plus your own list</td><td><span class="sev high"><i></i>HIGH</span></td></tr>
             <tr><td data-i18n="cov.r11n">Public IPv4</td><td data-i18n="cov.r11d">Private, loopback, CGNAT and reserved ranges excluded</td><td><span class="sev med"><i></i>MEDIUM</span></td></tr>
             <tr><td data-i18n="cov.r12n">Email addresses</td><td data-i18n="cov.r12d">All email formats</td><td><span class="sev med"><i></i>MEDIUM</span></td></tr>
             <tr><td data-i18n="cov.r13n">Private domains</td><td data-i18n="cov.r13d">Your own domain list from the config file</td><td><span class="sev med"><i></i>MEDIUM</span></td></tr>
-            <tr><td data-i18n="cov.r14n">Private IPv4 / VPN</td><td><span data-i18n="cov.r14d">RFC 1918, CGNAT and link-local, narrowed by <code>private_cidrs</code></span><span class="optin" data-i18n="cov.optin">opt-in</span></td><td><span class="sev med"><i></i>MEDIUM</span></td></tr>
+            <tr><td data-i18n="cov.r14n">Private IPv4 / VPN</td><td><span data-i18n="cov.r14d">RFC 1918, CGNAT and link-local, or your own <code>private_cidrs</code></span><span class="optin" data-i18n="cov.optin">opt-in</span></td><td><span class="sev med"><i></i>MEDIUM</span></td></tr>
             <tr><td data-i18n="cov.r15n">Taiwan mobile numbers</td><td><span data-i18n="cov.r15d">Digit runs are a measured false-positive source</span><span class="optin" data-i18n="cov.optin">opt-in</span></td><td><span class="sev med"><i></i>MEDIUM</span></td></tr>
             <tr><td data-i18n="cov.r16n">International phones</td><td><span data-i18n="cov.r16d">Same trade-off as Taiwan numbers</span><span class="optin" data-i18n="cov.optin">opt-in</span></td><td><span class="sev low"><i></i>LOW</span></td></tr>
             <tr><td data-i18n="cov.r17n">HTTP(S) URLs</td><td><span data-i18n="cov.r17d">Off by default: always-on masking would flag provider endpoints</span><span class="optin" data-i18n="cov.optin">opt-in</span></td><td><span class="sev low"><i></i>LOW</span></td></tr>
@@ -709,7 +709,7 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
         </details>
         <details>
           <summary data-i18n="faq.q3">Where do the placeholders and keys live?</summary>
-          <p data-i18n="faq.a3">Placeholders are per-session pseudonyms. Their reverse mapping stays on your machine: in memory by default, or in an opt-in encrypted database (SGP.db) whose key the OS keychain holds, with a keyfile fallback for headless machines.</p>
+          <p data-i18n="faq.a3">Placeholders are per-session pseudonyms. Their reverse mapping stays on your machine: in memory by default, or, for OpenCode and pi, in an opt-in encrypted database (SGP.db) whose key the OS keychain holds, with a keyfile fallback for headless machines.</p>
         </details>
         <details>
           <summary data-i18n="faq.q4">How do I add my own keywords and domains?</summary>
@@ -820,7 +820,7 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
     "cov.r9n": "IBAN",
     "cov.r9d": "緊密或每 4 字元分組，須通過 mod-97",
     "cov.r10n": "NDA 關鍵字",
-    "cov.r10d": "來自設定檔的自訂清單",
+    "cov.r10d": "內建預設值加上你的自訂清單",
     "cov.r11n": "公開 IPv4",
     "cov.r11d": "排除私有、loopback、CGNAT 與保留網段",
     "cov.r12n": "電子郵件",
@@ -828,7 +828,7 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
     "cov.r13n": "私有網域",
     "cov.r13d": "來自設定檔的自訂網域清單",
     "cov.r14n": "私有 IPv4／VPN",
-    "cov.r14d": "RFC 1918、CGNAT 與 link-local，可用 <code>private_cidrs</code> 縮小範圍",
+    "cov.r14d": "RFC 1918、CGNAT 與 link-local，或你自己的 <code>private_cidrs</code>",
     "cov.r15n": "台灣手機號碼",
     "cov.r15d": "數字串是實測的誤判來源",
     "cov.r16n": "國際電話",
@@ -895,7 +895,7 @@ leakshield --redact --file ./notes.md --out ./notes.safe.md</code></pre>
     "faq.q2": "無法遮罩時會怎樣？",
     "faq.a2": "請求會被拒絕。LeakShield 是 fail-closed：無法辨識的格式、無效的設定或缺少對照，都會中止呼叫，而不是送出原文。",
     "faq.q3": "佔位符與金鑰放在哪裡？",
-    "faq.a3": "佔位符是每個 session 的偽名，能換回原值的對照表留在你的機器上：預設只在記憶體；要持久化需自行開啟加密資料庫（SGP.db），金鑰由作業系統 keychain 保管，無 keychain 的環境可改用金鑰檔。",
+    "faq.a3": "佔位符是每個 session 的偽名，能換回原值的對照表留在你的機器上：預設只在記憶體；OpenCode 與 pi 可自行開啟加密資料庫（SGP.db）持久化，金鑰由作業系統 keychain 保管，無 keychain 的環境可改用金鑰檔。",
     "faq.q4": "怎麼加入自己的關鍵字與網域？",
     "faq.a4": "把 <code>config/guard.config.example.yaml</code> 複製到 <code>~/.leakshield/guard.config.yaml</code>（單一專案可放 <code>./config/</code>），再加入 NDA 關鍵字、私有網域、allowlist 或 <code>settings.rule_overrides</code>。未知的規則 id 會讓設定載入失敗，不會被忽略。",
     "faq.q5": "可以上生產環境了嗎？",

@@ -158,13 +158,13 @@ Before relying on any host, read [what this protects — and what it does not](#
 | NDA Keywords | Defaults plus your own (see [Configuration](#configuration)) | 🔴 HIGH |
 | Private Domains | Your own (see [Configuration](#configuration)) | 🟡 MEDIUM |
 
-> **Detection boundaries** (per `src/rules/builtin.ts`): the generic secret rule matches only the keywords `password`, `passwd`, `secret`, `private_key`, `client_secret` with a value of **8+ characters** — generic `api_key=`/`token=` assignments are not matched unless the value itself matches a vendor pattern. It also skips an unquoted value that is a code expression, such as `process.env.DB_PASSWORD` or `z.string().min(6)`; a call whose arguments hold another string literal is still reported. Credit card and IBAN matches require a valid checksum, and the credit card rule skips a run of one repeated digit and digits inside a UUID. The URL credential and DB connection rules skip a password that is a `${…}`, `{{…}}` or `<…>` placeholder. IP matches cover only public/routable IPv4, and a dotted run longer than four groups is reported whole so an address embedded in it is masked instead of left behind (dotted dates such as `2026.10.21.14.32.59` therefore report as an IP run too). Not covered by any rule: street/postal addresses, dates, IPv6, and values below the 8-character minimum for generic secret assignments. SSH remote authorities (`user@host:path`, `ssh://user@host/…`) are not reported as email; private domains and path keywords still apply inside them, and the password half of `scheme://user:password@host` is reported as a URL credential instead. Private IPv4 is opt-in because the literal also matches version numbers and timestamps; `settings.private_cidrs` narrows it to the organisation's own ranges, and an entry that does not parse fails the config load. Every built-in rule has a stable id and can be toggled via `settings.rule_overrides` in `config/guard.config.yaml` (unknown ids fail config load); the URL rule ships disabled because always-on URL masking would flag provider endpoints. The same rule set (built-in + `config/guard.config.yaml`) applies to every mode — `block`, `redact`, and `transparent`.
+> **Detection boundaries** (per `src/rules/builtin.ts`): the generic secret rule matches only the keywords `password`, `passwd`, `secret`, `private_key`, `client_secret` with a value of **8+ characters** — generic `api_key=`/`token=` assignments are not matched unless the value itself matches a vendor pattern. It also skips an unquoted value that is a code expression, such as `process.env.DB_PASSWORD` or `z.string().min(6)`; a call whose arguments hold another string literal is still reported. Credit card and IBAN matches require a valid checksum, and the credit card rule skips a run of one repeated digit and digits inside a UUID. The URL credential and DB connection rules skip a password that is a `${…}`, `{{…}}` or `<…>` placeholder. IP matches cover only public/routable IPv4, and a dotted run longer than four groups is reported whole so an address embedded in it is masked instead of left behind (dotted dates such as `2026.10.21.14.32.59` therefore report as an IP run too). Not covered by any rule: street/postal addresses, dates, IPv6, and values below the 8-character minimum for generic secret assignments. SSH remote authorities (`user@host:path`, `ssh://user@host/…`) are not reported as email; private domains and path keywords still apply inside them, and the password half of `scheme://user:password@host` is reported as a URL credential instead. Private IPv4 is opt-in because the literal also matches version numbers and timestamps; `settings.private_cidrs` replaces its default networks, for example with your organisation's own ranges, and an entry that does not parse fails the config load. Every built-in rule has a stable id and can be toggled via `settings.rule_overrides` in your config file ([ids](#built-in-rule-ids); unknown ids fail config load); the URL rule ships disabled because always-on URL masking would flag provider endpoints. The same rule set (built-in rules plus your config) applies to every mode — `block`, `redact`, and `transparent` — and every host.
 
 ---
 
 ## Decision Model
 
-Every scan produces a **decision** that tells the caller how to handle the content:
+Every scan produces a **decision** that tells the caller how to handle the content. The CLI and Web UI report it directly; the host integrations act on findings instead (mask in transparent mode, replace or refuse in `redact` and `block`).
 
 | Decision | When | Risk Level | Meaning |
 |----------|------|-----------|---------|
@@ -200,7 +200,7 @@ When using `--format json`, the output includes these decision-oriented fields:
 
 ## Installation
 
-Requires Node.js 20 or later. Mapping persistence needs 22.13 or later.
+Requires Node.js 20 or later. Mapping persistence needs 22.13 or later, and the pi extension needs 22.19 or later.
 
 ```bash
 npm install -g leakshield
@@ -278,25 +278,7 @@ The output is a single executable — hand it to anyone, no dependencies require
 
 ### Configuration for binary and npm users
 
-The binary and the npm package work out of the box with built-in defaults. To customize rules (NDA keywords, private domains, custom regex patterns), place a config file in one of these locations:
-
-| Location | Scope |
-|----------|-------|
-| `./config/guard.config.yaml` | Current working directory |
-| `~/.leakshield/guard.config.yaml` | All sessions (user home) |
-
-```bash
-# Quick start: copy config/guard.config.example.yaml from this repository,
-# then replace its sample keywords and domains
-mkdir -p ~/.leakshield
-cp config/guard.config.example.yaml ~/.leakshield/guard.config.yaml
-
-# Or per-project
-mkdir -p ./config
-# Create/edit ./config/guard.config.yaml as needed
-```
-
-See [Configuration](#configuration) section for available options.
+The binary and the npm package work with built-in defaults and ship no config file. To add your own keywords, domains or rules, see [Configuration](#configuration).
 
 ---
 
@@ -495,7 +477,7 @@ npm run scan -- --file ../shared.env --allow-outside
 
 The CLI and Web UI skip any line containing `leakshield-ignore`, `guard:skip`, `guard:ignore`, `sg-ignore`, `no-scan` or `skip-guard` (case-insensitive). A real secret on that line reports as `ALLOW`.
 
-> ⚠️ Anyone who can edit a scanned file can add a directive, so a CLI scan is not a gate against untrusted changes. The OpenCode plugin does not honor directives.
+> ⚠️ Anyone who can edit a scanned file can add a directive, so a CLI scan is not a gate against untrusted changes. The host integrations (OpenCode plugin, pi extension, Claude Code proxy) do not honor directives.
 
 ---
 
@@ -504,7 +486,10 @@ The CLI and Web UI skip any line containing `leakshield-ignore`, `guard:skip`, `
 Start a local web server and use it in your browser:
 
 ```bash
-# Default port 3000
+# Installed package (default port 3000)
+leakshield --web
+
+# From a checkout, without building
 npx tsx src/cli.ts --web
 
 # Custom port
@@ -555,6 +540,15 @@ curl -s -X POST http://localhost:3001/scan \
 ## Configuration
 
 LeakShield loads the first config file it finds: `./config/guard.config.yaml`, then `config/guard.config.yaml` in the LeakShield directory (source builds only), then `~/.leakshield/guard.config.yaml`. With no file, the built-in defaults apply. The OpenCode plugin also accepts a `configPath` option. The repository does not ship a `config/guard.config.yaml`, and Git ignores one you create there, so your keywords stay local. To start a new file, copy [`config/guard.config.example.yaml`](config/guard.config.example.yaml) and add your own keywords and domains. Listing `nda_keywords` replaces the four defaults (`CONFIDENTIAL`, `INTERNAL ONLY`, `DO NOT SHARE`, `NDA`); the example keeps them.
+
+Without a checkout (npm or binary install), download the example into your home directory:
+
+```bash
+mkdir -p ~/.leakshield
+curl -fsSL https://raw.githubusercontent.com/jwcrystal/leakshield/main/config/guard.config.example.yaml \
+  -o ~/.leakshield/guard.config.yaml
+leakshield --doctor   # confirms the file loads
+```
 
 ### Fields
 

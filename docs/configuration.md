@@ -74,7 +74,7 @@ Every entry point applies it: the OpenCode plugin, the pi extension, the Claude 
 - **After changing an enabled env file**, restart the host that loaded it (OpenCode, pi), the Claude Code proxy or the Web UI. The CLI applies it on its next run.
 - **Verification**: for OpenCode, the end-to-end harness in `scripts/e2e/compare/` runs with `env_files`. For pi and the Claude Code proxy, coverage is inferred from the code path above; no end-to-end check has been run yet.
 
-**`envQueries` is separate and OpenCode-only.** The opt-in `envQueries` plugin option adds three read-only tools over the same files (`guard_env_list`, `guard_env_inspect`, `guard_env_compare`) so an agent can answer configuration questions without seeing values; it needs `mode: "block"` or `"redact"`. It is a debugging aid, not a protection: masking comes from `env_files` above. pi and the Claude Code proxy do not offer these tools, and their `.env` protection does not depend on them. See [Readonly env queries](plugin/env-queries.md).
+**`envQueries` is separate and OpenCode-only.** The opt-in `envQueries` plugin option adds three read-only tools over the same files (`guard_env_list`, `guard_env_inspect`, `guard_env_compare`) so an agent can answer configuration questions without seeing values; it works only with `mode: "block"` or `"redact"`; in transparent mode, including the default, the option is ignored with a warning and `--doctor` shows an `env-queries` warn check. It is a debugging aid, not a protection: masking comes from `env_files` above. pi and the Claude Code proxy do not offer these tools, and their `.env` protection does not depend on them. See [Readonly env queries](plugin/env-queries.md).
 
 ## Custom Rules
 

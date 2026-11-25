@@ -74,7 +74,7 @@ settings:
 - **修改已啟用的 env 檔後**，請重啟載入它的宿主（OpenCode、pi）、Claude Code proxy 或 Web UI；CLI 下次執行就會套用。
 - **驗證**：OpenCode 有 `scripts/e2e/compare/` 的端到端測試工具搭配 `env_files` 執行。pi 和 Claude Code proxy 的涵蓋是依上述程式路徑推斷，尚未做端到端驗證。
 
-**`envQueries` 是另一回事，只有 OpenCode 有。** 選擇性開啟的 `envQueries` plugin 選項，會針對同樣這些檔案提供三個唯讀工具（`guard_env_list`、`guard_env_inspect`、`guard_env_compare`），讓 agent 不看到值也能回答設定問題；需要搭配 `mode: "block"` 或 `"redact"`。它是除錯輔助，不是保護機制：遮罩靠的是上面的 `env_files`。pi 和 Claude Code proxy 沒有這些工具，`.env` 的保護效果也不受影響。見[唯讀 env 查詢](plugin/env-queries.zh-TW.md)。
+**`envQueries` 是另一回事，只有 OpenCode 有。** 選擇性開啟的 `envQueries` plugin 選項，會針對同樣這些檔案提供三個唯讀工具（`guard_env_list`、`guard_env_inspect`、`guard_env_compare`），讓 agent 不看到值也能回答設定問題；只有搭配 `mode: "block"` 或 `"redact"` 才會生效；在 transparent 模式（包括預設）下會被忽略並顯示警告，`--doctor` 也會出現 `env-queries` 的 warn 檢查。它是除錯輔助，不是保護機制：遮罩靠的是上面的 `env_files`。pi 和 Claude Code proxy 沒有這些工具，`.env` 的保護效果也不受影響。見[唯讀 env 查詢](plugin/env-queries.zh-TW.md)。
 
 ## 自訂規則
 

@@ -859,4 +859,29 @@ describe("OpenCode plugin entry", () => {
       }
     },
   );
+  it.each(["block", "transparent"] as const)(
+    "fails closed when configPath names a missing file in mode %s, without the path in the refusal (v2 setup)",
+    async (mode) => {
+      const missing = path.join(os.tmpdir(), "leakshield-missing-dir-for-test", "guard.config.yaml");
+      const registered: Array<{ name: string; callback: unknown }> = [];
+      const hook = async (name: string, callback: unknown) => {
+        registered.push({ name, callback });
+        return { dispose: async () => {} };
+      };
+      await leakshieldPlugin.setup({
+        options: { mode, configPath: missing },
+        location: { directory: process.cwd() },
+        session: { hook },
+        tool: { hook },
+        aisdk: { hook },
+      } as never);
+
+      expect(registered.length).toBeGreaterThan(0);
+      for (const record of registered) {
+        const refusal = (async () => (record.callback as (event: unknown) => unknown)({ sessionID: "s" }))();
+        await expect(refusal).rejects.toThrow("guard config file could not be loaded");
+        await expect(refusal).rejects.not.toThrow("leakshield-missing-dir-for-test");
+      }
+    },
+  );
 });

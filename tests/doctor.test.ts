@@ -227,6 +227,22 @@ describe("runDoctor", () => {
     expect(report.checks.find((c) => c.id === "guard-config")?.state).toBe("fail");
   });
 
+  it("reports BROKEN with the path when configPath names a missing file", async () => {
+    const { loadConfig } = await import("../src/config/loader.js");
+    const missing = "/nonexistent/leakshield-doctor.yaml";
+    const { deps } = makeFixture({
+      distFiles: true,
+      config: (tmp) => ({ plugins: [{ package: distRef(tmp), options: { mode: "block", configPath: missing } }] }),
+      options: { loadGuardConfig: (overridePath, workspaceRoot) => loadConfig(overridePath, workspaceRoot) },
+    });
+    const report = await runDoctor(deps);
+    expect(report.status).toBe("BROKEN");
+    const check = report.checks.find((c) => c.id === "guard-config");
+    expect(check?.state).toBe("fail");
+    // The doctor prints to the user's terminal, so naming the path is fine here.
+    expect(check?.detail).toContain(`guard config file not found: ${missing}`);
+  });
+
   it("warns about custom rules the scanner skips without failing the install (#33)", async () => {
     const guardConfig = {
       nda_keywords: [],

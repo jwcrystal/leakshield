@@ -727,7 +727,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   checks.push({
     id: "options",
     state: "ok",
-    detail: `mode=${options.mode}${(weakest.entry.options as { mode?: unknown } | undefined)?.mode === undefined ? " (default)" : ""}${options.mode === "transparent" ? ` wireProtection=${options.wireProtection ?? true}` : ""}${options.attachments === "allow" ? " attachments=allow" : ""}${options.deidentify ? " +deidentify" : ""}${options.envQueries ? " +envQueries" : ""}${options.configPath ? ` configPath=${options.configPath}` : ""}${across}`,
+    detail: `mode=${options.mode}${(weakest.entry.options as { mode?: unknown } | undefined)?.mode === undefined ? " (default)" : ""}${options.mode === "transparent" ? ` wireProtection=${options.wireProtection ?? true}` : ""}${options.attachments === "allow" ? " attachments=allow" : ""}${options.deidentify ? " +deidentify" : ""}${options.envQueries ? (options.mode === "transparent" ? " +envQueries(ignored)" : " +envQueries") : ""}${options.configPath ? ` configPath=${options.configPath}` : ""}${across}`,
   });
   checks.push(persistenceCheck(options, deps));
   if (validated.some((candidate) => candidate.options.mode === "transparent" && candidate.options.envQueries)) {

@@ -85,7 +85,7 @@ const v2Setup = async (ctx: V2PluginContext): Promise<PluginNamespace.Cleanup | 
       await guard.setup(ctx);
       if (options.envQueries) {
         console.warn(
-          "[leakshield] envQueries is ignored in transparent mode: the guard_env_* tools are not registered. Read env files directly (values are masked), or set mode to \"block\" or \"redact\" to use envQueries.",
+          "[leakshield] envQueries is ignored in transparent mode: the guard_env_* tools are not registered, and env files the agent reads are only partly masked (values shorter than 8 characters stay visible). Set mode to \"block\" or \"redact\" to use envQueries.",
         );
       }
       // Hook-only must leave provider routing/transport preferences untouched.

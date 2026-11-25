@@ -203,7 +203,7 @@ describe("runDoctor", () => {
     expect(report.status).not.toBe("BROKEN");
     expect(report.status).toBe(baseReport.status);
     expect(report.checks.find((c) => c.id === "env-queries")?.state).toBe("warn");
-    expect(report.checks.find((c) => c.id === "options")?.detail).toContain("envQueries");
+    expect(report.checks.find((c) => c.id === "options")?.detail).toContain("+envQueries(ignored)");
   });
 
   it("reports BROKEN when the dist entry point is missing (silent skip)", async () => {

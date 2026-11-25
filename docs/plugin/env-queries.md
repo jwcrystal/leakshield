@@ -4,7 +4,7 @@
 
 [← README](../../README.md#opencode-plugin-recommended)
 
-The `envQueries` option (default `false`) exposes three read-only tools over the files listed in `settings.env_files`, so an agent can answer configuration questions without ever seeing values. It is for `block` and `redact` modes. In transparent mode (the v2 default when `mode` is omitted) the option is ignored: the plugin starts normally, the tools are not registered, it logs a warning and `--doctor` shows a warn check. Transparent mode does not need it: an agent can read the env file directly, values are replaced with stable placeholders, and it can still see which keys are set and which values match. Use envQueries when env file contents must not enter the conversation at all, not even as placeholders:
+The `envQueries` option (default `false`) exposes three read-only tools over the files listed in `settings.env_files`, so an agent can answer configuration questions without ever seeing values. It is for `block` and `redact` modes. In transparent mode (the v2 default when `mode` is omitted) the option is ignored: the plugin starts normally, the tools are not registered, it logs a warning and `--doctor` shows a warn check. An agent in transparent mode can read the env file directly instead, but masking there is partial: values of 8 or more characters (and anything a scanner rule detects) become stable placeholders, while shorter values such as `PORT=3000` or `DEBUG=true` stay visible, and only masked values can be compared through their placeholders. Use envQueries with `block` or `redact` when env file contents must not enter the conversation:
 
 | Tool | Contract |
 |---|---|

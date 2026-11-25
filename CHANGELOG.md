@@ -2,6 +2,13 @@
 
 All notable changes are listed here.
 
+## Unreleased
+
+### Changed
+
+- The OpenCode plugin ignores `envQueries` in transparent mode, including the default when `mode` is omitted, instead of failing every request closed. The plugin starts normally without the `guard_env_*` tools, logs a warning, and `--doctor` shows an `env-queries` warn check without changing the verdict. This supersedes the 0.4.0 note that `envQueries` is rejected with the default mode. Set `mode` to `block` or `redact` to use envQueries.
+- The initialization-failure refusal now ends with "Run `leakshield --doctor` for details."
+
 ## 0.4.0 — 2026-11-24
 
 ### Added

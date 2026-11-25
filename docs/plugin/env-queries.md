@@ -4,7 +4,9 @@
 
 [← OpenCode plugin](../opencode.md)
 
-The `envQueries` option (default `false`) exposes three read-only tools over the files listed in `settings.env_files`, so an agent can answer configuration questions without ever seeing values. It does not work with transparent mode, so on v2 set `mode` to `block` or `redact` explicitly:
+The `envQueries` option (default `false`) exposes three read-only tools over the files listed in `settings.env_files`, so an agent can answer configuration questions without ever seeing values.
+
+**Who it is for.** Use it with `mode: "block"` or `"redact"`, or when env file contents should stay out of the conversation entirely. In those modes, reading an env file gives the agent a block notice or redacted values, so these tools are how it can still check that a key exists, is empty or matches another key. In transparent mode (the default) you do not need it: the agent can read env files directly with their values masked, and can use the placeholders in commands. Combining `envQueries` with transparent mode is rejected, and every request is refused with a message that says how to fix it; LeakShield does not switch modes for you. This tool is a debugging aid, not a protection: masking comes from `settings.env_files` itself.
 
 | Tool | Contract |
 |---|---|

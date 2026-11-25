@@ -4,7 +4,9 @@
 
 [← OpenCode plugin](../opencode.zh-TW.md)
 
-`envQueries` 選項（預設 `false`）針對 `settings.env_files` 所列檔案提供三個唯讀工具，讓 agent 能回答設定問題而不看到任何 value。這個選項不支援 transparent 模式，所以在 v2 要明確設定 `mode` 為 `block` 或 `redact`：
+`envQueries` 選項（預設 `false`）針對 `settings.env_files` 所列檔案提供三個唯讀工具，讓 agent 能回答設定問題而不看到任何 value。
+
+**給誰用。** 搭配 `mode: "block"` 或 `"redact"` 使用，或是你希望 env 檔內容完全不進入對話時使用。在這兩種模式下，agent 讀 env 檔只會拿到攔截通知或已脫敏的值，這些工具讓它仍能確認某個 key 是否存在、是否為空、是否和另一個 key 相同。transparent 模式（預設）不需要它：agent 可以直接讀 env 檔，值會被遮罩，也能在指令裡使用 placeholder。`envQueries` 搭配 transparent 模式會被拒絕，所有請求都會被擋下，並在訊息裡說明怎麼修正；LeakShield 不會自動幫你切換模式。這個工具是除錯輔助，不是保護機制：遮罩靠的是 `settings.env_files` 本身。
 
 | 工具 | 契約 |
 |---|---|

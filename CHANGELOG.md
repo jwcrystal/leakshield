@@ -6,6 +6,8 @@ All notable changes are listed here.
 
 ### Changed
 
+- When the OpenCode plugin cannot start because of invalid options or a guard config that fails to load, the refusal shown for every blocked request now says why and how to fix it, instead of only "LeakShield initialization failed". Option errors name the option and the rule (never the rejected value); a config load failure is described without its details, which can contain file paths or rule descriptions, and points to `leakshield --doctor`. `envQueries` with transparent mode is still rejected, and the plugin does not switch modes: the message now explains that transparent users can read env files directly and that `block` or `redact` keeps env contents out of the conversation.
+
 - The repository no longer tracks `config/guard.config.yaml`, and Git now ignores it so local keywords and domains are not committed by accident. That file set `nda_keywords: []`, which turned NDA keyword detection off when the CLI or Web UI ran from a checkout, or when a host loaded a source build. Those setups now use the built-in defaults (`CONFIDENTIAL`, `INTERNAL ONLY`, `DO NOT SHARE`, `NDA`) unless you create your own config. npm installs are unchanged: the package never included the file. `config/guard.config.example.yaml` is rewritten in English, keeps the four defaults, and no longer enables the placeholder keyword `Project Phoenix`.
 
 ## 0.4.0 — 2026-11-24

@@ -622,7 +622,14 @@ settings:
     - .env.local
 ```
 
-`env_files` 路徑相對專案根目錄，且不能離開 workspace。Guard 只讀取非空且至少 8 字元的 value，掃描準備送往模型的內容是否出現完全相同的值。載入的 value 不會傳給模型、寫入 log 或序列化；也不會自動讀取所有 process environment variables。修改已啟用的 `.env` 後，請重啟載入它的宿主或 proxy（只有 CLI 每次執行都會重新讀取）。選擇性開啟的 `envQueries` plugin 工具（見[唯讀 env 查詢](docs/plugin/env-queries.zh-TW.md)）查詢的是同樣這些檔案，且永不回傳其 value。
+所有入口都會套用：OpenCode plugin、pi extension、Claude Code proxy、CLI 和 Web UI。它們都透過 `loadConfig()` 載入設定，`loadConfig()` 會依 `settings.env_files` 建立精確值偵測器，共用的掃描器再使用這個偵測器。
+
+- **路徑**相對於一個根目錄，且不能離開它。OpenCode plugin 用專案目錄；pi extension、Claude Code proxy、CLI 和 Web UI 用啟動它們時所在的目錄（`process.cwd()`）。所以請在專案根目錄啟動 pi 或 proxy，否則相對路徑會指到別的地方。
+- **值**：只讀取非空且至少 8 字元的 value，掃描準備送往模型的內容是否出現完全相同的值。不會自動讀取 `.env` 或 process 環境變數，載入的 value 不會傳給模型、寫入 log 或序列化。
+- **修改已啟用的 env 檔後**，請重啟載入它的宿主（OpenCode、pi）、Claude Code proxy 或 Web UI；CLI 下次執行就會套用。
+- **驗證**：OpenCode 有 `scripts/e2e/compare/` 的端到端測試工具搭配 `env_files` 執行。pi 和 Claude Code proxy 的涵蓋是依上述程式路徑推斷，尚未做端到端驗證。
+
+**`envQueries` 是另一回事，只有 OpenCode 有。** 選擇性開啟的 `envQueries` plugin 選項，會針對同樣這些檔案提供三個唯讀工具（`guard_env_list`、`guard_env_inspect`、`guard_env_compare`），讓 agent 不看到值也能回答設定問題；需要搭配 `mode: "block"` 或 `"redact"`。它是除錯輔助，不是保護機制：遮罩靠的是上面的 `env_files`。pi 和 Claude Code proxy 沒有這些工具，`.env` 的保護效果也不受影響。見[唯讀 env 查詢](docs/plugin/env-queries.zh-TW.md)。
 
 ### 自訂規則
 

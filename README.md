@@ -626,7 +626,14 @@ settings:
     - .env.local
 ```
 
-Paths are relative to the workspace root and must remain inside it. LeakShield reads non-empty values of at least eight characters, then detects exact occurrences in text sent to the model. It does not automatically read `.env`, process environment variables, or send, log, or serialize the loaded values. After changing an enabled env file, restart the host or proxy that loaded it (only the CLI re-reads on every run). The opt-in `envQueries` plugin tools (see [Readonly env queries](docs/plugin/env-queries.md)) query these same files and never return their values.
+Every entry point applies it: the OpenCode plugin, the pi extension, the Claude Code proxy, the CLI and the Web UI. Each one loads the guard config through `loadConfig()`, which builds the exact-value detector from `settings.env_files`, and the shared scanner uses that detector.
+
+- **Paths** are relative to a root and must stay inside it. The OpenCode plugin uses the project directory. The pi extension, the Claude Code proxy, the CLI and the Web UI use the directory they were started from (`process.cwd()`), so start pi or the proxy from the project root, or the relative paths point elsewhere.
+- **Values**: LeakShield reads non-empty values of at least eight characters, then detects exact occurrences in text sent to the model. It does not automatically read `.env` or process environment variables, and it never sends, logs or serializes the loaded values.
+- **After changing an enabled env file**, restart the host that loaded it (OpenCode, pi), the Claude Code proxy or the Web UI. The CLI applies it on its next run.
+- **Verification**: for OpenCode, the end-to-end harness in `scripts/e2e/compare/` runs with `env_files`. For pi and the Claude Code proxy, coverage is inferred from the code path above; no end-to-end check has been run yet.
+
+**`envQueries` is separate and OpenCode-only.** The opt-in `envQueries` plugin option adds three read-only tools over the same files (`guard_env_list`, `guard_env_inspect`, `guard_env_compare`) so an agent can answer configuration questions without seeing values; it needs `mode: "block"` or `"redact"`. It is a debugging aid, not a protection: masking comes from `env_files` above. pi and the Claude Code proxy do not offer these tools, and their `.env` protection does not depend on them. See [Readonly env queries](docs/plugin/env-queries.md).
 
 ### Custom Rules
 

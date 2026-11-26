@@ -40,6 +40,7 @@ None of the hosts is a guarantee that nothing sensitive reaches a model. `leaksh
 - **Claude Code** (experimental): a local proxy (`leakshield --claude-code-proxy`, then `ANTHROPIC_BASE_URL`), verified with Claude Code 2.1.321 against a loopback stub upstream ([record](docs/evidence/2026-11-21-claude-code-proxy.md)). It masks model requests and restores assistant text, but does not restore placeholders at tool execution yet. See [Claude Code](docs/claude-code.md).
 - Not yet verified: OS-keychain custody on Windows and Linux (macOS verified 2026-10-20), a real Anthropic provider, long histories on other providers, long-running use ([#26](https://github.com/jwcrystal/leakshield/issues/26)).
 - Defaults may still change during `0.x`; see the [changelog](CHANGELOG.md).
+- Planned work: [Roadmap](docs/ROADMAP.md) (Traditional Chinese; priorities, candidates and research, separate from current support claims).
 - Verification records: [docs/evidence](docs/evidence/README.md). Report vulnerabilities privately: [SECURITY.md](SECURITY.md). License: [Apache-2.0](LICENSE).
 
 ---

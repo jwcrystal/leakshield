@@ -33,7 +33,7 @@ Documented limitations are not vulnerabilities by themselves. Each host's declar
 
 All hosts:
 
-- traffic that does not pass the interception point (host telemetry, a local process or permitted tool that sends data itself: `curl`, a remote MCP server);
+- traffic that does not pass the interception point (host telemetry, analytics or crash reports, a local process or permitted tool that sends data itself: `curl`, a remote MCP server);
 - values no built-in or configured rule detects;
 - local history, logs and files containing originals.
 

@@ -579,7 +579,7 @@ async function runMain() {
   }
   const isInside = (parent, child) => {
     const rel = relative(parent, child);
-    return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+    return rel === "" || (!/^\.\.(?:[\\/]|$)/.test(rel) && !isAbsolute(rel));
   };
   const realpathAllowingMissing = (target) => {
     const missing = [];

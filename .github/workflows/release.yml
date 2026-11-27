@@ -41,6 +41,9 @@ jobs:
             exit 1
           fi
 
+      - name: Adapter protection matrix
+        run: npx vitest run tests/adapter-protection-matrix.test.ts
+
       # `prepack` runs the TypeScript build, so the tarball contains dist/.
       # `files: ["dist"]` in package.json keeps source out of it.
       - name: Build the npm tarball (plugin + CLI)

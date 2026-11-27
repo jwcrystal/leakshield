@@ -391,6 +391,13 @@ async function runCase(caseName, drive) {
               request.index > firstCompactionEndSeq,
           );
 
+    check(
+      `${caseName}: no recorded request carries the canary`,
+      requests.length > 0 &&
+        requests.every((request) => request.canaryCount === 0),
+      JSON.stringify(requests.map((request) => request.canaryCount)),
+    );
+
     if (caseName === "compaction") {
       const threshold = starts.some((event) => event.reason === "threshold");
       const finished = ends.find(
@@ -520,10 +527,10 @@ async function runCase(caseName, drive) {
         ),
       );
       check(
-        `retry: layer=${layer} (${startsRetry.length} auto_retry_start, ${endsRetry.length} auto_retry_end)`,
-        layer !== "none" &&
-          (startsRetry.length > 0 || layer === "provider-sdk"),
-        `model=${modelRequests.length}`,
+        `retry: pi agent-level retry (${startsRetry.length} auto_retry_start, ${endsRetry.length} auto_retry_end)`,
+        startsRetry.length > 0 &&
+          endsRetry.some((event) => event.success === true),
+        `layer=${layer} model=${modelRequests.length}`,
       );
       result.retryLayer = layer;
       result.retryEvents = { starts: startsRetry, ends: endsRetry };

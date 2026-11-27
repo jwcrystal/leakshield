@@ -6,7 +6,7 @@ Date: 2026-11-27. macOS (arm64), Node 24.22.3. Branch
 - `3fc1868` adds the [cross-adapter protection matrix](../../tests/adapter-protection-matrix.test.ts),
   the [readiness checklist](adapter-production-readiness.md) and the release-workflow
   step that runs the matrix.
-- `b6b7a41` adds [`scripts/e2e/run-pi-lifecycle.mjs`](../../scripts/e2e/run-pi-lifecycle.mjs).
+- `b6b7a41` adds [`scripts/e2e/run-pi-lifecycle.mjs`](../../scripts/e2e/run-pi-lifecycle.mjs), and `149ec6b` tightens its pass criteria. The lifecycle rows below come from a run at `149ec6b`; the other Pi harnesses ran at `b6b7a41`.
 
 Neither commit touches `src/`. The built `dist/` therefore matches `0d67011`
 for every run below.
@@ -106,9 +106,9 @@ recorded run uses the resolved binary.
 
 | Candidate SHA | Adapter and host version | Transport and interception mode | Case | Result | Capture or run link |
 |---|---|---|---|---|---|
-| `b6b7a41` | Pi, pi 1.6.0 | openai-completions, fetch boundary | Compaction (default auto) | pass | `run-pi-lifecycle.mjs` |
-| `b6b7a41` | Pi, pi 1.6.0 | openai-completions, fetch boundary | Compaction (branch summary) | pass | `run-pi-lifecycle.mjs` |
-| `b6b7a41` | Pi, pi 1.6.0 | openai-completions, fetch boundary | Retry (503, agent-level) | pass | `run-pi-lifecycle.mjs` |
+| `149ec6b` | Pi, pi 1.6.0 | openai-completions, fetch boundary | Compaction (default auto) | pass | `run-pi-lifecycle.mjs` |
+| `149ec6b` | Pi, pi 1.6.0 | openai-completions, fetch boundary | Compaction (branch summary) | pass | `run-pi-lifecycle.mjs` |
+| `149ec6b` | Pi, pi 1.6.0 | openai-completions, fetch boundary | Retry (503, agent-level) | pass | `run-pi-lifecycle.mjs` |
 | `b6b7a41` | Pi, pi 1.6.0 | Bedrock switch, fetch boundary | Retry / refusal (zero dispatch) | pass | `run-pi-compaction-refusal.mjs` |
 | `b6b7a41` | Pi, pi 1.6.0 | three APIs, fetch boundary | Adapter | pass | `run-pi-wire.mjs` |
 | `b6b7a41` | Pi, pi 1.6.0 | openai-completions, fetch boundary | Session (`--continue`) | pass | `run-pi-extension.mjs` |

@@ -10,6 +10,19 @@ Date: 2026-11-27. macOS (arm64), Node 24.22.3. Branch
 - `0635989` adds [`scripts/e2e/run-pi-fresh-session.mjs`](../../scripts/e2e/run-pi-fresh-session.mjs); `49b6040` and `9964380` harden it after review. The fresh-session row comes from a run at `9964380`.
 - `3fe5cbe` clears inherited pi persistence variables in the lifecycle harness.
 - `4a53abb` adds [`scripts/e2e/run-opencode-lifecycle.mjs`](../../scripts/e2e/run-opencode-lifecycle.mjs), and `227f8be` and `80451a7` harden it after review.
+- `ce082d2`, `8373085`, `ff08c1f` and `86ff04b` restrict where all three
+  harnesses may write. `--out` must be under the system temp directory and
+  must not equal, sit inside, or contain the real home or the repository; the
+  check runs on the canonical path, which must not contain the `PATH`
+  delimiter. Every write then goes into a fresh `mkdtemp` run directory, so a
+  symlink left under `--out` is never followed.
+
+  At `86ff04b` all three harnesses were rerun with the same results (18, 25
+  and 50 checks). The negative controls also held:
+  - `--out` under home, inside the repository, at a repository ancestor, or
+    as a symlink to a directory containing `:` exits 2 and creates nothing.
+  - Runs with symlinks planted at every fixed output path left the symlink
+    targets unchanged.
 
 None of these commits touches `src/`. The built `dist/` therefore matches `0d67011`
 for every run below.

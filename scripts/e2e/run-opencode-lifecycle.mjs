@@ -121,7 +121,27 @@ if (!existsSync(join(DIST_DIR, "index.js"))) {
 }
 
 const BIN = process.env.OPENCODE_BIN || (existsSync(DEFAULT_BIN) ? DEFAULT_BIN : "opencode");
-const version = execFileSync(BIN, ["--version"], { encoding: "utf8" }).trim();
+// Even `--version` initialises OpenCode's data and log directories, so the
+// probe gets the same HOME/XDG isolation as the cases.
+const versionProbeDir = join(OUT, "version-probe");
+mkdirSync(versionProbeDir, { recursive: true });
+const versionEnv = {};
+for (const [key, value] of Object.entries(process.env))
+  if (!/^(OPENCODE_|OPENCHAMBER_|LEAKSHIELD_|CAPTURE_|CLAUDE_)/.test(key)) versionEnv[key] = value;
+Object.assign(versionEnv, {
+  HOME: join(versionProbeDir, "home"),
+  XDG_CONFIG_HOME: join(versionProbeDir, "config"),
+  XDG_DATA_HOME: join(versionProbeDir, "data"),
+  XDG_STATE_HOME: join(versionProbeDir, "state"),
+  XDG_CACHE_HOME: join(versionProbeDir, "cache"),
+  OPENCODE_CONFIG_DIR: join(versionProbeDir, "config", "opencode"),
+  OPENCODE_CONFIG_PROJECT_DISABLE: "1",
+});
+const version = execFileSync(BIN, ["--version"], {
+  encoding: "utf8",
+  cwd: versionProbeDir,
+  env: versionEnv,
+}).trim();
 if (version !== `opencode v${EXPECTED_VERSION}` && version !== EXPECTED_VERSION) {
   console.error(`This harness is pinned to OpenCode ${EXPECTED_VERSION}, received ${version}`);
   process.exit(2);

@@ -81,6 +81,10 @@ writeFileSync(
   `nda_keywords:\n  - ${CANARY}\nprivate_domains: []\ncustom_rules: []\n`,
 );
 process.env.LEAKSHIELD_CONFIG = CONFIG;
+// An inherited LEAKSHIELD_PI_PERSIST would point the shipped extension at the
+// user's real mapping store and OS keychain.
+for (const key of Object.keys(process.env))
+  if (key.startsWith("LEAKSHIELD_PI_PERSIST")) delete process.env[key];
 process.env.PI_OFFLINE = "1";
 process.env.PI_SKIP_VERSION_CHECK = "1";
 process.env.PI_CODING_AGENT_DIR = join(ROOT, "empty-global");

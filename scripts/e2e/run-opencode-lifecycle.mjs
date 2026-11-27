@@ -37,7 +37,7 @@ import {
 } from "node:fs";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
-import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TRANSPARENT_TOKEN } from "./transparent-token.mjs";
 
@@ -54,7 +54,7 @@ const REAL_HOME = realpathSync(HOME_AT_START);
 const REAL_REPO = realpathSync(REPO);
 const isInside = (parent, child) => {
   const rel = relative(parent, child);
-  return rel === "" || (!/^\.\.(?:[\\/]|$)/.test(rel) && !isAbsolute(rel));
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 };
 const realpathAllowingMissing = (target) => {
   const missing = [];

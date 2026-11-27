@@ -50,6 +50,7 @@ import {
   join,
   relative,
   resolve,
+  sep,
 } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -579,7 +580,7 @@ async function runMain() {
   }
   const isInside = (parent, child) => {
     const rel = relative(parent, child);
-    return rel === "" || (!/^\.\.(?:[\\/]|$)/.test(rel) && !isAbsolute(rel));
+    return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
   };
   const realpathAllowingMissing = (target) => {
     const missing = [];

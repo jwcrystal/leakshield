@@ -39,7 +39,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
-import { basename, join, resolve } from "node:path";
+import { basename, delimiter, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const PI_VERSION = "1.6.0";
@@ -71,6 +71,7 @@ const shellQuote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
  */
 function installKeychainStubs(binDir, logPath) {
   mkdirSync(binDir, { recursive: true });
+  writeFileSync(logPath, "");
   for (const name of ["security", "secret-tool"]) {
     const path = join(binDir, name);
     writeFileSync(
@@ -79,7 +80,7 @@ function installKeychainStubs(binDir, logPath) {
     );
     chmodSync(path, 0o755);
   }
-  process.env.PATH = `${binDir}:${process.env.PATH ?? ""}`;
+  process.env.PATH = `${binDir}${delimiter}${process.env.PATH ?? ""}`;
 }
 
 const option = (name) => {
@@ -559,6 +560,12 @@ async function runMain() {
   );
 
   const ROOT = resolve(outArg);
+  if (ROOT.includes(delimiter)) {
+    console.error(
+      `--out must not contain "${delimiter}": the keychain stub directory is prepended to PATH`,
+    );
+    process.exit(2);
+  }
   const requestsDir = join(ROOT, "requests");
   const casesDir = join(ROOT, "cases");
   mkdirSync(requestsDir, { recursive: true });
@@ -779,7 +786,11 @@ async function runMain() {
     keychainLog
       .split("\n")
       .filter(Boolean)
-      .some((line) => line.startsWith("security ")),
+      .some((line) =>
+        line.startsWith(
+          process.platform === "darwin" ? "security " : "secret-tool ",
+        ),
+      ),
     JSON.stringify({
       invocations: keychainLog.split("\n").filter(Boolean).length,
       keyfileExists: existsSync(persist.keyfilePath),

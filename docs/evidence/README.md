@@ -27,6 +27,7 @@
 
 | 檔案 | 狀態 |
 |---|---|
+| [2026-11-24 Claude Code Mod 與 Local Proxy + Hooks](2026-11-24-claude-code-mod-vs-proxy.md) | 研究與驗收計畫（#99；未執行 Mod runtime 驗證，保留 Proxy 基線） |
 | [2026-10-14 三方重測](2026-10-14-three-way-comparison.md) | 現行 |
 | [2026-10-11 官方 Rehydra 來源稽核](2026-10-11-rehydra-current-source-audit.md) | 現行 |
 | [2026-10-11 官方 V2 對照](2026-10-11-official-rehydra-v2-comparison.md) | 已被取代（數字以 10/14 為準；測試方法與 EightDoor 發現仍可參考） |

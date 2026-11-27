@@ -1,0 +1,247 @@
+# Production readiness: host E2E on the 0.5.x candidate
+
+Date: 2026-11-27. macOS (arm64), Node 24.22.3. Branch
+`release/production-readiness`, cut from `main` at `0d67011`.
+
+- `3fc1868` adds the [cross-adapter protection matrix](../../tests/adapter-protection-matrix.test.ts),
+  the [readiness checklist](adapter-production-readiness.md) and the release-workflow
+  step that runs the matrix.
+- `b6b7a41` adds [`scripts/e2e/run-pi-lifecycle.mjs`](../../scripts/e2e/run-pi-lifecycle.mjs), and `149ec6b` tightens its pass criteria. The lifecycle rows below come from a run at `149ec6b`; the other Pi harnesses ran at `b6b7a41`.
+- `0635989` adds [`scripts/e2e/run-pi-fresh-session.mjs`](../../scripts/e2e/run-pi-fresh-session.mjs); `49b6040` and `9964380` harden it after review. The fresh-session row comes from a run at `9964380`.
+- `3fe5cbe` clears inherited pi persistence variables in the lifecycle harness.
+- `4a53abb` adds [`scripts/e2e/run-opencode-lifecycle.mjs`](../../scripts/e2e/run-opencode-lifecycle.mjs), and `227f8be` and `80451a7` harden it after review.
+- `ce082d2`, `8373085`, `ff08c1f` and `86ff04b` restrict where all three
+  harnesses may write. `--out` must be under the system temp directory and
+  must not equal, sit inside, or contain the real home or the repository; the
+  check runs on the canonical path, which must not contain the `PATH`
+  delimiter. Every write then goes into a fresh `mkdtemp` run directory, so a
+  symlink left under `--out` is never followed.
+
+  At `86ff04b` all three harnesses were rerun with the same results (18, 25
+  and 50 checks). The negative controls also held:
+  - `--out` under home, inside the repository, at a repository ancestor, or
+    as a symlink to a directory containing `:` exits 2 and creates nothing.
+  - Runs with symlinks planted at every fixed output path left the symlink
+    targets unchanged.
+
+None of these commits touches `src/`. The built `dist/` therefore matches `0d67011`
+for every run below.
+
+Host versions: pi 1.6.0 (`@earendil-works/pi-coding-agent`, npm-installed into
+a scratch prefix), OpenCode 2.4.1, Claude Code 2.1.330.
+
+Every run used a recording stub on `127.0.0.1`, isolated host config and agent
+directories, a synthetic API key and synthetic canaries. No real provider and
+no user account were involved. Request bodies were kept in a local scratch
+directory, which is not guaranteed to persist. This record reports counts only.
+
+## Automated checks
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit` | pass |
+| `npx vitest run` (74 files, 1984 tests, matrix included) | pass |
+
+The matrix passes on `main` as is. It does not depend on any uncommitted `src/` change.
+
+## Pi 1.6.0: default compaction, branch summary, automatic retry
+
+`run-pi-lifecycle.mjs` drives the pi SDK (`createAgentSession`). It loads the
+shipped `dist/adapters/pi/extension.js` through pi's own `DefaultResourceLoader`
+(`additionalExtensionPaths`), not through a hand-built guard. If the extension
+reports load errors, the case fails.
+
+`settings.json` sets only `defaultProvider` and `defaultModel`, so pi's
+defaults apply. The harness read these from `settings-defaults.js` and printed
+them:
+
+- compaction: enabled, `reserveTokens` 16384, `keepRecentTokens` 20000
+- retry: enabled, `maxRetries` 3, `baseDelayMs` 2000
+- branchSummary: `reserveTokens` 16384
+
+The model uses `openai-completions` with `contextWindow` 200000. The canary is
+the NDA keyword in an isolated `LEAKSHIELD_CONFIG`, the variable
+`extension.ts` reads.
+
+| Case | What happened | Requests (kind: canary / placeholders) | Result |
+|---|---|---|---|
+| Default auto compaction | The stub reported 190000 prompt tokens on the fourth turn. pi emitted `compaction_start` with reason `threshold`, then `compaction_end` with a non-empty summary (`tokensBefore` 190005). pi's own threshold path triggered compaction. It was not called manually and was not an overflow. | 4 model turns before compaction at 0 canary; the summarizer at 0 / 3; 2 model requests after compaction at 0 / 12 and 0 / 13 | pass |
+| Branch summary | `session.navigateTree(firstUserEntry, { summarize: true })` after three canary-bearing turns. A summary entry was created and pi sent its branch-summary prompt to the stub. One more prompt followed. | 3 model turns at 0 canary; the branch summary at 0 / 6; the post-navigation prompt at 0 / 1 | pass |
+| Automatic retry | The first model request got HTTP 503 `overloaded`. pi emitted `auto_retry_start` (attempt 1) and `auto_retry_end` (success). The turn ended with `stopReason: stop`. The retry came from pi's agent loop, not from the provider SDK. | 2 model attempts, both at 0 / 3 | pass |
+
+An independent check found the canary in none of the 14 raw request bodies.
+
+TUI navigation was not exercised: branch summary was driven through the SDK
+method that the TUI's tree navigation calls. Pi's hook-only mode was not
+re-measured. The supported interception mode stays the fetch boundary, so the
+checklist's "Pi interception mode" row is **not applicable** to this candidate.
+
+## Pi 1.6.0: fresh-session isolation
+
+`run-pi-fresh-session.mjs` uses the same loader and default settings, with a
+file-backed `SessionManager`. The stub can reply `ECHO <token>`, using a
+placeholder captured from an earlier request. A scenario counts a token as
+restored when the assistant message holds the canary, and as not restored when
+it still holds the literal placeholder.
+
+The documented policy ([docs/pi.md](../pi.md#sessions-and-persistence)) keeps
+mappings for the life of the process by default, and the encrypted store is
+opt-in.
+
+| Scenario | What happened | Result |
+|---|---|---|
+| A. Same session (positive control) | A token minted in session 1 and echoed back in session 1 was restored. | pass |
+| B. Fresh session, same process | `AgentSessionRuntime.newSession()` (the path pi's `/new` uses) gave a new session ID. The session-1 token stayed literal. | pass |
+| C. Fresh session, new process, store off | A second Node process opened a new session. The session-1 token stayed literal. | pass |
+| D. Fresh session, new process, store on | `LEAKSHIELD_PI_PERSIST=1` in both processes. The fresh session kept the session-1 token literal. As the store's control, resuming session 1 in a new process did restore it. | pass |
+
+Each fresh session (B, C, D) also runs its own control:
+- A canary turn whose request carries placeholders and no canary.
+- An echo of that session's new token, which must be restored.
+
+Without these controls, the fresh-session checks would also pass with the
+extension absent. In a mutation run during development, with the extension
+removed for those sessions, B, C and D all failed.
+
+None of the raw request bodies contains the canary, and neither does
+`summary.json`. The run took 25 checks, and all passed.
+
+Key custody is isolated as well. The mapping-key ladder calls the macOS
+`security` CLI before the keyfile, so a temporary `HOME` alone does not keep it
+away from the real Keychain. The harness puts failing `security` and
+`secret-tool` stubs first on `PATH`, rejects an `--out` path containing the
+`PATH` delimiter, and checks that the stub was called and the isolated keyfile
+was created.
+
+One earlier run, at `0635989` before that fix, read the existing login
+Keychain item (`leakshield` / `sgp-mapping-key`) and used it to encrypt a
+temporary store of synthetic values. The item's modification date is still
+2026-10-20, so nothing was written to it.
+
+### Other Pi harnesses on the same build and host
+
+| Harness | Result |
+|---|---|
+| `run-pi-wire.mjs` (openai-completions, anthropic-messages, openai-responses) | pass (5 / 5 each) |
+| `run-pi-extension.mjs` (read, write, edit, bash, `--continue`) | pass (14 / 14) |
+| `run-pi-compaction-refusal.mjs` (Bedrock switch: manual compaction refused, zero dispatch) | pass (6 / 6) |
+| `run-pi-config-refusal.mjs` | pass (3 / 3) |
+| `run-pi-codemode.mjs` | pass (8 / 8) |
+
+## OpenCode 2.4.1
+
+`scripts/e2e/run-boundary.mjs` ran at `3fc1868` with
+`--only=C6-absent,C10-transparent,C11-transparent-tool,C12-transparent-resume,C13-transparent-restore,C19-ws-http-fallback`.
+
+| Case | Result |
+|---|---|
+| C6-absent (no plugin: control) | expected leak: 6 canary hits at the provider, which confirms the harness detects leaks |
+| C10-transparent | pass: no canary; placeholders in 2 requests |
+| C11-transparent-tool | pass: tool result re-masked |
+| C12-transparent-resume | pass: `--continue` in a new server process, no canary in either run |
+| C13-transparent-restore | pass: the provider never saw the original; the local `read` opened the restored path |
+| C19-ws-http-fallback | pass: WebSocket connect failed, protected HTTP fallback |
+
+The harness also found canaries in OpenCode's local session store, for C6 and
+C10 only. That store is the host's own record of the user's prompt and stays
+outside the provider boundary. It had no log hits and no unattributed captures.
+
+### Compaction, retry and fresh session
+
+[`scripts/e2e/run-opencode-lifecycle.mjs`](../../scripts/e2e/run-opencode-lifecycle.mjs)
+was added in `4a53abb` and hardened after review in `227f8be` and `80451a7`.
+These results come from a run at `80451a7`.
+
+The harness runs real OpenCode 2.4.1 with the plugin in transparent mode
+against a loopback stub. Isolation:
+- The out directory must be under the system temp directory and outside the
+  repository.
+- `OPENCODE_CONFIG_DIR` points inside each case.
+- `OPENCODE_CONFIG_PROJECT_DISABLE=1` turns off OpenCode's discovery of
+  `opencode.json` in the working directory and its ancestors. HOME and XDG
+  overrides alone do not stop that discovery.
+- Inherited `OPENCODE_*` variables are cleared.
+- For each case, `opencode debug config --standalone` must show only the
+  harness config: plugins exactly LeakShield's `dist/`, providers exactly the
+  stub.
+- Keychain access goes through failing `security` and `secret-tool` stubs.
+
+The model limit is 200000 context and 32000 output, with no compaction
+overrides. Host behaviour, as established for the run:
+- **Compaction:** on by default. It triggers when the estimate reaches the
+  context minus a buffer; the default buffer is the larger of 15% of the
+  context and 16000 tokens. That threshold is 170000 here.
+- **Retry:** a 503 is classified `provider.internal` and retried at the session
+  layer, up to 3 times with backoff.
+
+| Case | What happened | Result |
+|---|---|---|
+| Default auto compaction | The stub reported 190000 prompt tokens. OpenCode sent its summarizer request, then a model request carrying the compaction checkpoint. | pass (summarizer 0 canary / 2 placeholders; following request 0 / 10) |
+| Retry | The first model request got 503. OpenCode emitted a session `retry` event (attempt 2, 1.8 s delay) and resent an identical body. | pass (both attempts 0 / placeholders) |
+| Fresh session, new process | Same-session restoration works. A fresh `opencode run` with a new session ID keeps the earlier token literal, and masks and restores its own token. | pass |
+| Fresh session, store on | The fresh session keeps the earlier token literal and restores its own. As the store's control, `--continue` on the minting session in a new process restores the token. The store, the keyfile and the keychain-stub hits all stay inside the case tree. | pass |
+| Two sessions in one host | One `opencode serve` process, same PID, and two `opencode run --server` sessions with distinct IDs. Session 2 keeps session 1's token literal and restores its own. | pass |
+
+Totals: 50 checks pass, and none of the 30 raw request bodies contains a
+canary. With the plugin removed from the isolated config (a mutation run),
+every case and the config-isolation check fail.
+
+### First boundary run
+
+The first boundary attempt failed in every case with zero requests, before
+reaching OpenCode. `OPENCODE_BIN` pointed at `/opt/homebrew/bin/opencode`, a link to a
+`mise` shim that cannot resolve inside the harness's isolated environment. The
+recorded run uses the resolved binary.
+
+## Claude Code 2.1.330
+
+`scripts/e2e/claude-code/run.mjs` ran at `3fc1868`.
+
+| Scenario | Result |
+|---|---|
+| `mask` | pass: 3 Messages requests, no canary, a placeholder in every request, thinking and `tool_result` history forwarded, output restored |
+| `refuse` | pass: no Messages request reached the upstream; Claude Code showed the LeakShield 400 within 1 to 6 attempts (6 refusals logged) |
+
+## Checklist rows
+
+| Candidate SHA | Adapter and host version | Transport and interception mode | Case | Result | Capture or run link |
+|---|---|---|---|---|---|
+| `149ec6b` | Pi, pi 1.6.0 | openai-completions, fetch boundary | Compaction (default auto) | pass | `run-pi-lifecycle.mjs` |
+| `149ec6b` | Pi, pi 1.6.0 | openai-completions, fetch boundary | Compaction (branch summary) | pass | `run-pi-lifecycle.mjs` |
+| `149ec6b` | Pi, pi 1.6.0 | openai-completions, fetch boundary | Retry (503, agent-level) | pass | `run-pi-lifecycle.mjs` |
+| `b6b7a41` | Pi, pi 1.6.0 | Bedrock switch, fetch boundary | Retry / refusal (zero dispatch) | pass | `run-pi-compaction-refusal.mjs` |
+| `b6b7a41` | Pi, pi 1.6.0 | three APIs, fetch boundary | Adapter | pass | `run-pi-wire.mjs` |
+| `b6b7a41` | Pi, pi 1.6.0 | openai-completions, fetch boundary | Session (`--continue`) | pass | `run-pi-extension.mjs` |
+| `9964380` | Pi, pi 1.6.0 | openai-completions, fetch boundary, store off and on | Session (fresh session must not restore an earlier token) | pass | `run-pi-fresh-session.mjs` |
+| `b6b7a41` | Pi, pi 1.6.0 | any | Pi interception mode | not applicable | mode unchanged; see [host capabilities](../host-capabilities.md) |
+| `3fc1868` | OpenCode, 2.4.1 | Chat Completions HTTP, Responses WS→HTTP fallback, transparent | Adapter | pass | `run-boundary.mjs` C10, C11, C13, C19 |
+| `3fc1868` | OpenCode, 2.4.1 | transparent | Session (resume in a new process) | pass | `run-boundary.mjs` C12 |
+| `80451a7` | OpenCode, 2.4.1 | Chat Completions HTTP, transparent, store off and on, one host and new process | Session (fresh session must not restore an earlier token) | pass | `run-opencode-lifecycle.mjs` |
+| `80451a7` | OpenCode, 2.4.1 | Chat Completions HTTP, transparent | Compaction (default auto) | pass | `run-opencode-lifecycle.mjs` |
+| `80451a7` | OpenCode, 2.4.1 | Chat Completions HTTP, transparent | Retry (503, session-level) | pass | `run-opencode-lifecycle.mjs` |
+| `3fc1868` | Claude Code, 2.1.330 | loopback proxy | Adapter (mask, refuse) | pass | `claude-code/run.mjs` |
+| `3fc1868` | Claude Code, 2.1.330 | loopback proxy | Session (resume, fresh) | unverified | none |
+| `3fc1868` | Claude Code, 2.1.330 | loopback proxy | Compaction | unverified | no probe ([#111](https://github.com/jwcrystal/leakshield/issues/111)) |
+| `3fc1868` | Claude Code, 2.1.330 | loopback proxy | Retry | unverified | none |
+
+## Verdict
+
+- **Pi on pi 1.6.0: ready under the checklist.** Every row for the fetch
+  boundary has host evidence and passes: default compaction, branch summary,
+  automatic retry, refusal, the adapter case, resume and fresh-session
+  isolation. The scope is pi 1.6.0 on macOS with loopback stubs. pi 1.6.1 (the
+  current npm `latest`) was not run.
+- **OpenCode on 2.4.1: ready under the checklist.** Every row passes:
+  - masking, tool restoration and the WebSocket fallback
+  - resume
+  - default auto compaction
+  - session-level retry
+  - fresh-session isolation, both in a new process and within one host
+
+  Compaction and retry were run on Chat Completions HTTP only, not on the
+  Responses or WebSocket transports.
+- **Claude Code on 2.1.330: not ready under the checklist.** Mask and refuse
+  pass. Session, compaction and retry have no host evidence.
+
+Not covered by this record: real providers, Windows and Linux, pi 1.6.1, the
+TUI tree navigation, and request headers (only request bodies were scanned).

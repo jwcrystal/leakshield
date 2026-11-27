@@ -7,8 +7,9 @@ Date: 2026-11-27. macOS (arm64), Node 24.22.3. Branch
   the [readiness checklist](adapter-production-readiness.md) and the release-workflow
   step that runs the matrix.
 - `b6b7a41` adds [`scripts/e2e/run-pi-lifecycle.mjs`](../../scripts/e2e/run-pi-lifecycle.mjs), and `149ec6b` tightens its pass criteria. The lifecycle rows below come from a run at `149ec6b`; the other Pi harnesses ran at `b6b7a41`.
+- `0635989` adds [`scripts/e2e/run-pi-fresh-session.mjs`](../../scripts/e2e/run-pi-fresh-session.mjs); `49b6040` and `9964380` harden it after review. The fresh-session row comes from a run at `9964380`.
 
-Neither commit touches `src/`. The built `dist/` therefore matches `0d67011`
+None of these commits touches `src/`. The built `dist/` therefore matches `0d67011`
 for every run below.
 
 Host versions: pi 1.6.0 (`@earendil-works/pi-coding-agent`, npm-installed into
@@ -59,6 +60,48 @@ TUI navigation was not exercised: branch summary was driven through the SDK
 method that the TUI's tree navigation calls. Pi's hook-only mode was not
 re-measured. The supported interception mode stays the fetch boundary, so the
 checklist's "Pi interception mode" row is **not applicable** to this candidate.
+
+## Pi 1.6.0: fresh-session isolation
+
+`run-pi-fresh-session.mjs` uses the same loader and default settings, with a
+file-backed `SessionManager`. The stub can reply `ECHO <token>`, using a
+placeholder captured from an earlier request. A scenario counts a token as
+restored when the assistant message holds the canary, and as not restored when
+it still holds the literal placeholder.
+
+The documented policy ([docs/pi.md](../pi.md#sessions-and-persistence)) keeps
+mappings for the life of the process by default, and the encrypted store is
+opt-in.
+
+| Scenario | What happened | Result |
+|---|---|---|
+| A. Same session (positive control) | A token minted in session 1 and echoed back in session 1 was restored. | pass |
+| B. Fresh session, same process | `AgentSessionRuntime.newSession()` (the path pi's `/new` uses) gave a new session ID. The session-1 token stayed literal. | pass |
+| C. Fresh session, new process, store off | A second Node process opened a new session. The session-1 token stayed literal. | pass |
+| D. Fresh session, new process, store on | `LEAKSHIELD_PI_PERSIST=1` in both processes. The fresh session kept the session-1 token literal. As the store's control, resuming session 1 in a new process did restore it. | pass |
+
+Each fresh session (B, C, D) also runs its own control:
+- A canary turn whose request carries placeholders and no canary.
+- An echo of that session's new token, which must be restored.
+
+Without these controls, the fresh-session checks would also pass with the
+extension absent. In a mutation run during development, with the extension
+removed for those sessions, B, C and D all failed.
+
+None of the raw request bodies contains the canary, and neither does
+`summary.json`. The run took 25 checks, and all passed.
+
+Key custody is isolated as well. The mapping-key ladder calls the macOS
+`security` CLI before the keyfile, so a temporary `HOME` alone does not keep it
+away from the real Keychain. The harness puts failing `security` and
+`secret-tool` stubs first on `PATH`, rejects an `--out` path containing the
+`PATH` delimiter, and checks that the stub was called and the isolated keyfile
+was created.
+
+One earlier run, at `0635989` before that fix, read the existing login
+Keychain item (`leakshield` / `sgp-mapping-key`) and used it to encrypt a
+temporary store of synthetic values. The item's modification date is still
+2026-10-20, so nothing was written to it.
 
 ### Other Pi harnesses on the same build and host
 
@@ -112,7 +155,7 @@ recorded run uses the resolved binary.
 | `b6b7a41` | Pi, pi 1.6.0 | Bedrock switch, fetch boundary | Retry / refusal (zero dispatch) | pass | `run-pi-compaction-refusal.mjs` |
 | `b6b7a41` | Pi, pi 1.6.0 | three APIs, fetch boundary | Adapter | pass | `run-pi-wire.mjs` |
 | `b6b7a41` | Pi, pi 1.6.0 | openai-completions, fetch boundary | Session (`--continue`) | pass | `run-pi-extension.mjs` |
-| `b6b7a41` | Pi, pi 1.6.0 | any | Session (fresh session must not restore an earlier token) | unverified | none |
+| `9964380` | Pi, pi 1.6.0 | openai-completions, fetch boundary, store off and on | Session (fresh session must not restore an earlier token) | pass | `run-pi-fresh-session.mjs` |
 | `b6b7a41` | Pi, pi 1.6.0 | any | Pi interception mode | not applicable | mode unchanged; see [host capabilities](../host-capabilities.md) |
 | `3fc1868` | OpenCode, 2.4.1 | Chat Completions HTTP, Responses WS→HTTP fallback, transparent | Adapter | pass | `run-boundary.mjs` C10, C11, C13, C19 |
 | `3fc1868` | OpenCode, 2.4.1 | transparent | Session (resume in a new process) | pass | `run-boundary.mjs` C12 |
@@ -126,11 +169,11 @@ recorded run uses the resolved binary.
 
 ## Verdict
 
-- **Pi on pi 1.6.0: not yet signed off; one row remains.** Default
-  compaction, branch summary, automatic retry, refusal, the adapter case and
-  resume all have host evidence and pass. Fresh-session isolation has no host
-  evidence, and under the checklist that unverified row still blocks.
-  pi 1.6.1 (the current npm `latest`) was not run.
+- **Pi on pi 1.6.0: ready under the checklist.** Every row for the fetch
+  boundary has host evidence and passes: default compaction, branch summary,
+  automatic retry, refusal, the adapter case, resume and fresh-session
+  isolation. The scope is pi 1.6.0 on macOS with loopback stubs. pi 1.6.1 (the
+  current npm `latest`) was not run.
 - **OpenCode on 2.4.1: not ready under the checklist.** Masking, tool
   restoration, resume and WebSocket fallback pass. Compaction, retry and
   fresh-session isolation have no host evidence, and the checklist treats an

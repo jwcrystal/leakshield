@@ -40,7 +40,7 @@
 
 | 日期 | 檔案 | 狀態 |
 |---|---|---|
-| 11-27 | [Production readiness：三個 host 的 E2E 與 pi 預設 compaction／branch summary／自動 retry](2026-11-27-production-readiness.md) | 現行（pi 1.6.0、OpenCode 2.4.1、Claude Code 2.1.330；未驗證項目見檔內） |
+| 11-27 | [Production readiness：三個 host 的 E2E 與 pi 預設 compaction／branch summary／自動 retry／新 session 隔離](2026-11-27-production-readiness.md) | 現行（pi 1.6.0 依清單可上線；OpenCode 2.4.1、Claude Code 2.1.330 仍有未驗證項目，見檔內） |
 | 11-24 | [pi 1.6.0 真實 provider：行程內 extension 的遮罩與還原](2026-11-24-pi-real-provider.md) | 現行（macOS，Command Code／openai-completions） |
 | 11-24 | [pi 套件入口與打包安裝驗證](2026-11-24-pi-package-install.md) | 現行（Node 22.19／24，三種 API） |
 | 11-23 | [pi hook-only：內容 hooks、背景請求與明確取消（#118）](2026-11-23-pi-hook-only-feasibility.md) | 研究（37 情境、146 斷言；尚非正式模式） |

@@ -98,9 +98,11 @@ if (OUT_ARG.includes(delimiter)) {
 }
 const REAL_OUT = realpathAllowingMissing(OUT_ARG);
 if (
+  REAL_OUT.includes(delimiter) ||
   REAL_OUT === REAL_TMP ||
   !isInside(REAL_TMP, REAL_OUT) ||
   isInside(REAL_REPO, REAL_OUT) ||
+  isInside(REAL_OUT, REAL_REPO) ||
   isInside(REAL_HOME, REAL_OUT) ||
   isInside(REAL_OUT, REAL_HOME)
 ) {

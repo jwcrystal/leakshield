@@ -29,6 +29,7 @@ import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import {
   basename,
+  delimiter,
   dirname,
   isAbsolute,
   join,
@@ -92,9 +93,11 @@ const REAL_TMP = realpathSync(tmpdir());
 const REAL_HOME = realpathSync(homedir());
 const REAL_OUT = realpathAllowingMissing(out);
 if (
+  REAL_OUT.includes(delimiter) ||
   REAL_OUT === REAL_TMP ||
   !isInside(REAL_TMP, REAL_OUT) ||
   isInside(realpathSync(REPO), REAL_OUT) ||
+  isInside(REAL_OUT, realpathSync(REPO)) ||
   isInside(REAL_HOME, REAL_OUT) ||
   isInside(REAL_OUT, REAL_HOME)
 ) {

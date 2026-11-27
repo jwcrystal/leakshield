@@ -29,6 +29,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -90,19 +91,29 @@ if (!outArg) {
   );
   process.exit(2);
 }
-const OUT = resolve(outArg);
-if (OUT.includes(delimiter)) {
+const OUT_ARG = resolve(outArg);
+if (OUT_ARG.includes(delimiter)) {
   console.error(`--out must not contain "${delimiter}": the keychain stub directory is prepended to PATH`);
   process.exit(2);
 }
-const REAL_OUT = realpathAllowingMissing(OUT);
-if (REAL_OUT === REAL_TMP || !isInside(REAL_TMP, REAL_OUT) || isInside(REAL_REPO, REAL_OUT)) {
+const REAL_OUT = realpathAllowingMissing(OUT_ARG);
+if (
+  REAL_OUT === REAL_TMP ||
+  !isInside(REAL_TMP, REAL_OUT) ||
+  isInside(REAL_REPO, REAL_OUT) ||
+  isInside(REAL_HOME, REAL_OUT) ||
+  isInside(REAL_OUT, REAL_HOME)
+) {
   console.error(
     `--out must be a directory under os.tmpdir() (${REAL_TMP}), outside the repository (${REAL_REPO}) and the real home (${REAL_HOME}); got ${REAL_OUT}`,
   );
   process.exit(2);
 }
 mkdirSync(REAL_OUT, { recursive: true });
+// Every write and removal goes into a fresh directory this run created, so a
+// symlink left under --out by an earlier run cannot redirect them.
+const OUT = mkdtempSync(join(REAL_OUT, "run-"));
+console.log(`run directory: ${OUT}`);
 const selected = typeof onlyOption === "string"
   ? onlyOption.split(",").map((name) => name.trim()).filter(Boolean)
   : ALL_CASES;
@@ -154,9 +165,6 @@ try {
 const REQUESTS_DIR = join(OUT, "requests");
 const WORK_ROOT = join(OUT, "work");
 const LOGS_DIR = join(OUT, "logs");
-rmSync(REQUESTS_DIR, { recursive: true, force: true });
-rmSync(WORK_ROOT, { recursive: true, force: true });
-rmSync(LOGS_DIR, { recursive: true, force: true });
 mkdirSync(REQUESTS_DIR, { recursive: true });
 mkdirSync(WORK_ROOT, { recursive: true });
 mkdirSync(LOGS_DIR, { recursive: true });
@@ -1468,6 +1476,8 @@ const summary = {
       out: REAL_OUT,
       outUnderTmp: isInside(REAL_TMP, REAL_OUT),
       outOutsideRepo: !isInside(REAL_REPO, REAL_OUT),
+      outOutsideHome: !isInside(REAL_HOME, REAL_OUT) && !isInside(REAL_OUT, REAL_HOME),
+      runDirectory: OUT,
       home: REAL_HOME,
       configDir: "OPENCODE_CONFIG_DIR=<case>/config/opencode",
       projectDiscovery: "disabled via OPENCODE_CONFIG_PROJECT_DISABLE=1",

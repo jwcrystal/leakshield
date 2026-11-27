@@ -34,12 +34,23 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
-import { basename, delimiter, join, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import {
+  basename,
+  delimiter,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 import { pathToFileURL } from "node:url";
 
 const PI_VERSION = "1.6.0";
@@ -559,13 +570,48 @@ async function runMain() {
     pathToFileURL(join(REPO, "dist/decision/pseudonymization.js")).href
   );
 
-  const ROOT = resolve(outArg);
-  if (ROOT.includes(delimiter)) {
+  const outPath = resolve(outArg);
+  if (outPath.includes(delimiter)) {
     console.error(
       `--out must not contain "${delimiter}": the keychain stub directory is prepended to PATH`,
     );
     process.exit(2);
   }
+  const isInside = (parent, child) => {
+    const rel = relative(parent, child);
+    return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  };
+  const realpathAllowingMissing = (target) => {
+    const missing = [];
+    let current = resolve(target);
+    while (!existsSync(current)) {
+      missing.unshift(basename(current));
+      const parent = dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+    return join(realpathSync(current), ...missing);
+  };
+  const REAL_TMP = realpathSync(tmpdir());
+  const REAL_HOME = realpathSync(homedir());
+  const REAL_OUT = realpathAllowingMissing(outPath);
+  if (
+    REAL_OUT === REAL_TMP ||
+    !isInside(REAL_TMP, REAL_OUT) ||
+    isInside(realpathSync(REPO), REAL_OUT) ||
+    isInside(REAL_HOME, REAL_OUT) ||
+    isInside(REAL_OUT, REAL_HOME)
+  ) {
+    console.error(
+      `--out must be a directory under os.tmpdir() (${REAL_TMP}), outside the repository and the real home; got ${REAL_OUT}`,
+    );
+    process.exit(2);
+  }
+  mkdirSync(REAL_OUT, { recursive: true });
+  // Writes go into a fresh directory this run created, so a symlink left under
+  // --out by an earlier run cannot redirect them.
+  const ROOT = mkdtempSync(join(REAL_OUT, "run-"));
+  console.log(`run directory: ${ROOT}`);
   const requestsDir = join(ROOT, "requests");
   const casesDir = join(ROOT, "cases");
   mkdirSync(requestsDir, { recursive: true });

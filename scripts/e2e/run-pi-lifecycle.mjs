@@ -20,11 +20,21 @@ import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
-import { join, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 import { pathToFileURL } from "node:url";
 
 const option = (name) => {
@@ -63,7 +73,41 @@ if (!existsSync(extensionPath)) {
   console.error(`missing ${extensionPath}; run npm run build first`);
   process.exit(2);
 }
-const ROOT = resolve(out);
+const isInside = (parent, child) => {
+  const rel = relative(parent, child);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+};
+const realpathAllowingMissing = (target) => {
+  const missing = [];
+  let current = resolve(target);
+  while (!existsSync(current)) {
+    missing.unshift(basename(current));
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return join(realpathSync(current), ...missing);
+};
+const REAL_TMP = realpathSync(tmpdir());
+const REAL_HOME = realpathSync(homedir());
+const REAL_OUT = realpathAllowingMissing(out);
+if (
+  REAL_OUT === REAL_TMP ||
+  !isInside(REAL_TMP, REAL_OUT) ||
+  isInside(realpathSync(REPO), REAL_OUT) ||
+  isInside(REAL_HOME, REAL_OUT) ||
+  isInside(REAL_OUT, REAL_HOME)
+) {
+  console.error(
+    `--out must be a directory under os.tmpdir() (${REAL_TMP}), outside the repository and the real home; got ${REAL_OUT}`,
+  );
+  process.exit(2);
+}
+mkdirSync(REAL_OUT, { recursive: true });
+// Writes go into a fresh directory this run created, so a symlink left under
+// --out by an earlier run cannot redirect them.
+const ROOT = mkdtempSync(join(REAL_OUT, "run-"));
+console.log(`run directory: ${ROOT}`);
 const requestsDir = join(ROOT, "requests");
 mkdirSync(requestsDir, { recursive: true });
 mkdirSync(join(ROOT, "cases"), { recursive: true });

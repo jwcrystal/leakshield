@@ -8,6 +8,8 @@ Date: 2026-11-27. macOS (arm64), Node 24.22.3. Branch
   step that runs the matrix.
 - `b6b7a41` adds [`scripts/e2e/run-pi-lifecycle.mjs`](../../scripts/e2e/run-pi-lifecycle.mjs), and `149ec6b` tightens its pass criteria. The lifecycle rows below come from a run at `149ec6b`; the other Pi harnesses ran at `b6b7a41`.
 - `0635989` adds [`scripts/e2e/run-pi-fresh-session.mjs`](../../scripts/e2e/run-pi-fresh-session.mjs); `49b6040` and `9964380` harden it after review. The fresh-session row comes from a run at `9964380`.
+- `3fe5cbe` clears inherited pi persistence variables in the lifecycle harness.
+- `4a53abb` adds [`scripts/e2e/run-opencode-lifecycle.mjs`](../../scripts/e2e/run-opencode-lifecycle.mjs), and `227f8be` and `80451a7` harden it after review.
 
 None of these commits touches `src/`. The built `dist/` therefore matches `0d67011`
 for every run below.
@@ -131,8 +133,50 @@ The harness also found canaries in OpenCode's local session store, for C6 and
 C10 only. That store is the host's own record of the user's prompt and stays
 outside the provider boundary. It had no log hits and no unattributed captures.
 
-The first attempt failed in every case with zero requests, before reaching
-OpenCode. `OPENCODE_BIN` pointed at `/opt/homebrew/bin/opencode`, a link to a
+### Compaction, retry and fresh session
+
+[`scripts/e2e/run-opencode-lifecycle.mjs`](../../scripts/e2e/run-opencode-lifecycle.mjs)
+was added in `4a53abb` and hardened after review in `227f8be` and `80451a7`.
+These results come from a run at `80451a7`.
+
+The harness runs real OpenCode 2.4.1 with the plugin in transparent mode
+against a loopback stub. Isolation:
+- The out directory must be under the system temp directory and outside the
+  repository.
+- `OPENCODE_CONFIG_DIR` points inside each case.
+- `OPENCODE_CONFIG_PROJECT_DISABLE=1` turns off OpenCode's discovery of
+  `opencode.json` in the working directory and its ancestors. HOME and XDG
+  overrides alone do not stop that discovery.
+- Inherited `OPENCODE_*` variables are cleared.
+- For each case, `opencode debug config --standalone` must show only the
+  harness config: plugins exactly LeakShield's `dist/`, providers exactly the
+  stub.
+- Keychain access goes through failing `security` and `secret-tool` stubs.
+
+The model limit is 200000 context and 32000 output, with no compaction
+overrides. Host behaviour, as established for the run:
+- **Compaction:** on by default. It triggers when the estimate reaches the
+  context minus a buffer; the default buffer is the larger of 15% of the
+  context and 16000 tokens. That threshold is 170000 here.
+- **Retry:** a 503 is classified `provider.internal` and retried at the session
+  layer, up to 3 times with backoff.
+
+| Case | What happened | Result |
+|---|---|---|
+| Default auto compaction | The stub reported 190000 prompt tokens. OpenCode sent its summarizer request, then a model request carrying the compaction checkpoint. | pass (summarizer 0 canary / 2 placeholders; following request 0 / 10) |
+| Retry | The first model request got 503. OpenCode emitted a session `retry` event (attempt 2, 1.8 s delay) and resent an identical body. | pass (both attempts 0 / placeholders) |
+| Fresh session, new process | Same-session restoration works. A fresh `opencode run` with a new session ID keeps the earlier token literal, and masks and restores its own token. | pass |
+| Fresh session, store on | The fresh session keeps the earlier token literal and restores its own. As the store's control, `--continue` on the minting session in a new process restores the token. The store, the keyfile and the keychain-stub hits all stay inside the case tree. | pass |
+| Two sessions in one host | One `opencode serve` process, same PID, and two `opencode run --server` sessions with distinct IDs. Session 2 keeps session 1's token literal and restores its own. | pass |
+
+Totals: 50 checks pass, and none of the 30 raw request bodies contains a
+canary. With the plugin removed from the isolated config (a mutation run),
+every case and the config-isolation check fail.
+
+### First boundary run
+
+The first boundary attempt failed in every case with zero requests, before
+reaching OpenCode. `OPENCODE_BIN` pointed at `/opt/homebrew/bin/opencode`, a link to a
 `mise` shim that cannot resolve inside the harness's isolated environment. The
 recorded run uses the resolved binary.
 
@@ -159,9 +203,9 @@ recorded run uses the resolved binary.
 | `b6b7a41` | Pi, pi 1.6.0 | any | Pi interception mode | not applicable | mode unchanged; see [host capabilities](../host-capabilities.md) |
 | `3fc1868` | OpenCode, 2.4.1 | Chat Completions HTTP, Responses WS→HTTP fallback, transparent | Adapter | pass | `run-boundary.mjs` C10, C11, C13, C19 |
 | `3fc1868` | OpenCode, 2.4.1 | transparent | Session (resume in a new process) | pass | `run-boundary.mjs` C12 |
-| `3fc1868` | OpenCode, 2.4.1 | transparent | Session (fresh session must not restore an earlier token) | unverified | none |
-| `3fc1868` | OpenCode, 2.4.1 | transparent | Compaction | unverified | no harness |
-| `3fc1868` | OpenCode, 2.4.1 | transparent | Retry | unverified | no harness |
+| `80451a7` | OpenCode, 2.4.1 | Chat Completions HTTP, transparent, store off and on, one host and new process | Session (fresh session must not restore an earlier token) | pass | `run-opencode-lifecycle.mjs` |
+| `80451a7` | OpenCode, 2.4.1 | Chat Completions HTTP, transparent | Compaction (default auto) | pass | `run-opencode-lifecycle.mjs` |
+| `80451a7` | OpenCode, 2.4.1 | Chat Completions HTTP, transparent | Retry (503, session-level) | pass | `run-opencode-lifecycle.mjs` |
 | `3fc1868` | Claude Code, 2.1.330 | loopback proxy | Adapter (mask, refuse) | pass | `claude-code/run.mjs` |
 | `3fc1868` | Claude Code, 2.1.330 | loopback proxy | Session (resume, fresh) | unverified | none |
 | `3fc1868` | Claude Code, 2.1.330 | loopback proxy | Compaction | unverified | no probe ([#111](https://github.com/jwcrystal/leakshield/issues/111)) |
@@ -174,10 +218,15 @@ recorded run uses the resolved binary.
   automatic retry, refusal, the adapter case, resume and fresh-session
   isolation. The scope is pi 1.6.0 on macOS with loopback stubs. pi 1.6.1 (the
   current npm `latest`) was not run.
-- **OpenCode on 2.4.1: not ready under the checklist.** Masking, tool
-  restoration, resume and WebSocket fallback pass. Compaction, retry and
-  fresh-session isolation have no host evidence, and the checklist treats an
-  unverified supported path as blocking.
+- **OpenCode on 2.4.1: ready under the checklist.** Every row passes:
+  - masking, tool restoration and the WebSocket fallback
+  - resume
+  - default auto compaction
+  - session-level retry
+  - fresh-session isolation, both in a new process and within one host
+
+  Compaction and retry were run on Chat Completions HTTP only, not on the
+  Responses or WebSocket transports.
 - **Claude Code on 2.1.330: not ready under the checklist.** Mask and refuse
   pass. Session, compaction and retry have no host evidence.
 

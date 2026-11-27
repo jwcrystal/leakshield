@@ -14,6 +14,15 @@
  * C and D spawn this script as separate Node processes because the extension
  * installs its guard once per process on globalThis.
  *
+ * Each fresh session also carries its own positive control: a canary-bearing
+ * turn must reach the provider masked (no canary, at least one placeholder),
+ * and echoing that session's new placeholder must come back as the canary.
+ * Without those controls a fresh session that omitted the extension would
+ * still pass every literal-token check.
+ *
+ * Keychain CLIs are stubbed inside the out tree and prepended to PATH so the
+ * mapping key comes from the isolated keyfile, never the user's real Keychain.
+ *
  * Every request body is written under `<out>/requests/`. The summary reports
  * booleans and counts only; the canary never leaves the guard config.
  *
@@ -22,6 +31,7 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -50,6 +60,27 @@ const LOADER_OPTIONS = {
 };
 const redact = (text) => String(text ?? "").split(CANARY).join("<canary>");
 const countOccurrences = (text, needle) => text.split(needle).length - 1;
+
+const shellQuote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
+
+/**
+ * Both platform keychain probes resolve their CLI through PATH, so a temp
+ * HOME does not isolate them: `security` would still reach the real login
+ * Keychain. Prepend stubs that fail (exit 1) and log the invocation, which
+ * makes the resolver step down to the isolated keyfile.
+ */
+function installKeychainStubs(binDir, logPath) {
+  mkdirSync(binDir, { recursive: true });
+  for (const name of ["security", "secret-tool"]) {
+    const path = join(binDir, name);
+    writeFileSync(
+      path,
+      `#!/bin/sh\nprintf '%s %s\\n' ${shellQuote(name)} "$*" >> ${shellQuote(logPath)}\nexit 1\n`,
+    );
+    chmodSync(path, 0o755);
+  }
+  process.env.PATH = `${binDir}:${process.env.PATH ?? ""}`;
+}
 
 const option = (name) => {
   const index = process.argv.indexOf(name);
@@ -154,13 +185,17 @@ function startStub(config, prefix) {
       state.capturedToken = tokens[0];
     const name = `${phase}--${String(index).padStart(3, "0")}.json`;
     writeFileSync(join(config.requestsDir, name), body);
-    state.requests.push({
+    const recordedRequest = {
       phase,
       index,
       file: basename(name),
       canaryCount: countOccurrences(body, CANARY),
       tokenCount: tokens.length,
-    });
+      placeholderCount: tokens.length,
+    };
+    state.lastRequest = recordedRequest;
+    state.lastTokens = tokens;
+    state.requests.push(recordedRequest);
     stream(
       response,
       state.echoToken === null ? "synthetic ok" : `ECHO ${state.echoToken}`,
@@ -225,6 +260,12 @@ async function runChild(config) {
   };
   let stub;
   try {
+    if (
+      config.binDir &&
+      !(process.env.PATH ?? "").startsWith(`${config.binDir}:`)
+    ) {
+      process.env.PATH = `${config.binDir}:${process.env.PATH ?? ""}`;
+    }
     process.chdir(config.cwd);
     process.env.HOME = config.home;
     process.env.XDG_DATA_HOME = join(config.home, ".local/share");
@@ -365,6 +406,25 @@ async function runChild(config) {
         persisted: second.sessionManager.isPersisted(),
       });
       result.b = { sessionId: secondId, ...facts(fresh, token) };
+
+      stub.state.phase = "B-control";
+      stub.state.echoToken = null;
+      await echoIn(
+        second,
+        `Synthetic NDA note for the fresh-session check: ${CANARY}.`,
+      );
+      const controlRequest = stub.state.lastRequest ?? null;
+      const controlToken = stub.state.lastTokens?.at(-1) ?? null;
+      stub.state.echoToken = controlToken;
+      const controlEcho = await echoIn(
+        second,
+        "Echo the protected value from the previous turn.",
+      );
+      result.freshControl = {
+        request: controlRequest,
+        token: controlToken,
+        restored: facts(controlEcho, controlToken),
+      };
       await runtime.dispose();
     } else {
       const sessionDir = join(config.agentDir, "sessions");
@@ -407,6 +467,30 @@ async function runChild(config) {
       });
       result.assistant = facts(message, token ?? null);
       if (config.mint) result.token = token;
+
+      if (config.freshControl) {
+        const controlPhase = `${config.phase}-control`;
+        stub.state.phase = controlPhase;
+        stub.state.echoToken = null;
+        const before = stub.state.requests.length;
+        await session.prompt(
+          `Synthetic NDA note for the fresh-session check: ${CANARY}.`,
+        );
+        const recorded = stub.state.requests
+          .slice(before)
+          .filter((entry) => entry.phase === controlPhase);
+        const controlRequest = recorded.at(-1) ?? null;
+        const controlToken = stub.state.lastTokens?.at(-1) ?? null;
+        stub.state.echoToken = controlToken;
+        await session.prompt(
+          "Echo the protected value from the previous turn.",
+        );
+        result.freshControl = {
+          request: controlRequest,
+          token: controlToken,
+          restored: facts(assistantText(session), controlToken),
+        };
+      }
     }
 
     result.requests = stub.state.requests;
@@ -479,6 +563,9 @@ async function runMain() {
   const casesDir = join(ROOT, "cases");
   mkdirSync(requestsDir, { recursive: true });
   mkdirSync(casesDir, { recursive: true });
+  const stubBinDir = join(ROOT, "keychain-stub");
+  const stubLogPath = join(ROOT, "keychain-stub.log");
+  installKeychainStubs(stubBinDir, stubLogPath);
   const configPath = join(ROOT, "guard.config.yaml");
   writeFileSync(
     configPath,
@@ -521,6 +608,7 @@ async function runMain() {
       cwd: agentDir,
       configPath,
       requestsDir,
+      binDir: stubBinDir,
       resultPath: join(caseDir, `result-${tag}.json`),
       ...extra,
     };
@@ -551,6 +639,22 @@ async function runMain() {
   const abDir = join(casesDir, "A-B");
   const cDir = join(casesDir, "C");
   const dDir = join(casesDir, "D");
+
+  const controlRequestOk = (control) =>
+    control?.request?.canaryCount === 0 &&
+    (control?.request?.placeholderCount ?? 0) > 0;
+  const controlRestoreOk = (control) =>
+    control?.restored?.hasCanary === true &&
+    control?.restored?.hasToken === false;
+  const controlDetail = (control) =>
+    JSON.stringify({
+      request: control?.request ?? null,
+      restored: control?.restored ?? null,
+    });
+  const tokenDiffers = (control, previous) =>
+    typeof control?.token === "string" &&
+    control.token.length > 0 &&
+    control.token !== previous;
 
   const ab = await runChildConfig(
     "A/B: harness ran in one real pi process",
@@ -590,6 +694,16 @@ async function runMain() {
     b?.hasCanary === false,
     JSON.stringify({ hasCanary: b?.hasCanary }),
   );
+  record(
+    "B: fresh control request masked the canary to a placeholder",
+    controlRequestOk(ab?.freshControl),
+    controlDetail(ab?.freshControl),
+  );
+  record(
+    "B: fresh control echo of the new placeholder was restored to the canary",
+    controlRestoreOk(ab?.freshControl),
+    controlDetail(ab?.freshControl),
+  );
 
   const cMint = await runChildConfig(
     "C: mint process ran",
@@ -605,6 +719,7 @@ async function runMain() {
     caseConfig(cDir, "C-fresh", {
       echoToken: cToken,
       phase: "C-fresh",
+      freshControl: true,
     }),
   );
   record(
@@ -630,6 +745,16 @@ async function runMain() {
     cFresh?.assistant?.hasCanary === false,
     JSON.stringify({ hasCanary: cFresh?.assistant?.hasCanary }),
   );
+  record(
+    "C: fresh control request masked the canary to a placeholder",
+    controlRequestOk(cFresh?.freshControl),
+    controlDetail(cFresh?.freshControl),
+  );
+  record(
+    "C: fresh control echo of the new placeholder was restored to the canary",
+    controlRestoreOk(cFresh?.freshControl),
+    controlDetail(cFresh?.freshControl),
+  );
 
   const persist = {
     enabled: true,
@@ -646,12 +771,32 @@ async function runMain() {
     }),
   );
   const dToken = dMint?.token ?? null;
+  const keychainLog = existsSync(stubLogPath)
+    ? readFileSync(stubLogPath, "utf8").trim()
+    : "";
+  record(
+    "D: keychain stub intercepted the mapping-key probe",
+    keychainLog
+      .split("\n")
+      .filter(Boolean)
+      .some((line) => line.startsWith("security ")),
+    JSON.stringify({
+      invocations: keychainLog.split("\n").filter(Boolean).length,
+      keyfileExists: existsSync(persist.keyfilePath),
+    }),
+  );
+  record(
+    "D: mapping key came from the isolated keyfile",
+    existsSync(persist.keyfilePath),
+    JSON.stringify({ keyfileExists: existsSync(persist.keyfilePath) }),
+  );
   const dFresh = await runChildConfig(
     "D: fresh process ran with persistence on",
     caseConfig(dDir, "D-fresh", {
       echoToken: dToken,
       phase: "D-fresh",
       persist,
+      freshControl: true,
     }),
   );
   const dSessionFile = dMint?.sessions[0]?.file ?? null;
@@ -692,6 +837,16 @@ async function runMain() {
     JSON.stringify({ hasCanary: dFresh?.assistant?.hasCanary }),
   );
   record(
+    "D: fresh control request masked the canary to a placeholder",
+    controlRequestOk(dFresh?.freshControl),
+    controlDetail(dFresh?.freshControl),
+  );
+  record(
+    "D: fresh control echo of the new placeholder was restored to the canary",
+    controlRestoreOk(dFresh?.freshControl),
+    controlDetail(dFresh?.freshControl),
+  );
+  record(
     "D control: resumed session restored the token from the store",
     !!dResume &&
       dResume.sessions[0]?.id === dMint?.sessions[0]?.id &&
@@ -722,8 +877,14 @@ async function runMain() {
     requests: tags.reduce((sum, tag) => sum + (scan.get(tag)?.requests ?? 0), 0),
     canary: tags.reduce((sum, tag) => sum + (scan.get(tag)?.canary ?? 0), 0),
   });
-  const cStats = stats(["C-mint", "C-fresh"]);
-  const dStats = stats(["D-mint", "D-fresh", "D-resume"]);
+  const bStats = stats(["B", "B-control"]);
+  const cStats = stats(["C-mint", "C-fresh", "C-fresh-control"]);
+  const dStats = stats([
+    "D-mint",
+    "D-fresh",
+    "D-fresh-control",
+    "D-resume",
+  ]);
 
   record(
     "A: every recorded request carries no canary",
@@ -732,8 +893,8 @@ async function runMain() {
   );
   record(
     "B: every recorded request carries no canary",
-    (scan.get("B")?.canary ?? 0) === 0 && (scan.get("B")?.requests ?? 0) > 0,
-    JSON.stringify({ requests: scan.get("B")?.requests ?? 0, canary: scan.get("B")?.canary ?? 0 }),
+    bStats.canary === 0 && bStats.requests > 0,
+    JSON.stringify(bStats),
   );
   record(
     "C: every recorded request carries no canary",
@@ -773,6 +934,7 @@ async function runMain() {
     requestCounts: extra.requestCounts,
     canaryInRequests: extra.canaryInRequests,
     sessionIds: extra.sessionIds,
+    freshControl: extra.freshControl ?? null,
     checks: scoped(letter),
   });
 
@@ -798,12 +960,25 @@ async function runMain() {
       B: scenario("B", bOk, {
         restored: b?.hasCanary === true,
         tokenLiteralKept: b?.hasToken === true,
-        requestCounts: { fresh: scan.get("B")?.requests ?? 0 },
-        canaryInRequests: scan.get("B")?.canary ?? 0,
+        requestCounts: {
+          fresh: scan.get("B")?.requests ?? 0,
+          freshControl: scan.get("B-control")?.requests ?? 0,
+        },
+        canaryInRequests: bStats.canary,
         sessionIds: {
           count: 2,
           distinct: ab?.ids?.distinct === true,
           ids: ab?.ids ? [ab.ids.first, ab.ids.second] : [],
+        },
+        freshControl: {
+          request: ab?.freshControl?.request ?? null,
+          tokenCaptured:
+            typeof ab?.freshControl?.token === "string" &&
+            ab.freshControl.token.length > 0,
+          tokenDiffersFromOldSessionToken: tokenDiffers(
+            ab?.freshControl,
+            a?.token,
+          ),
         },
       }),
       C: scenario("C", cOk, {
@@ -812,6 +987,7 @@ async function runMain() {
         requestCounts: {
           mint: scan.get("C-mint")?.requests ?? 0,
           fresh: scan.get("C-fresh")?.requests ?? 0,
+          freshControl: scan.get("C-fresh-control")?.requests ?? 0,
         },
         canaryInRequests: cStats.canary,
         sessionIds: {
@@ -824,6 +1000,16 @@ async function runMain() {
             cFresh?.sessions[0]?.id ?? null,
           ],
         },
+        freshControl: {
+          request: cFresh?.freshControl?.request ?? null,
+          tokenCaptured:
+            typeof cFresh?.freshControl?.token === "string" &&
+            cFresh.freshControl.token.length > 0,
+          tokenDiffersFromOldSessionToken: tokenDiffers(
+            cFresh?.freshControl,
+            cToken,
+          ),
+        },
       }),
       D: {
         ...scenario("D", dFreshOk, {
@@ -832,6 +1018,7 @@ async function runMain() {
           requestCounts: {
             mint: scan.get("D-mint")?.requests ?? 0,
             fresh: scan.get("D-fresh")?.requests ?? 0,
+            freshControl: scan.get("D-fresh-control")?.requests ?? 0,
             resume: scan.get("D-resume")?.requests ?? 0,
           },
           canaryInRequests: dStats.canary,
@@ -844,6 +1031,16 @@ async function runMain() {
               dMint?.sessions[0]?.id ?? null,
               dFresh?.sessions[0]?.id ?? null,
             ],
+          },
+          freshControl: {
+            request: dFresh?.freshControl?.request ?? null,
+            tokenCaptured:
+              typeof dFresh?.freshControl?.token === "string" &&
+              dFresh.freshControl.token.length > 0,
+            tokenDiffersFromOldSessionToken: tokenDiffers(
+              dFresh?.freshControl,
+              dToken,
+            ),
           },
         }),
         persistenceControl: {
